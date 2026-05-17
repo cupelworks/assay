@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from assay import __version__
 from assay.api import router
@@ -15,6 +16,7 @@ def create_app() -> FastAPI:
         version=__version__,
     )
     app.include_router(router)
+    Instrumentator().instrument(app).expose(app)
     return app
 
 

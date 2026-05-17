@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     host: str = "127.0.0.1"
     port: int = 8000
+    llm_provider: str = "anthropic"      # "anthropic" | "openai"
+    llm_model: str = "claude-sonnet-4-6"
 
 
 # Module-level singleton — imported across the app, read once at startup.
