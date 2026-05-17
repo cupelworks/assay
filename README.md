@@ -36,11 +36,15 @@ Then open <http://127.0.0.1:8000/docs> for the interactive OpenAPI UI.
 
 ```
 src/assay/
-├── main.py        # FastAPI app factory
-├── config.py      # Pydantic settings
-├── schemas.py     # Domain models (TestCase, MetricScore, EvaluationRun, ...)
-└── api.py         # HTTP routes
-tests/             # Pytest suite
+├── main.py              # FastAPI app factory
+├── config.py            # Pydantic settings (reads ASSAY_* env vars)
+├── api.py               # HTTP routes
+└── schemas/
+    ├── __init__.py      # Re-exports all public models
+    ├── suite.py         # TestCase, TestSuite
+    ├── run.py           # MetricScore, TestCaseResult, StatisticalSummary, RunStatus, EvaluationRun
+    └── evaluation.py    # JudgeCriterion, EvaluationRequest
+tests/                   # Pytest suite
 ```
 
 ## Tests
