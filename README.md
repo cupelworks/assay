@@ -72,15 +72,18 @@ Copy `.env.example` to `.env` and set the variable there for local development.
 
 ### Migrations
 
+With uv:
 ```bash
-# Apply all pending migrations (run once after cloning, and after each upgrade)
 uv run alembic upgrade head
-
-# Generate a new migration after changing a model
 uv run alembic revision --autogenerate -m "describe the change"
-
-# Roll back one migration
 uv run alembic downgrade -1
+```
+
+With pip (activate your venv first):
+```bash
+alembic upgrade head
+alembic revision --autogenerate -m "describe the change"
+alembic downgrade -1
 ```
 
 ## Tests

@@ -26,13 +26,14 @@ class TestCaseResultModel(Base):
     __tablename__ = "test_case_results"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("evaluation_runs.id"), index=True)
+    # Nullable — ad-hoc evaluations (POST /evaluations) are not tied to a run.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("evaluation_runs.id"), index=True)
     case_id: Mapped[uuid.UUID]
     actual_output: Mapped[str] = mapped_column(Text)
     latency_ms: Mapped[float | None] = mapped_column(Float)
     error: Mapped[str | None] = mapped_column(Text)
 
-    run: Mapped["EvaluationRunModel"] = relationship(back_populates="results")
+    run: Mapped["EvaluationRunModel | None"] = relationship(back_populates="results")
     scores: Mapped[list["MetricScoreModel"]] = relationship(
         back_populates="result", cascade="all, delete-orphan"
     )

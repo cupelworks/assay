@@ -1,5 +1,10 @@
-from fastapi import APIRouter, HTTPException, status
+import uuid
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from assay.db import get_session
+from assay.models.run import TestCaseResultModel
 from assay.schemas import (
     EvaluationRequest,
     EvaluationRun,
@@ -50,10 +55,25 @@ def start_run(suite_id: str) -> EvaluationRun:
     tags=["evaluations"],
     response_model=TestCaseResult,
 )
-def evaluate(request: EvaluationRequest) -> TestCaseResult:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Evaluators (NLP metrics + LLM judge) not yet implemented.",
+async def evaluate(
+    request: EvaluationRequest,
+    session: AsyncSession = Depends(get_session),
+) -> TestCaseResult:
+    # Evaluators (NLP metrics + LLM judge) not yet implemented — scores are empty.
+    row = TestCaseResultModel(
+        case_id=uuid.uuid4(),
+        actual_output=request.actual_output,
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+
+    return TestCaseResult(
+        case_id=row.case_id,
+        actual_output=row.actual_output,
+        scores=[],
+        latency_ms=row.latency_ms,
+        error=row.error,
     )
 
 
