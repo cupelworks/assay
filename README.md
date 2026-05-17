@@ -11,6 +11,10 @@ Early scaffold. The HTTP surface and domain models are defined; the evaluators a
 - **Python** 3.11+
 - **FastAPI** for the HTTP API
 - **Pydantic v2** for validation and settings
+- **SQLAlchemy 2 (async)** for ORM and database access
+- **Alembic** for schema migrations
+- **aiosqlite** — async SQLite driver (local dev)
+- **asyncpg** — async PostgreSQL driver (production)
 
 ## Quickstart
 
@@ -38,13 +42,45 @@ Then open <http://127.0.0.1:8000/docs> for the interactive OpenAPI UI.
 src/assay/
 ├── main.py              # FastAPI app factory
 ├── config.py            # Pydantic settings (reads ASSAY_* env vars)
+├── db.py                # Async SQLAlchemy engine and session dependency
 ├── api.py               # HTTP routes
-└── schemas/
-    ├── __init__.py      # Re-exports all public models
-    ├── suite.py         # TestCase, TestSuite
-    ├── run.py           # MetricScore, TestCaseResult, StatisticalSummary, RunStatus, EvaluationRun
-    └── evaluation.py    # JudgeCriterion, EvaluationRequest
+├── schemas/             # Pydantic models — API validation and serialization
+│   ├── __init__.py      # Re-exports all public models
+│   ├── suite.py         # TestCase, TestSuite
+│   ├── run.py           # MetricScore, TestCaseResult, StatisticalSummary, RunStatus, EvaluationRun
+│   └── evaluation.py    # JudgeCriterion, EvaluationRequest
+└── models/              # SQLAlchemy ORM models — database table definitions
+    ├── __init__.py
+    ├── base.py           # Shared DeclarativeBase
+    ├── suite.py          # SuiteModel, TestCaseModel
+    └── run.py            # EvaluationRunModel, TestCaseResultModel, MetricScoreModel
+alembic/                 # Alembic migration environment
+alembic.ini              # Alembic configuration (URL is read from ASSAY_DATABASE_URL at runtime)
 tests/                   # Pytest suite
+```
+
+## Database
+
+The database URL is controlled by `ASSAY_DATABASE_URL`. No code changes are needed between environments — only the URL changes.
+
+| Environment | URL format |
+|-------------|------------|
+| Local (default) | `sqlite+aiosqlite:///./assay.db` |
+| Production | `postgresql+asyncpg://user:pass@host:5432/assay` |
+
+Copy `.env.example` to `.env` and set the variable there for local development.
+
+### Migrations
+
+```bash
+# Apply all pending migrations (run once after cloning, and after each upgrade)
+uv run alembic upgrade head
+
+# Generate a new migration after changing a model
+uv run alembic revision --autogenerate -m "describe the change"
+
+# Roll back one migration
+uv run alembic downgrade -1
 ```
 
 ## Tests

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     host: str = "127.0.0.1"
     port: int = 8000
+    # sqlite+aiosqlite locally; postgresql+asyncpg in production
+    database_url: str = "sqlite+aiosqlite:///./assay.db"
 
 
 # Module-level singleton — imported across the app, read once at startup.
