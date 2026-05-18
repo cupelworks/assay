@@ -86,6 +86,16 @@ alembic revision --autogenerate -m "describe the change"
 alembic downgrade -1
 ```
 
+## Observability
+
+Assay exposes a Prometheus-compatible scrape endpoint at `GET /metrics`. It is not listed in the OpenAPI docs (`/docs`) because it returns plain text rather than JSON, but it is active on every running instance.
+
+```bash
+curl http://127.0.0.1:8000/metrics
+```
+
+The endpoint provides request count and latency histograms (`http_requests_total`, `http_request_duration_seconds`) labelled by method, status code, and handler. Point any Prometheus scraper — or a compatible platform like Datadog, Grafana Cloud, or Google Cloud Managed Prometheus — at this URL.
+
 ## Tests
 
 ```bash
