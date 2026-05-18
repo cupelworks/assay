@@ -48,15 +48,10 @@ src/assay/
 ├── llm.py               # LLMClient protocol + AnthropicClient / OpenAIClient factory
 ├── schemas/             # Pydantic models — API validation and serialization
 │   ├── __init__.py      # Re-exports all public models
-│   ├── suite.py         # TestCase, TestSuite
-│   ├── run.py           # MetricScore, TestCaseResult, StatisticalSummary, RunStatus, EvaluationRun
-│   ├── evaluation.py    # JudgeCriterion, EvaluationRequest
 │   └── stats.py         # ZTestRequest, ZTestResult
 └── models/              # SQLAlchemy ORM models — database table definitions
     ├── __init__.py
-    ├── base.py           # Shared DeclarativeBase
-    ├── suite.py          # SuiteModel, TestCaseModel
-    └── run.py            # EvaluationRunModel, TestCaseResultModel, MetricScoreModel
+    └── base.py           # Shared DeclarativeBase
 alembic/                 # Alembic migration environment
 alembic.ini              # Alembic configuration (URL is read from ASSAY_DATABASE_URL at runtime)
 tests/                   # Pytest suite
@@ -88,76 +83,6 @@ alembic upgrade head
 alembic revision --autogenerate -m "describe the change"
 alembic downgrade -1
 ```
-
-## Statistical testing
-
-### `POST /statistical-tests/z-test`
-
-Tests whether a set of metric scores is statistically above (or below) a threshold, rather than just checking the average. This matters because a mean of 0.76 on 10 generations is much weaker evidence than a mean of 0.76 on 100 generations — the z-test quantifies that difference.
-
-**When to use it:** after collecting NLP metric scores (ROUGE, BLEU, BERTScore, etc.) over a batch of AI generations, send the raw scores to this endpoint to get a statistically grounded pass/fail decision.
-
-#### Request
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `scores` | `float[]` | required | Raw metric scores from individual generations |
-| `threshold` | `float` | required | Minimum quality bar the population mean must clear |
-| `alpha` | `float` | `0.05` | Significance level — `0.05` means 95% confidence |
-| `alternative` | `string` | `"greater"` | `"greater"` \| `"less"` \| `"two-sided"` |
-
-#### Response
-
-| Field | Description |
-|---|---|
-| `passed` | `true` if there is sufficient statistical evidence to reject H₀ |
-| `p_value` | Probability of observing this result if the true mean equalled the threshold; lower = stronger evidence |
-| `z_statistic` | Standardised distance between the sample mean and the threshold |
-| `confidence_interval` | Two-sided (1 − α) interval for the true population mean |
-| `mean`, `std`, `n` | Sample descriptors |
-
-#### Example
-
-100 ROUGE-L scores from a generation pipeline, quality gate at 0.75:
-
-```bash
-curl -X POST http://127.0.0.1:8000/statistical-tests/z-test \
-  -H "Content-Type: application/json" \
-  -d '{
-    "scores": [0.81, 0.78, 0.84, 0.76, 0.79, ...],
-    "threshold": 0.75,
-    "alpha": 0.05,
-    "alternative": "greater"
-  }'
-```
-
-```json
-{
-  "n": 100,
-  "mean": 0.812,
-  "std": 0.043,
-  "threshold": 0.75,
-  "alternative": "greater",
-  "z_statistic": 14.42,
-  "p_value": 0.000001,
-  "alpha": 0.05,
-  "passed": true,
-  "confidence_interval": [0.804, 0.820]
-}
-```
-
-**Interpreting the output:**
-- `passed: true` — reject H₀ (mean = 0.75); the pipeline clears the quality gate with 95% confidence.
-- `p_value: 0.000001` — if the true mean were exactly 0.75, there is a 0.0001% chance of observing a sample mean this high. Strong evidence.
-- `confidence_interval: [0.804, 0.820]` — the true population mean almost certainly sits between 0.804 and 0.820, well above 0.75.
-
-#### Notes
-
-- Reliable for **n ≥ 30**. Below that the normal approximation breaks down; a t-test would be more appropriate.
-- Uses the **sample standard deviation** (Bessel-corrected, n − 1 denominator) as an estimate of the population std.
-- The confidence interval is always **two-sided at (1 − α)** regardless of `alternative`, since it describes where the true mean lies rather than the test direction.
-- Implemented with Python's `statistics.NormalDist` — no external dependencies.
-
 ## Observability
 
 Assay exposes a Prometheus-compatible scrape endpoint at `GET /metrics`. It is not listed in the OpenAPI docs (`/docs`) because it returns plain text rather than JSON, but it is active on every running instance.
