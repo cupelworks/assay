@@ -25,6 +25,11 @@ htmlcov/
 .idea/
 .vscode/
 
+# Database
+*.db
+*.db-shm
+*.db-wal
+
 # Env
 .env
 

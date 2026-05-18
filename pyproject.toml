@@ -6,17 +6,28 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "fastapi>=0.115",          # HTTP framework — routes, request/response handling, OpenAPI docs
-    "uvicorn[standard]>=0.32", # ASGI server — runs the FastAPI app
-    "pydantic>=2.9",           # Data validation and domain models (TestCase, EvaluationRun, etc.)
-    "pydantic-settings>=2.6",  # Environment-based configuration via the Settings class
+    "fastapi>=0.115",                          # HTTP framework — routes, request/response handling, OpenAPI docs
+    "uvicorn[standard]>=0.32",                 # ASGI server — runs the FastAPI app
+    "pydantic>=2.9",                           # Data validation and domain models (TestCase, EvaluationRun, etc.)
+    "pydantic-settings>=2.6",                  # Environment-based configuration via the Settings class
+    "sqlalchemy[asyncio]>=2.0",                # ORM and async engine (works with both SQLite and PostgreSQL)
+    "alembic>=1.13",                           # Database migration tool — tracks schema changes over time
+    "asyncpg>=0.30",                           # Async PostgreSQL driver — used in prod via postgresql+asyncpg:// URLs
+    "prometheus-fastapi-instrumentator>=7.0",  # Prometheus /metrics endpoint and request instrumentation
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",  # Test runner
-    "httpx>=0.27",  # Async HTTP client used by FastAPI's TestClient in tests
-    "ruff>=0.7",    # Linter and formatter
+    "pytest>=8.0",     # Test runner
+    "httpx>=0.27",     # Async HTTP client used by FastAPI's TestClient in tests
+    "ruff>=0.7",       # Linter and formatter
+    "aiosqlite>=0.20", # Async SQLite driver — local dev only (prod uses asyncpg)
+]
+anthropic = [
+    "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)
+]
+openai = [
+    "openai>=1.35",  # OpenAI Chat Completions client (used by OpenAIClient in llm.py)
 ]
 
 [build-system]

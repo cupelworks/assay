@@ -1,16 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 
-from assay.schemas import (
-    EvaluationRequest,
-    EvaluationRun,
-    StatisticalSummary,
-    TestCaseResult,
-    TestSuite,
-)
+from assay.schemas import ZTestRequest, ZTestResult
 
-# Collects all route definitions in this module. main.py mounts it onto the
-# FastAPI app via app.include_router(router), keeping route logic separate from
-# app setup and making the router independently testable.
 router = APIRouter()
 
 
@@ -20,50 +11,27 @@ def health() -> dict[str, str]:
 
 
 @router.post(
-    "/test-suites",
-    tags=["suites"],
-    response_model=TestSuite,
-    status_code=status.HTTP_201_CREATED,
+    path="/statistical-tests/z-test",
+    tags=["analysis"],
+    response_model=ZTestResult,
 )
-def create_test_suite(suite: TestSuite) -> TestSuite:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Test-suite persistence not yet implemented.",
-    )
+def z_test(request: ZTestRequest) -> ZTestResult:
+    """One-sample z-test for metric score distributions.
 
+    Tests whether the population mean of `scores` is statistically different from
+    `threshold` at the given significance level (`alpha`).
 
-@router.post(
-    "/test-suites/{suite_id}/runs",
-    tags=["runs"],
-    response_model=EvaluationRun,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-def start_run(suite_id: str) -> EvaluationRun:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Run execution not yet implemented.",
-    )
+    Typical use: pass 100 ROUGE scores and a minimum quality threshold — the
+    response tells you whether the difference is statistically significant or
+    could be due to chance.
 
+    **Interpretation**
+    - `passed: true` — reject H0; sufficient evidence the true mean clears the threshold.
+    - `p_value` — probability of observing this result if H0 were true; lower is stronger evidence.
+    - `confidence_interval` — two-sided (1 - alpha) CI for the true population mean.
 
-@router.post(
-    "/evaluations",
-    tags=["evaluations"],
-    response_model=TestCaseResult,
-)
-def evaluate(request: EvaluationRequest) -> TestCaseResult:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Evaluators (NLP metrics + LLM judge) not yet implemented.",
-    )
+    **Note:** reliable for n ≥ 30. For smaller samples the t-distribution would be more appropriate.
+    """
+    from assay.stats import run_z_test
 
-
-@router.get(
-    "/runs/{run_id}/summary",
-    tags=["runs"],
-    response_model=list[StatisticalSummary],
-)
-def run_summary(run_id: str) -> list[StatisticalSummary]:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Statistical summary not yet implemented.",
-    )
+    return run_z_test(request)
