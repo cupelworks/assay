@@ -5,16 +5,16 @@ Revises:
 Create Date: 2026-05-18 00:24:06.140511
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = '0b07ec7d0711'
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -28,13 +28,15 @@ def upgrade() -> None:
     op.create_table('evaluation_runs',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('suite_id', sa.Uuid(), nullable=False),
-    sa.Column('status', sa.Enum('pending', 'running', 'completed', 'failed', name='runstatus'), nullable=False),
+    sa.Column('status', sa.Enum('pending', 'running', 'completed', 'failed', name='runstatus'),
+              nullable=False),
     sa.Column('started_at', sa.DateTime(), nullable=True),
     sa.Column('completed_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['suite_id'], ['suites.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_evaluation_runs_suite_id'), 'evaluation_runs', ['suite_id'], unique=False)
+    op.create_index(op.f('ix_evaluation_runs_suite_id'), 'evaluation_runs', ['suite_id'],
+                    unique=False)
     op.create_table('test_cases',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('suite_id', sa.Uuid(), nullable=False),
@@ -54,7 +56,7 @@ def upgrade() -> None:
     sa.Column('latency_ms', sa.Float(), nullable=True),
     sa.Column('error', sa.Text(), nullable=True),
     sa.ForeignKeyConstraint(['run_id'], ['evaluation_runs.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id')  # noqa: E501
     )
     op.create_index(op.f('ix_test_case_results_run_id'), 'test_case_results', ['run_id'], unique=False)
     op.create_table('metric_scores',

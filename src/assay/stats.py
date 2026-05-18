@@ -1,5 +1,7 @@
 import math
-from statistics import NormalDist, mean as _mean, stdev as _stdev
+from statistics import NormalDist
+from statistics import mean as _mean
+from statistics import stdev as _stdev
 
 from assay.schemas.stats import ZTestRequest, ZTestResult
 
