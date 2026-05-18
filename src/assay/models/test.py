@@ -27,7 +27,8 @@ class PendingTestModel(Base):
     # Metric names to compute (e.g. ["rouge", "bertscore"]).
     metrics: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[TestStatus] = mapped_column(SAEnum(TestStatus), default=TestStatus.pending)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now().astimezone())
+    created_at: Mapped[datetime] = mapped_column(DateTime,
+                                                 default=lambda: datetime.now().astimezone())
 
     result: Mapped["ExecutedTestModel | None"] = relationship(
         back_populates="pending_test", uselist=False
@@ -48,7 +49,8 @@ class ExecutedTestModel(Base):
     scores: Mapped[dict] = mapped_column(JSON, default=dict)
     latency_ms: Mapped[float | None] = mapped_column(Float)
     error: Mapped[str | None] = mapped_column(Text)
-    executed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now().astimezone())
+    executed_at: Mapped[datetime] = mapped_column(DateTime,
+                                                  default=lambda: datetime.now().astimezone())
 
     pending_test: Mapped["PendingTestModel"] = relationship(back_populates="result")
     statistical_verifications: Mapped[list["StatisticalVerificationModel"]] = relationship(
@@ -63,7 +65,7 @@ class StatisticalVerificationModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     executed_test_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("executed_tests.id"), index=True
+        ForeignKey("executed_tests.id"), index=True, nullable=True
     )
     # The metric these scores belong to (e.g. "rouge").
     metric: Mapped[str] = mapped_column(String(255))
@@ -76,7 +78,8 @@ class StatisticalVerificationModel(Base):
     passed: Mapped[bool]
     # Full result payload for auditability.
     result_detail: Mapped[dict] = mapped_column(JSON, default=dict)
-    verified_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now().astimezone())
+    verified_at: Mapped[datetime] = mapped_column(DateTime,
+                                                  default=lambda: datetime.now().astimezone())
 
     executed_test: Mapped["ExecutedTestModel"] = relationship(
         back_populates="statistical_verifications"
