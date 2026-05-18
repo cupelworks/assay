@@ -9,6 +9,7 @@ from assay.schemas.run import (
     StatisticalSummary,
     TestCaseResult,
 )
+from assay.schemas.stats import ZTestRequest, ZTestResult
 from assay.schemas.suite import TestCase, TestSuite
 
 # Defines what `from assay.schemas import *` exposes, and signals to IDEs and
@@ -23,4 +24,6 @@ __all__ = [
     "TestCase",
     "TestCaseResult",
     "TestSuite",
+    "ZTestRequest",
+    "ZTestResult",
 ]

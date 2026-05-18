@@ -11,6 +11,8 @@ from assay.schemas import (
     StatisticalSummary,
     TestCaseResult,
     TestSuite,
+    ZTestRequest,
+    ZTestResult,
 )
 
 # Collects all route definitions in this module. main.py mounts it onto the
@@ -87,3 +89,30 @@ def run_summary(run_id: str) -> list[StatisticalSummary]:
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail="Statistical summary not yet implemented.",
     )
+
+
+@router.post(
+    "/statistical-tests/z-test",
+    tags=["analysis"],
+    response_model=ZTestResult,
+)
+def z_test(request: ZTestRequest) -> ZTestResult:
+    """One-sample z-test for metric score distributions.
+
+    Tests whether the population mean of `scores` is statistically different from
+    `threshold` at the given significance level (`alpha`).
+
+    Typical use: pass 100 ROUGE scores and a minimum quality threshold — the
+    response tells you whether the difference is statistically significant or
+    could be due to chance.
+
+    **Interpretation**
+    - `passed: true` — reject H0; sufficient evidence the true mean clears the threshold.
+    - `p_value` — probability of observing this result if H0 were true; lower is stronger evidence.
+    - `confidence_interval` — two-sided (1 - alpha) CI for the true population mean.
+
+    **Note:** reliable for n ≥ 30. For smaller samples the t-distribution would be more appropriate.
+    """
+    from assay.stats import run_z_test
+
+    return run_z_test(request)
