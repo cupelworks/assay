@@ -3,13 +3,16 @@ from statistics import NormalDist
 from statistics import mean as _mean
 from statistics import stdev as _stdev
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from assay.models.test import StatisticalVerificationModel
 from assay.schemas.stats import ZTestRequest, ZTestResult
 
 # Shared standard normal distribution — used for CDF and inverse CDF lookups.
 _nd = NormalDist()
 
 
-def run_z_test(req: ZTestRequest) -> ZTestResult:
+async def run_z_test(req: ZTestRequest, session: AsyncSession) -> ZTestResult:
     """One-sample z-test: tests whether the true mean of `scores` differs from `threshold`.
 
     Uses the sample standard deviation as an estimate of the population std.
@@ -39,7 +42,7 @@ def run_z_test(req: ZTestRequest) -> ZTestResult:
     z_crit = _nd.inv_cdf(1 - req.alpha / 2)
     ci = (round(mu - z_crit * se, 6), round(mu + z_crit * se, 6))
 
-    return ZTestResult(
+    result = ZTestResult(
         n=n,
         mean=round(mu, 6),
         std=round(sigma, 6),
@@ -51,3 +54,20 @@ def run_z_test(req: ZTestRequest) -> ZTestResult:
         passed=p_value < req.alpha,
         confidence_interval=ci,
     )
+
+    session.add(
+        StatisticalVerificationModel(
+            metric="z-test",
+            test_type="z-test",
+            threshold=req.threshold,
+            alpha=req.alpha,
+            alternative=req.alternative,
+            z_statistic=result.z_statistic,
+            p_value=result.p_value,
+            passed=result.passed,
+            result_detail=result.model_dump(),
+        )
+    )
+    await session.commit()
+
+    return result

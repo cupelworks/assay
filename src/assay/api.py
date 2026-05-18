@@ -1,9 +1,14 @@
-from fastapi import APIRouter
+from typing import Annotated
 
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from assay.db import get_session
 from assay.schemas import ZTestRequest, ZTestResult
 
 router = APIRouter()
 
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 @router.get("/health", tags=["meta"])
 def health() -> dict[str, str]:
@@ -15,7 +20,7 @@ def health() -> dict[str, str]:
     tags=["analysis"],
     response_model=ZTestResult,
 )
-def z_test(request: ZTestRequest) -> ZTestResult:
+async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult:
     """One-sample z-test for metric score distributions.
 
     Tests whether the population mean of `scores` is statistically different from
@@ -34,4 +39,4 @@ def z_test(request: ZTestRequest) -> ZTestResult:
     """
     from assay.stats import run_z_test
 
-    return run_z_test(request)
+    return await run_z_test(request, session)
