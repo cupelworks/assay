@@ -5,8 +5,8 @@ from statistics import stdev as _stdev
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models.test import StatisticalVerificationModel
-from assay.schemas.stats import ZTestRequest, ZTestResult
+from assay.models import StatisticalVerificationModel
+from assay.schemas import ZTestRequest, ZTestResult
 
 # Shared standard normal distribution — used for CDF and inverse CDF lookups.
 _nd = NormalDist()

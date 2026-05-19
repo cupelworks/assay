@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
-from assay.schemas import ZTestRequest, ZTestResult
+from assay.schemas import (
+    DataSetImportViaPathRequest,
+    DataSetImportViaPathResponse,
+    ZTestRequest,
+    ZTestResult,
+)
 
 router = APIRouter()
 
@@ -37,6 +42,88 @@ async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult:
 
     **Note:** reliable for n ≥ 30. For smaller samples the t-distribution would be more appropriate.
     """
-    from assay.stats import run_z_test
+    from assay.services import run_z_test
 
     return await run_z_test(request, session)
+
+@router.post(
+    path="/upload-dataset/path",
+    responses={
+        404: {
+            "description": "File not found at the given path.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "File not found: /path/to/file.jsonl"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+        409: {
+            "description": "A dataset with the same name already exists.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset name 'my_dataset' already exists."},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+        422: {
+            "description": "One or more lines in the .jsonl file failed schema validation.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "line": 2,
+                                "content": '{"prompt": "missing model_output field"}',
+                                "errors": [
+                                    {
+                                        "type": "missing",
+                                        "loc": ["model_output"],
+                                        "msg": "Field required",
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                }
+            },
+        },
+    },
+    tags=["dataset"],
+    response_model=DataSetImportViaPathResponse,
+)
+async def upload_dataset(request: DataSetImportViaPathRequest, session: SessionDep):
+    """Load a dataset from a local `.jsonl` file and persist it as a Dataset with its rows.
+
+    Each line must be a valid JSON object matching the dataset schema (`prompt`, `model_output`,
+    and `expected_output`). All lines are validated before any data is written —
+    the whole file is rejected if any line is invalid (fail fast, no partial imports).
+
+    The dataset name must be unique — if a dataset with the same name already exists, the
+    request is rejected before any file I/O is performed.
+
+    On success, one `Dataset` record and one `DatasetRow` per line are created in a single
+    transaction. The response includes the dataset ID, name, total row count, and the list
+    of generated row IDs.
+
+    **Example line:**
+    ```json
+    {"prompt": "Summarize this article...", "model_output": "Short summary.",
+     "expected_output": "A brief summary."}
+    ```
+
+    **Note:** the file must be accessible from the server's filesystem.
+    Remote URLs and cloud storage paths are not supported.
+    """
+    from assay.services import upload_dataset_via_path
+
+    return await upload_dataset_via_path(request, session)
