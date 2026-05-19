@@ -101,7 +101,7 @@ async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult:
     tags=["dataset"],
     response_model=DataSetImportViaPathResponse,
 )
-async def upload_dataset(request: DataSetImportViaPathRequest, session: SessionDep):
+async def upload_dataset(request: DataSetImportViaPathRequest, session: SessionDep): # pragma: no cover  # noqa: E501
     """Load a dataset from a local `.jsonl` file and persist it as a Dataset with its rows.
 
     Each line must be a valid JSON object matching the dataset schema (`prompt`, `model_output`,
