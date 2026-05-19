@@ -19,13 +19,7 @@ from assay.schemas import (
 
 async def upload_dataset_via_path(req: DataSetImportViaPathRequest,
                                   session: AsyncSession) -> DataSetImportViaPathResponse:
-    """Load a .jsonl dataset from a local path and persist it as a Dataset with its rows.
-
-    Validates all lines before inserting anything — if any line fails schema validation
-    the whole file is rejected and nothing is written (fail fast, no partial imports).
-    On success, creates one DatasetModel and one DatasetRowModel per line within the same
-    transaction. IDs are captured after flush (before commit) to avoid async lazy-load issues.
-    If the commit fails, the transaction is rolled back and nothing is persisted.
+    """Orchestrates dataset upload: validates, parses, persists, and returns the result.
 
     Args:
         req: Request containing the absolute file path and an optional dataset name.
@@ -39,56 +33,17 @@ async def upload_dataset_via_path(req: DataSetImportViaPathRequest,
         HTTPException 409: A dataset with the same name already exists.
         HTTPException 422: One or more lines fail schema validation.
     """
-    # Fail early if the file doesn't exist — no point opening it.
-    if not Path(req.path).exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File not found: {req.path}"
-        )
+    _check_file_exists(req.path)
+    await _check_name_unique(req.dataset_name, session)
 
-    # Check name uniqueness before any file I/O — cheapest checks first.
-    # scalar() returns the DatasetModel instance if found, None otherwise.
-    dataset_name_existing = await session.scalar(
-        select(DatasetModel).where(DatasetModel.name == req.dataset_name)
-    )
-    if dataset_name_existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Dataset name '{req.dataset_name}' already exists.",
-        )
-
-    # File is closed immediately after parsing — DB work happens on in-memory objects.
     with open(req.path) as f:
         rows, errors = _parse_and_validate_rows(f)
 
-    # Fail fast — reject the whole file if any line is invalid, no partial inserts.
-    if errors:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=[
-                {
-                    "line": i,
-                    "content": line.strip(),
-                    "errors": errs,
-                }
-                for i, line, errs in errors
-            ],
-        )
+    _raise_if_errors(errors)
 
-    # Build the dataset and its rows in one shot — SQLAlchemy handles the FK linkage.
-    dataset = DatasetModel(
-        name=req.dataset_name,
-        rows=[
-            DatasetRowModel(
-                input=row.prompt,
-                expected_output=row.expected_output,
-                model_output=row.model_output,
-            )
-            for row in rows
-        ]
-    )
-
+    dataset = _build_dataset_model(req.dataset_name, rows)
     session.add(dataset)
+
     # flush() sends INSERT and populates DB-generated IDs without committing.
     # IDs are captured while objects are still live — avoids lazy-load issues after commit.
     await session.flush()
@@ -103,6 +58,63 @@ async def upload_dataset_via_path(req: DataSetImportViaPathRequest,
         dataset=DataSetInfo(name=req.dataset_name, id=dataset_id),
         loaded=DataRowInfo(n=len(rows), ids=row_ids),
     )
+
+
+def _check_file_exists(path: str) -> None:
+    """Raise 404 if the file does not exist at the given path."""
+    if not Path(path).exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {path}",
+        )
+
+
+async def _check_name_unique(name: str, session: AsyncSession) -> None:
+    """Raise 409 if a dataset with the given name already exists.
+
+    scalar() returns the DatasetModel instance if found, None otherwise.
+    """
+    existing = await session.scalar(select(DatasetModel).where(DatasetModel.name == name))
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Dataset name '{name}' already exists.",
+        )
+
+
+def _build_dataset_model(name: str, rows: list[DataSetJsonStructure]) -> DatasetModel:
+    """Build a DatasetModel with its rows from validated schema objects.
+
+    Pure function — no DB or HTTP dependencies, fully unit-testable.
+    """
+    return DatasetModel(
+        name=name,
+        rows=[
+            DatasetRowModel(
+                input=row.prompt,
+                expected_output=row.expected_output,
+                model_output=row.model_output,
+            )
+            for row in rows
+        ],
+    )
+
+
+def _raise_if_errors(errors: list[tuple[int, str, list]]) -> None:
+    """Raise 422 with structured error details if any lines failed validation."""
+    if errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=[
+                {
+                    "line": i,
+                    "content": line.strip(),
+                    "errors": errs,
+                }
+                for i, line, errs in errors
+            ],
+        )
+
 
 def _parse_and_validate_rows(file: TextIOWrapper) \
         -> tuple[list[DataSetJsonStructure], list[tuple[int, str, list]]]:
