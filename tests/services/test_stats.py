@@ -13,8 +13,8 @@ from assay.services.stats import (
     _calculate_p_value,
     _calculate_se,
     _calculate_z_statistic,
-    _persist_verification,
     _get_descriptive_statistics,
+    _persist_verification,
 )
 
 # --- _calculate_z_statistic ---
