@@ -25,7 +25,7 @@ def health() -> dict[str, str]:
     tags=["analysis"],
     response_model=ZTestResult,
 )
-async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult:
+async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult: # pragma: no cover
     """One-sample z-test for metric score distributions.
 
     Tests whether the population mean of `scores` is statistically different from

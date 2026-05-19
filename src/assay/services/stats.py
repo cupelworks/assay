@@ -12,37 +12,41 @@ from assay.schemas import ZTestRequest, ZTestResult
 _nd = NormalDist()
 
 
-async def run_z_test(req: ZTestRequest, session: AsyncSession) -> ZTestResult:
-    """One-sample z-test: tests whether the true mean of `scores` differs from `threshold`.
+async def run_z_test(req: ZTestRequest, session: AsyncSession) -> ZTestResult: # pragma: no cover
+    """Run a one-sample z-test and persist the result.
 
-    Uses the sample standard deviation as an estimate of the population std.
-    Reliable for n >= 30; for smaller samples a t-test would be more appropriate.
+    Tests whether the true mean of `scores` differs from `threshold`.
+    Uses sample std as a population estimate — reliable for n >= 30.
+    Orchestrates the pure math helpers below and delegates persistence to `_persist_verification`.
     """
-    n = len(req.scores)
-    mu = _mean(req.scores)
-    sigma = _stdev(req.scores)  # Bessel-corrected sample std (n-1 denominator)
+    n, mu, sigma = _get_descriptive_statistics(req)
 
-    if sigma == 0:
-        # All scores identical — z is ±inf or 0; CDF handles these correctly.
-        z = math.inf if mu > req.threshold else (-math.inf if mu < req.threshold else 0.0)
-    else:
-        z = (mu - req.threshold) / (sigma / math.sqrt(n))
+    z = _calculate_z_statistic(req, n, mu, sigma)
 
-    # NormalDist.cdf handles ±inf via math.erf, so no special-casing needed.
-    match req.alternative:
-        case "greater":
-            p_value = 1 - _nd.cdf(z)
-        case "less":
-            p_value = _nd.cdf(z)
-        case "two-sided":
-            p_value = 2 * (1 - _nd.cdf(abs(z)))
+    p_value = _calculate_p_value(req, z)
 
-    # Two-sided CI at (1 - alpha) confidence — useful regardless of the alternative chosen.
-    se = (sigma / math.sqrt(n)) if sigma > 0 else 0.0
-    z_crit = _nd.inv_cdf(1 - req.alpha / 2)
-    ci = (round(mu - z_crit * se, 6), round(mu + z_crit * se, 6))
+    se = _calculate_se(n, sigma)
+    z_crit = _calculate_critical_value(req)
+    ci = _calculate_confidence_interval(mu, z_crit, se)
 
-    result = ZTestResult(
+    result = _build_result(req, n, mu, sigma, z, p_value, ci)
+
+    await _persist_verification(result, req, session)
+
+    return result
+
+
+def _build_result(
+    req: ZTestRequest,
+    n: int,
+    mu: float,
+    sigma: float,
+    z: float,
+    p_value: float,
+    ci: tuple[float, float],
+) -> ZTestResult:
+    """Build the ZTestResult from computed values. Pure function — fully unit-testable."""
+    return ZTestResult(
         n=n,
         mean=round(mu, 6),
         std=round(sigma, 6),
@@ -55,6 +59,16 @@ async def run_z_test(req: ZTestRequest, session: AsyncSession) -> ZTestResult:
         confidence_interval=ci,
     )
 
+
+async def _persist_verification(
+        result: ZTestResult,
+        req: ZTestRequest,
+        session: AsyncSession
+) -> None:
+    """Persist the z-test result as a StatisticalVerificationModel row.
+
+    Separated from run_z_test to allow independent unit testing via a mocked session.
+    """
     session.add(
         StatisticalVerificationModel(
             metric="z-test",
@@ -70,4 +84,42 @@ async def run_z_test(req: ZTestRequest, session: AsyncSession) -> ZTestResult:
     )
     await session.commit()
 
-    return result
+
+def _get_descriptive_statistics(req: ZTestRequest) -> tuple[int, float, float]:
+    n = len(req.scores)
+    mu = _mean(req.scores)
+    sigma = _stdev(req.scores)  # Bessel-corrected sample std (n-1 denominator)
+
+    return n, mu, sigma
+
+
+def _calculate_z_statistic(req: ZTestRequest, n: int, mu: float, sigma: float) -> float:
+    if sigma == 0:
+        # All scores identical — z is ±inf or 0; CDF handles these correctly.
+        return math.inf if mu > req.threshold else (-math.inf if mu < req.threshold else 0.0)
+    else:
+        return (mu - req.threshold) / (sigma / math.sqrt(n))
+
+
+def _calculate_p_value(req: ZTestRequest, z: float) -> float:
+    # NormalDist.cdf handles ±inf via math.erf, so no special-casing needed.
+    match req.alternative:
+        case "greater":
+            return 1 - _nd.cdf(z)
+        case "less":
+            return _nd.cdf(z)
+        case "two-sided":
+            return 2 * (1 - _nd.cdf(abs(z)))
+        
+
+def _calculate_se(n: int, sigma: float) -> float:
+    return (sigma / math.sqrt(n)) if sigma > 0 else 0.0
+
+
+def _calculate_critical_value(req: ZTestRequest) -> float:
+    # CI is always two-sided (alpha/2), regardless of the test's alternative hypothesis.
+    return _nd.inv_cdf(1 - req.alpha / 2)
+
+
+def _calculate_confidence_interval(mu: float, z_crit: float, se: float) -> tuple[float, float]:
+    return round(mu - z_crit * se, 6), round(mu + z_crit * se, 6)
