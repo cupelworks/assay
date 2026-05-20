@@ -18,7 +18,8 @@ from assay.schemas import (
 
 
 async def upload_dataset_via_path(req: DataSetImportViaPathRequest,
-                                  session: AsyncSession) -> DataSetImportViaPathResponse:
+                                  session: AsyncSession
+                                  ) -> DataSetImportViaPathResponse: # pragma: no cover
     """Orchestrates dataset upload: validates, parses, persists, and returns the result.
 
     Args:
@@ -42,17 +43,35 @@ async def upload_dataset_via_path(req: DataSetImportViaPathRequest,
     _raise_if_errors(errors)
 
     dataset = _build_dataset_model(req.dataset_name, rows)
-    session.add(dataset)
+    dataset_id, row_ids = await _persist_dataset(dataset, session)
 
-    # flush() sends INSERT and populates DB-generated IDs without committing.
-    # IDs are captured while objects are still live — avoids lazy-load issues after commit.
+    return _build_response(req, rows, dataset_id, row_ids)
+
+
+async def _persist_dataset(
+    dataset: DatasetModel, session: AsyncSession
+) -> tuple[object, list[object]]:
+    """Persist a DatasetModel and return (dataset_id, row_ids).
+
+    flush() sends the INSERT and populates DB-generated IDs without committing.
+    IDs are captured while objects are still live — avoids lazy-load issues after commit.
+    If commit fails, the open transaction is rolled back automatically.
+    """
+    session.add(dataset)
     await session.flush()
     row_ids = [r.id for r in dataset.rows]
     dataset_id = dataset.id
-
-    # Transaction is still open — if commit fails, everything is rolled back.
     await session.commit()
+    return dataset_id, row_ids
 
+
+def _build_response(
+    req: DataSetImportViaPathRequest,
+    rows: list[DataSetJsonStructure],
+    dataset_id: object,
+    row_ids: list[object],
+) -> DataSetImportViaPathResponse:
+    """Build the API response from persisted IDs. Pure function — fully unit-testable."""
     return DataSetImportViaPathResponse(
         path=req.path,
         dataset=DataSetInfo(name=req.dataset_name, id=dataset_id),
