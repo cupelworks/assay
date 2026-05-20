@@ -98,3 +98,26 @@ The endpoint provides request count and latency histograms (`http_requests_total
 ```bash
 uv run pytest
 ```
+
+### Coverage
+
+Run with terminal coverage report (shows which lines were not hit):
+
+```bash
+uv run pytest --cov=assay --cov-report=term-missing
+```
+
+Run with HTML report (open `htmlcov/index.html` in a browser for line-by-line highlights):
+
+```bash
+uv run pytest --cov=assay --cov-report=term-missing --cov-report=html
+```
+
+To enforce a minimum coverage threshold and fail the pipeline if it drops below it, add to `pyproject.toml`:
+
+```toml
+[tool.pytest.ini_options]
+addopts = "--cov=assay --cov-report=term-missing --cov-fail-under=80"
+```
+
+With this in place, `uv run pytest` will fail with a non-zero exit code if coverage falls below 80% — CI pipelines treat a non-zero exit as a build failure automatically.

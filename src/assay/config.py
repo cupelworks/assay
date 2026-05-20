@@ -17,8 +17,6 @@ class Settings(BaseSettings):
     port: int = 8000
     # sqlite+aiosqlite locally; postgresql+asyncpg in production
     database_url: str = "sqlite+aiosqlite:///./assay.db"
-    llm_provider: str = "anthropic"      # "anthropic" | "openai"
-    llm_model: str = "claude-sonnet-4-6"
 
 
 # Module-level singleton — imported across the app, read once at startup.

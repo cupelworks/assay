@@ -18,10 +18,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",     # Test runner
-    "httpx>=0.27",     # Async HTTP client used by FastAPI's TestClient in tests
-    "ruff>=0.7",       # Linter and formatter
-    "aiosqlite>=0.20", # Async SQLite driver — local dev only (prod uses asyncpg)
+    "pytest>=8.0",      # Test runner
+    "pytest-cov>=5.0",  # Coverage reporting — run with --cov=assay --cov-report=term-missing
+    "httpx>=0.27",      # Async HTTP client used by FastAPI's TestClient in tests
+    "ruff>=0.7",        # Linter and formatter
+    "aiosqlite>=0.20",  # Async SQLite driver — local dev only (prod uses asyncpg)
 ]
 anthropic = [
     "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)

@@ -8,11 +8,13 @@ class ZTestRequest(BaseModel):
 
     scores: list[float] = Field(
         ...,
-        min_length=2,
+        min_length=30,
         description="Metric scores from evaluations (e.g. 100 ROUGE scores).",
     )
     threshold: float = Field(
         ...,
+        gt=0,
+        lt=1,
         description="Value the population mean must exceed (or fall below) to pass.",
     )
     alpha: float = Field(
