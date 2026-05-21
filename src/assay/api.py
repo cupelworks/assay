@@ -7,6 +7,7 @@ from assay.db import get_session
 from assay.schemas import (
     DataSetImportViaPathRequest,
     DataSetImportViaPathResponse,
+    DataSetInfo,
     ZTestRequest,
     ZTestResult,
 )
@@ -45,6 +46,7 @@ async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult: # p
     from assay.services import run_z_test
 
     return await run_z_test(request, session)
+
 
 @router.post(
     path="/upload-dataset/path",
@@ -127,3 +129,48 @@ async def upload_dataset(request: DataSetImportViaPathRequest, session: SessionD
     from assay.services import upload_dataset_via_path
 
     return await upload_dataset_via_path(request, session)
+
+
+@router.post(
+    path="/upload-dataset/update-dataset-name",
+    responses={
+        404: {
+            "description": "No dataset exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset with id <example-id> not found"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+        409: {
+            "description": "A dataset with the new name already exists.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset name 'my_dataset' already exists."},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    tags=["dataset"],
+    response_model=DataSetInfo,
+)
+async def update_dataset_name(request: DataSetInfo, session: SessionDep): # pragma: no cover
+    """Rename a dataset by its ID.
+
+    The request body must include both the dataset `id` and the desired `name`.
+    The new name must be unique across all datasets. If the name is unchanged,
+    the request succeeds without a uniqueness check.
+    """
+    from assay.services import update_dataset_name as _update_dataset_name
+
+    return await _update_dataset_name(request, session)

@@ -3,7 +3,6 @@ from pathlib import Path
 
 from fastapi import HTTPException
 from pydantic import ValidationError
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
@@ -15,11 +14,12 @@ from assay.schemas import (
     DataSetInfo,
     DataSetJsonStructure,
 )
+from assay.services.datasets._common import _check_name_unique
 
 
 async def upload_dataset_via_path(req: DataSetImportViaPathRequest,
                                   session: AsyncSession
-                                  ) -> DataSetImportViaPathResponse: # pragma: no cover
+                                  ) -> DataSetImportViaPathResponse:  # pragma: no cover
     """Orchestrates dataset upload: validates, parses, persists, and returns the result.
 
     Args:
@@ -85,19 +85,6 @@ def _check_file_exists(path: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"File not found: {path}",
-        )
-
-
-async def _check_name_unique(name: str, session: AsyncSession) -> None:
-    """Raise 409 if a dataset with the given name already exists.
-
-    scalar() returns the DatasetModel instance if found, None otherwise.
-    """
-    existing = await session.scalar(select(DatasetModel).where(DatasetModel.name == name))
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Dataset name '{name}' already exists.",
         )
 
 
