@@ -1,16 +1,11 @@
-import uuid
-
-from fastapi import HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette import status
 
 from assay.models import DatasetModel
 from assay.schemas import DataSetInfo
-from assay.services.datasets._common import _check_name_unique
+from assay.services.datasets._common import _check_name_unique, _get_dataset_or_404
 
 
-async def update_dataset_name(
+async def update_dataset_name_by_id(
         request: DataSetInfo,
         session: AsyncSession) -> DataSetInfo:  # pragma: no cover
     """Orchestrates dataset rename: fetches, validates uniqueness, persists, and returns the result.
@@ -31,17 +26,6 @@ async def update_dataset_name(
         await _check_name_unique(request.name, session)
     await _apply_name_update(dataset, request.name, session)
     return _build_dataset_info(dataset)
-
-
-async def _get_dataset_or_404(dataset_id: uuid.UUID, session: AsyncSession) -> DatasetModel:
-    """Fetch a dataset by ID or raise 404."""
-    dataset = await session.scalar(select(DatasetModel).where(DatasetModel.id == dataset_id))
-    if not dataset:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dataset with id {dataset_id} not found",
-        )
-    return dataset
 
 
 async def _apply_name_update(dataset: DatasetModel, name: str, session: AsyncSession) -> None:

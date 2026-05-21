@@ -5,16 +5,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
 from assay.schemas import (
+    DataSetDeletedInfo,
+    DataSetID,
     DataSetImportViaPathRequest,
     DataSetImportViaPathResponse,
     DataSetInfo,
     ZTestRequest,
     ZTestResult,
 )
+from assay.services import (
+    delete_dataset_by_id,
+    run_z_test,
+    update_dataset_name_by_id,
+    upload_dataset_via_path,
+)
 
 router = APIRouter()
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
 
 @router.get("/health", tags=["meta"])
 def health() -> dict[str, str]:
@@ -43,7 +52,6 @@ async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult: # p
 
     **Note:** reliable for n ≥ 30. For smaller samples the t-distribution would be more appropriate.
     """
-    from assay.services import run_z_test
 
     return await run_z_test(request, session)
 
@@ -103,7 +111,9 @@ async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult: # p
     tags=["dataset"],
     response_model=DataSetImportViaPathResponse,
 )
-async def upload_dataset(request: DataSetImportViaPathRequest, session: SessionDep): # pragma: no cover  # noqa: E501
+async def upload_dataset(
+        request: DataSetImportViaPathRequest,
+        session: SessionDep): # pragma: no cover
     """Load a dataset from a local `.jsonl` file and persist it as a Dataset with its rows.
 
     Each line must be a valid JSON object matching the dataset schema (`prompt`, `model_output`,
@@ -126,7 +136,6 @@ async def upload_dataset(request: DataSetImportViaPathRequest, session: SessionD
     **Note:** the file must be accessible from the server's filesystem.
     Remote URLs and cloud storage paths are not supported.
     """
-    from assay.services import upload_dataset_via_path
 
     return await upload_dataset_via_path(request, session)
 
@@ -171,6 +180,35 @@ async def update_dataset_name(request: DataSetInfo, session: SessionDep): # prag
     The new name must be unique across all datasets. If the name is unchanged,
     the request succeeds without a uniqueness check.
     """
-    from assay.services import update_dataset_name as _update_dataset_name
 
-    return await _update_dataset_name(request, session)
+    return await update_dataset_name_by_id(request, session)
+
+
+@router.delete(
+    path="/upload-dataset/delete-dataset",
+    responses={
+        404: {
+            "description": "No dataset exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset with id <example-id> not found"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    tags=["dataset"],
+    response_model=DataSetDeletedInfo,
+)
+async def delete_dataset(request: DataSetID, session: SessionDep):  # pragma: no cover
+    """Delete a dataset by its ID.
+
+    The request body must include the dataset `id`.
+    All rows associated with the dataset are also deleted.
+    """
+
+    return await delete_dataset_by_id(request, session)
