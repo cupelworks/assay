@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from assay.schemas import DataSetJsonStructure
+from assay.schemas import DataSetRowSchema
 from assay.services.datasets._common import _check_name_unique
-from assay.services.datasets.upload import (
+from assay.services.datasets.upload_full_dataset import (
     _build_dataset_model,
     _build_response,
     _check_file_exists,
@@ -51,9 +51,9 @@ def test_build_dataset_model_correct_name():
 
 
 def test_build_dataset_model_rows_mapping():
-    data_row = DataSetJsonStructure(prompt=prompt,
-                                    expected_output=expected_output,
-                                    model_output=model_output)
+    data_row = DataSetRowSchema(prompt=prompt,
+                                expected_output=expected_output,
+                                model_output=model_output)
 
     model_rows = _build_dataset_model("", [data_row]).rows
     assert len(model_rows) == 1
@@ -63,9 +63,9 @@ def test_build_dataset_model_rows_mapping():
 
 
 def test_build_dataset_model_multiple_rows():
-    data_rows = [DataSetJsonStructure(prompt=prompt,
-                                      expected_output=expected_output,
-                                      model_output=model_output) for _ in range(3)]
+    data_rows = [DataSetRowSchema(prompt=prompt,
+                                  expected_output=expected_output,
+                                  model_output=model_output) for _ in range(3)]
 
     model_rows = _build_dataset_model("", data_rows).rows
     assert len(model_rows) == 3

@@ -5,7 +5,7 @@ from assay.schemas.datasets import (
     DataSetImportViaPathRequest,
     DataSetImportViaPathResponse,
     DataSetInfo,
-    DataSetJsonStructure,
+    DataSetRowSchema,
 )
 from assay.schemas.stats import ZTestRequest, ZTestResult
 
@@ -16,7 +16,7 @@ __all__ = [
     "DataRowInfo",
     "DataSetImportViaPathRequest",
     "DataSetImportViaPathResponse",
-    "DataSetJsonStructure",
+    "DataSetRowSchema",
     "DataSetID",
     "DataSetDeletedInfo",
 ]

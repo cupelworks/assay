@@ -12,7 +12,7 @@ from assay.schemas import (
     DataSetImportViaPathRequest,
     DataSetImportViaPathResponse,
     DataSetInfo,
-    DataSetJsonStructure,
+    DataSetRowSchema,
 )
 from assay.services.datasets._common import _check_name_unique
 
@@ -67,7 +67,7 @@ async def _persist_dataset(
 
 def _build_response(
     req: DataSetImportViaPathRequest,
-    rows: list[DataSetJsonStructure],
+    rows: list[DataSetRowSchema],
     dataset_id: object,
     row_ids: list[object],
 ) -> DataSetImportViaPathResponse:
@@ -88,7 +88,7 @@ def _check_file_exists(path: str) -> None:
         )
 
 
-def _build_dataset_model(name: str, rows: list[DataSetJsonStructure]) -> DatasetModel:
+def _build_dataset_model(name: str, rows: list[DataSetRowSchema]) -> DatasetModel:
     """Build a DatasetModel with its rows from validated schema objects.
 
     Pure function — no DB or HTTP dependencies, fully unit-testable.
@@ -123,7 +123,7 @@ def _raise_if_errors(errors: list[tuple[int, str, list]]) -> None:
 
 
 def _parse_and_validate_rows(file: TextIOWrapper) \
-        -> tuple[list[DataSetJsonStructure], list[tuple[int, str, list]]]:
+        -> tuple[list[DataSetRowSchema], list[tuple[int, str, list]]]:
     """Read a .jsonl file line by line, validating each line against DataSetJsonStructure.
 
     Returns a tuple of:
@@ -134,14 +134,14 @@ def _parse_and_validate_rows(file: TextIOWrapper) \
     Does not raise — the caller decides what to do with errors.
     """
     errors: list[tuple[int, str, list]] = []
-    rows: list[DataSetJsonStructure] = []
+    rows: list[DataSetRowSchema] = []
     for i, line in enumerate(file):
         # Skip blank lines (e.g. trailing newline at end of file).
         if not line.strip():
             continue
         try:
             rows.append(
-                DataSetJsonStructure.model_validate_json(line)
+                DataSetRowSchema.model_validate_json(line)
             )
         except ValidationError as e:
             # Collect the line number, raw content, and Pydantic error details.
