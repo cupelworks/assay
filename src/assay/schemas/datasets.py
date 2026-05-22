@@ -49,13 +49,16 @@ class DataRowInfo(BaseModel):
     )
 
 
-class DataSetImportViaPathResponse(BaseModel):
+class DataSetImportedData(BaseModel):
+    dataset: DataSetInfo
+    loaded: DataRowInfo
+
+
+class DataSetImportViaPathResponse(DataSetImportedData):
     path: str = Field(
         ...,
         description="Path to the dataset to be imported.",
     )
-    dataset: DataSetInfo
-    loaded: DataRowInfo
 
 
 class DataSetDeletedInfo(BaseModel):
@@ -76,3 +79,7 @@ class DataSetRowSchema(BaseModel):
         ...,
         description="The answer of the model.",
     )
+
+
+class DataSetImportingData(DataSetID):
+    rows: list[DataSetRowSchema]

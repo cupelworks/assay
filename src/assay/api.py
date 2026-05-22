@@ -7,6 +7,8 @@ from assay.db import get_session
 from assay.schemas import (
     DataSetDeletedInfo,
     DataSetID,
+    DataSetImportedData,
+    DataSetImportingData,
     DataSetImportViaPathRequest,
     DataSetImportViaPathResponse,
     DataSetInfo,
@@ -19,6 +21,7 @@ from assay.services import (
     update_dataset_name_by_id,
     upload_dataset_via_path,
 )
+from assay.services.datasets import upload_new_rows_in_existing_dataset
 
 router = APIRouter()
 
@@ -182,6 +185,39 @@ async def update_dataset_name(request: DataSetInfo, session: SessionDep): # prag
     """
 
     return await update_dataset_name_by_id(request, session)
+
+
+@router.post(
+    path="/upload-dataset/upload-dataset-rows",
+    responses={
+        404: {
+            "description": "No dataset exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset with id <example-id> not found"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    tags=["dataset"],
+    response_model=DataSetImportedData,
+)
+async def upload_dataset_rows(
+        request: DataSetImportingData,
+        session: SessionDep) -> DataSetImportedData:  # pragma: no cover
+    """Add rows to an existing dataset.
+
+    The request body must include the dataset `id` and a list of `rows`,
+    each with `prompt`, `expected_output`, and `model_output`.
+    The dataset must already exist — use the upload-via-path endpoint to create one.
+    """
+
+    return await upload_new_rows_in_existing_dataset(request, session)
 
 
 @router.delete(

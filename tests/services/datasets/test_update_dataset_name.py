@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from assay.services.datasets.update import (
+from assay.services.datasets.update_dataset_name import (
     _apply_name_update,
     _build_dataset_info,
     _get_dataset_or_404,
