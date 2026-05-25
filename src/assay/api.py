@@ -137,7 +137,7 @@ async def get_dataset_rows(
 
 
 @router.post(
-    path="/upload-dataset/path",
+    path="/datasets/path",
     responses={
         404: {
             "description": "File not found at the given path.",
@@ -191,7 +191,7 @@ async def get_dataset_rows(
     tags=["dataset"],
     response_model=DataSetImportViaPathResponse,
 )
-async def upload_dataset(
+async def create_dataset_from_path(
         request: DataSetImportViaPathRequest,
         session: SessionDep): # pragma: no cover
     """Load a dataset from a local `.jsonl` file and persist it as a Dataset with its rows.
@@ -221,7 +221,7 @@ async def upload_dataset(
 
 
 @router.post(
-    path="/upload-dataset/upload-dataset-rows",
+    path="/datasets/rows",
     responses={
         404: {
             "description": "No dataset exists with the given ID.",
@@ -240,7 +240,7 @@ async def upload_dataset(
     tags=["dataset"],
     response_model=DataSetImportedData,
 )
-async def upload_dataset_rows(
+async def add_dataset_rows(
         request: DataSetImportingData,
         session: SessionDep) -> DataSetImportedData:  # pragma: no cover
     """Add rows to an existing dataset.
@@ -254,7 +254,7 @@ async def upload_dataset_rows(
 
 
 @router.patch(
-    path="/update-dataset/name",
+    path="/datasets/name",
     responses={
         404: {
             "description": "No dataset exists with the given ID.",
@@ -298,7 +298,7 @@ async def update_dataset_name(request: DataSetInfo, session: SessionDep): # prag
 
 
 @router.patch(
-    path="/update-dataset/rows",
+    path="/datasets/rows",
     responses={
         404: {
             "description": "One or more row IDs were not found — no rows are updated.",
@@ -331,7 +331,7 @@ async def update_dataset_rows(
 
 
 @router.put(
-    path="/update-dataset",
+    path="/datasets/rows",
     responses={
         404: {
             "description": "No dataset exists with the given ID.",
@@ -365,7 +365,7 @@ async def replace_dataset_content(
 
 
 @router.delete(
-    path="/delete-dataset",
+    path="/datasets",
     responses={
         404: {
             "description": "No dataset exists with the given ID.",
@@ -395,7 +395,7 @@ async def delete_dataset(request: DataSetID, session: SessionDep):  # pragma: no
 
 
 @router.delete(
-    path="/delete-dataset/delete-dataset-rows",
+    path="/datasets/rows",
     responses={
         404: {
             "description": "One or more row IDs were not found.",
