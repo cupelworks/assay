@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
@@ -15,18 +15,20 @@ from assay.schemas import (
     DataSetInfo,
     DataSetRowToUpdate,
     DataSetRowUpdatedData,
+    PaginatedDataSetResponse,
     ZTestRequest,
     ZTestResult,
 )
 from assay.services import (
     delete_dataset_by_id,
     delete_dataset_rows_by_ids,
+    get_datasets_metadata,
+    replace_dataset_content_by_dataset_id,
     run_z_test,
     update_dataset_name_by_id,
     update_dataset_rows_by_id,
     upload_dataset_via_path,
     upload_new_rows_in_existing_dataset,
-    replace_dataset_content_by_dataset_id,
 )
 
 router = APIRouter()
@@ -63,6 +65,27 @@ async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult: # p
     """
 
     return await run_z_test(request, session)
+
+
+@router.get(
+    path="/datasets",
+    responses={},
+    tags=["dataset"],
+    response_model=PaginatedDataSetResponse,
+)
+async def get_all_datasets_metadata(
+        session: SessionDep,
+        offset: int = Query(default=0, description="Number of records to skip for pagination."),
+        limit: int = Query(default=100, description="Maximum number of records to "
+                                                    "return for pagination.")
+) -> PaginatedDataSetResponse:  # pragma: no cover
+    """List all datasets with their metadata, paginated.
+
+    Use `offset` and `limit` to page through results. The response includes the total
+    number of datasets so the client can calculate the number of pages.
+    """
+
+    return await get_datasets_metadata(offset, limit, session)
 
 
 @router.post(

@@ -51,6 +51,7 @@ src/assay/
 ├── services/            # Business logic — one file per operation
 │   ├── datasets/
 │   │   ├── _common.py                  # Shared helpers (_get_dataset_or_404, _get_rows_or_404, etc.)
+│   │   ├── get_datasets_metadata.py
 │   │   ├── upload_full_dataset.py
 │   │   ├── upload_rows_in_dataset.py
 │   │   ├── replace_dataset_content.py

@@ -8,9 +8,11 @@ from assay.schemas.datasets import (
     DataSetImportViaPathRequest,
     DataSetImportViaPathResponse,
     DataSetInfo,
+    DataSetMetadata,
     DataSetRowSchema,
     DataSetRowToUpdate,
     DataSetRowUpdatedData,
+    PaginatedDataSetResponse,
 )
 from assay.schemas.stats import ZTestRequest, ZTestResult
 
@@ -29,4 +31,6 @@ __all__ = [
     "DataSetImportedData",
     "DataSetImportingData",
     "DataSetRowUpdatedData",
+    "DataSetMetadata",
+    "PaginatedDataSetResponse",
 ]

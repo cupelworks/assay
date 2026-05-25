@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
@@ -31,11 +32,15 @@ class DataSetID(BaseModel):
     )
 
 
-class DataSetInfo(DataSetID):
+class DataSetName(BaseModel):
     name: str = Field(
         ...,
         description="The name of the dataset.",
     )
+
+
+class DataSetInfo(DataSetID, DataSetName):
+    pass
 
 
 class DataRowInfo(BaseModel):
@@ -103,3 +108,26 @@ class DataSetRowToUpdate(BaseModel):
 class DataSetRowUpdatedData(BaseModel):
     dataset: DataSetInfo
     updated: DataRowInfo
+
+
+class DataSetMetadata(DataSetID, DataSetName):
+    created_at: datetime = Field(
+        ...,
+        description="The creation date of the dataset.",
+    )
+
+
+class PaginatedDataSetResponse(BaseModel):
+    items: list[DataSetMetadata]
+    total: int = Field(
+        ...,
+        description="The total number of datasets in the database.",
+    )
+    offset: int = Field(
+        ...,
+        description="Number of records to skip for pagination."
+    )
+    limit: int = Field(
+        ...,
+        description="The maximum number of records to return for pagination.",
+    )
