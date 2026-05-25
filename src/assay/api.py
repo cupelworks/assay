@@ -26,6 +26,7 @@ from assay.services import (
     update_dataset_rows_by_id,
     upload_dataset_via_path,
     upload_new_rows_in_existing_dataset,
+    replace_dataset_content_by_dataset_id,
 )
 
 router = APIRouter()
@@ -256,6 +257,40 @@ async def update_dataset_rows(
     """
 
     return await update_dataset_rows_by_id(request, session)
+
+
+@router.put(
+    path="/update-dataset",
+    responses={
+        404: {
+            "description": "No dataset exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset with id <example-id> not found"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    tags=["dataset"],
+    response_model=DataSetImportedData,
+)
+async def replace_dataset_content(
+        request: DataSetImportingData,
+        session: SessionDep) -> DataSetImportedData:  # pragma: no cover
+    """Replace all rows in an existing dataset with a new set of rows.
+
+    The request body must include the dataset `id` and a list of `rows`,
+    each with `prompt`, `expected_output`, and `model_output`.
+    All existing rows are deleted before the new ones are inserted — the operation
+    is transactional; either all rows are replaced or none are.
+    """
+
+    return await replace_dataset_content_by_dataset_id(request, session)
 
 
 @router.delete(
