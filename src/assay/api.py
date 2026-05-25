@@ -181,7 +181,7 @@ async def upload_dataset_rows(
     return await upload_new_rows_in_existing_dataset(request, session)
 
 
-@router.post(
+@router.patch(
     path="/update-dataset/name",
     responses={
         404: {
@@ -225,7 +225,7 @@ async def update_dataset_name(request: DataSetInfo, session: SessionDep): # prag
     return await update_dataset_name_by_id(request, session)
 
 
-@router.post(
+@router.patch(
     path="/update-dataset/rows",
     responses={
         404: {
