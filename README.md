@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Early scaffold. The HTTP surface and domain models are defined; the evaluators and statistics engine are stubbed and return `501 Not Implemented` until filled in.
+Active development. Dataset CRUD operations and the z-test are implemented. LLM-as-judge evaluators and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -44,14 +44,24 @@ src/assay/
 ├── config.py            # Pydantic settings (reads ASSAY_* env vars)
 ├── db.py                # Async SQLAlchemy engine and session dependency
 ├── api.py               # HTTP routes
-├── stats.py             # Statistical test logic (z-test)
-├── llm.py               # LLMClient protocol + AnthropicClient / OpenAIClient factory
 ├── schemas/             # Pydantic models — API validation and serialization
 │   ├── __init__.py      # Re-exports all public models
+│   ├── datasets.py      # Dataset and row schemas
 │   └── stats.py         # ZTestRequest, ZTestResult
+├── services/            # Business logic — one file per operation
+│   ├── datasets/
+│   │   ├── _common.py                  # Shared helpers (_get_dataset_or_404, _get_rows_or_404, etc.)
+│   │   ├── upload_full_dataset.py
+│   │   ├── upload_rows_in_dataset.py
+│   │   ├── update_dataset_name.py
+│   │   ├── update_dataset_rows.py
+│   │   ├── delete_full_dataset.py
+│   │   └── delete_dataset_rows.py
+│   └── stats.py         # run_z_test
 └── models/              # SQLAlchemy ORM models — database table definitions
     ├── __init__.py
-    └── base.py           # Shared DeclarativeBase
+    ├── datasets.py      # DatasetModel, DatasetRowModel
+    └── base.py          # Shared DeclarativeBase
 alembic/                 # Alembic migration environment
 alembic.ini              # Alembic configuration (URL is read from ASSAY_DATABASE_URL at runtime)
 tests/                   # Pytest suite

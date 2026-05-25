@@ -149,7 +149,40 @@ async def upload_dataset(
 
 
 @router.post(
-    path="/upload-dataset/update-dataset-name",
+    path="/upload-dataset/upload-dataset-rows",
+    responses={
+        404: {
+            "description": "No dataset exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset with id <example-id> not found"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    tags=["dataset"],
+    response_model=DataSetImportedData,
+)
+async def upload_dataset_rows(
+        request: DataSetImportingData,
+        session: SessionDep) -> DataSetImportedData:  # pragma: no cover
+    """Add rows to an existing dataset.
+
+    The request body must include the dataset `id` and a list of `rows`,
+    each with `prompt`, `expected_output`, and `model_output`.
+    The dataset must already exist — use the upload-via-path endpoint to create one.
+    """
+
+    return await upload_new_rows_in_existing_dataset(request, session)
+
+
+@router.post(
+    path="/update-dataset/name",
     responses={
         404: {
             "description": "No dataset exists with the given ID.",
@@ -193,40 +226,7 @@ async def update_dataset_name(request: DataSetInfo, session: SessionDep): # prag
 
 
 @router.post(
-    path="/upload-dataset/upload-dataset-rows",
-    responses={
-        404: {
-            "description": "No dataset exists with the given ID.",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Dataset with id <example-id> not found"},
-                    "schema": {
-                        "type": "object",
-                        "properties": {"detail": {"type": "string"}},
-                        "required": ["detail"],
-                    },
-                }
-            },
-        },
-    },
-    tags=["dataset"],
-    response_model=DataSetImportedData,
-)
-async def upload_dataset_rows(
-        request: DataSetImportingData,
-        session: SessionDep) -> DataSetImportedData:  # pragma: no cover
-    """Add rows to an existing dataset.
-
-    The request body must include the dataset `id` and a list of `rows`,
-    each with `prompt`, `expected_output`, and `model_output`.
-    The dataset must already exist — use the upload-via-path endpoint to create one.
-    """
-
-    return await upload_new_rows_in_existing_dataset(request, session)
-
-
-@router.post(
-    path="/upload-dataset/update-dataset-rows",
+    path="/update-dataset/rows",
     responses={
         404: {
             "description": "One or more row IDs were not found — no rows are updated.",
