@@ -53,6 +53,7 @@ src/assay/
 │   │   ├── _common.py                  # Shared helpers (_get_dataset_or_404, _get_rows_or_404, etc.)
 │   │   ├── upload_full_dataset.py
 │   │   ├── upload_rows_in_dataset.py
+│   │   ├── replace_dataset_content.py
 │   │   ├── update_dataset_name.py
 │   │   ├── update_dataset_rows.py
 │   │   ├── delete_full_dataset.py
