@@ -13,6 +13,8 @@ from assay.schemas import (
     DataSetImportViaPathRequest,
     DataSetImportViaPathResponse,
     DataSetInfo,
+    DataSetRowToUpdate,
+    DataSetRowUpdatedData,
     ZTestRequest,
     ZTestResult,
 )
@@ -21,6 +23,7 @@ from assay.services import (
     delete_dataset_rows_by_ids,
     run_z_test,
     update_dataset_name_by_id,
+    update_dataset_rows_by_id,
     upload_dataset_via_path,
     upload_new_rows_in_existing_dataset,
 )
@@ -220,6 +223,39 @@ async def upload_dataset_rows(
     """
 
     return await upload_new_rows_in_existing_dataset(request, session)
+
+
+@router.post(
+    path="/upload-dataset/update-dataset-rows",
+    responses={
+        404: {
+            "description": "One or more row IDs were not found — no rows are updated.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Row ids not found: ['<example-id>']"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    tags=["dataset"],
+    response_model=DataSetRowUpdatedData,
+)
+async def update_dataset_rows(
+        request: list[DataSetRowToUpdate],
+        session: SessionDep) -> DataSetRowUpdatedData:  # pragma: no cover
+    """Update existing dataset rows by their IDs.
+
+    The request body must be a list of objects, each with a row `id` and a `row_info`
+    containing `prompt`, `expected_output`, and `model_output`.
+    If any row ID is not found, the entire request is rejected with a 404.
+    """
+
+    return await update_dataset_rows_by_id(request, session)
 
 
 @router.delete(

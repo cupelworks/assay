@@ -1,10 +1,9 @@
-from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from assay.models import DatasetRowModel
 from assay.schemas import DataRowInfo, DataSetDeletedData, DataSetDeletingData, DataSetInfo
+from assay.services.datasets._common import _get_rows_or_404
 
 
 async def delete_dataset_rows_by_ids(
@@ -23,19 +22,7 @@ async def delete_dataset_rows_by_ids(
         HTTPException 404: One or more row IDs were not found — no rows are deleted.
     """
 
-    rows_model = (await session.scalars(select(DatasetRowModel)
-                                        .where(DatasetRowModel.id.in_(request.row_ids))
-                                        .options(selectinload(DatasetRowModel.dataset))
-                                        )).all()
-
-    found_ids = [row.id for row in rows_model]
-    missing_ids = set(request.row_ids) - set(found_ids)
-
-    if missing_ids:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Row ids not found: {[str(row_id) for row_id in missing_ids]}",
-        )
+    rows_model = await _get_rows_or_404(request.row_ids, session)
 
     result = _build_deleted_rows_info(rows_model)
     

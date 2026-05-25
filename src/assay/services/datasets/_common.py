@@ -3,9 +3,10 @@ import uuid
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from starlette import status
 
-from assay.models import DatasetModel
+from assay.models import DatasetModel, DatasetRowModel
 
 
 async def _check_name_unique(name: str, session: AsyncSession) -> None:
@@ -30,3 +31,23 @@ async def _get_dataset_or_404(dataset_id: uuid.UUID, session: AsyncSession) -> D
             detail=f"Dataset with id {dataset_id} not found",
         )
     return dataset
+
+
+async def _get_rows_or_404(
+        row_ids: list[uuid.UUID],
+        session: AsyncSession) -> list[DatasetRowModel]:
+    """Fetch rows by IDs (with their dataset) or raise 404 if any are missing."""
+    rows = (await session.scalars(
+        select(DatasetRowModel)
+        .where(DatasetRowModel.id.in_(row_ids))
+        .options(selectinload(DatasetRowModel.dataset))
+    )).all()
+
+    missing_ids = set(row_ids) - {row.id for row in rows}
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Row ids not found: {[str(row_id) for row_id in missing_ids]}",
+        )
+
+    return list(rows)
