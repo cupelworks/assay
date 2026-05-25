@@ -1,6 +1,7 @@
 from assay.schemas.datasets import (
     DataRowInfo,
-    DataSetDeletedInfo,
+    DataSetDeletedData,
+    DataSetDeletingData,
     DataSetID,
     DataSetImportedData,
     DataSetImportingData,
@@ -20,7 +21,8 @@ __all__ = [
     "DataSetImportViaPathResponse",
     "DataSetRowSchema",
     "DataSetID",
-    "DataSetDeletedInfo",
+    "DataSetDeletedData",
+    "DataSetDeletingData",
     "DataSetImportedData",
     "DataSetImportingData",
 ]

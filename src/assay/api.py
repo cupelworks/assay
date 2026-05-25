@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
 from assay.schemas import (
-    DataSetDeletedInfo,
+    DataSetDeletedData,
+    DataSetDeletingData,
     DataSetID,
     DataSetImportedData,
     DataSetImportingData,
@@ -17,11 +18,12 @@ from assay.schemas import (
 )
 from assay.services import (
     delete_dataset_by_id,
+    delete_dataset_rows_by_ids,
     run_z_test,
     update_dataset_name_by_id,
     upload_dataset_via_path,
+    upload_new_rows_in_existing_dataset,
 )
-from assay.services.datasets import upload_new_rows_in_existing_dataset
 
 router = APIRouter()
 
@@ -221,7 +223,7 @@ async def upload_dataset_rows(
 
 
 @router.delete(
-    path="/upload-dataset/delete-dataset",
+    path="/delete-dataset",
     responses={
         404: {
             "description": "No dataset exists with the given ID.",
@@ -238,7 +240,7 @@ async def upload_dataset_rows(
         },
     },
     tags=["dataset"],
-    response_model=DataSetDeletedInfo,
+    response_model=DataSetDeletedData,
 )
 async def delete_dataset(request: DataSetID, session: SessionDep):  # pragma: no cover
     """Delete a dataset by its ID.
@@ -248,3 +250,36 @@ async def delete_dataset(request: DataSetID, session: SessionDep):  # pragma: no
     """
 
     return await delete_dataset_by_id(request, session)
+
+
+@router.delete(
+    path="/delete-dataset/delete-dataset-rows",
+    responses={
+        404: {
+            "description": "One or more row IDs were not found.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Row ids not found: ['f6b155e0-5807-43ec-b240-8a4c5cb1c778']"
+                    },
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    tags=["dataset"],
+    response_model=DataSetDeletedData,
+)
+async def delete_dataset_rows(  # pragma: no cover
+        request: DataSetDeletingData, session: SessionDep):
+    """Delete rows from an existing dataset by their IDs.
+
+    The request body must include a list of `row_ids` to delete.
+    If any ID is not found, the entire request is rejected with a 404 — no rows are deleted.
+    """
+
+    return await delete_dataset_rows_by_ids(request, session)

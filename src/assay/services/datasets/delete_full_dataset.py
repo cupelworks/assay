@@ -1,13 +1,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import DatasetModel
-from assay.schemas import DataRowInfo, DataSetDeletedInfo, DataSetID, DataSetInfo
+from assay.schemas import DataRowInfo, DataSetDeletedData, DataSetID, DataSetInfo
 from assay.services.datasets._common import _get_dataset_or_404
 
 
 async def delete_dataset_by_id(
         request: DataSetID,
-        session: AsyncSession) -> DataSetDeletedInfo:
+        session: AsyncSession) -> DataSetDeletedData:
     """Orchestrates dataset deletion: fetches, deletes, commits, and returns the deleted info.
 
     Args:
@@ -27,8 +27,8 @@ async def delete_dataset_by_id(
     return _build_deleted_dataset_info(dataset)
 
 
-def _build_deleted_dataset_info(dataset: DatasetModel) -> DataSetDeletedInfo:
-    return DataSetDeletedInfo(
+def _build_deleted_dataset_info(dataset: DatasetModel) -> DataSetDeletedData:
+    return DataSetDeletedData(
         dataset=DataSetInfo(
             name=dataset.name,
             id=dataset.id,

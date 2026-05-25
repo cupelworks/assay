@@ -60,6 +60,8 @@ def test_upload_new_rows_in_existing_dataset_rows_added():
     assert len(dataset.rows) == 3
 
 
+# --- _build_uploaded_dataset_info ---
+
 def test_build_uploaded_dataset_info():
     dataset = MagicMock()
     dataset.id = uuid.uuid4()
