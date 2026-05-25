@@ -122,6 +122,20 @@ async def get_dataset_metadata(
     return await get_dataset_metadata_by_id(dataset_id, session)
 
 
+@router.get(
+    path="/datasets/{dataset_id}/rows",
+    responses={},
+    tags=["dataset"],
+)
+async def get_dataset_rows(
+    dataset_id: uuid.UUID,
+    session: SessionDep,
+    offset: int = Query(description="Number of records to skip for pagination."),
+    limit: int = Query(description="Maximum number of records to return for pagination."),
+):
+    ...
+
+
 @router.post(
     path="/upload-dataset/path",
     responses={
