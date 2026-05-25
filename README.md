@@ -132,3 +132,7 @@ addopts = "--cov=assay --cov-report=term-missing --cov-fail-under=80"
 ```
 
 With this in place, `uv run pytest` will fail with a non-zero exit code if coverage falls below 80% — CI pipelines treat a non-zero exit as a build failure automatically.
+
+## TODOs
+
+- `services/datasets/replace_dataset_content.py` — Consider what happens when a dataset row has a relationship with executed tests (cascading deletes or constraint violations on full replacement).
