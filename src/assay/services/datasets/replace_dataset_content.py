@@ -26,6 +26,7 @@ async def replace_dataset_content_by_dataset_id(
 
     dataset = await _get_dataset_or_404(request.id, session)
 
+    # TODO: Consider what happens when a dataset row will have a relationship with executed tests
     await session.execute(
         delete(DatasetRowModel)
         .where(DatasetRowModel.dataset_id == dataset.id)
