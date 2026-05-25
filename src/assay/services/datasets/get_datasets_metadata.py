@@ -1,8 +1,11 @@
+import uuid
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import DatasetModel
 from assay.schemas import DataSetMetadata, PaginatedDataSetResponse
+from assay.services.datasets._common import _get_dataset_or_404
 
 
 async def get_datasets_metadata(
@@ -37,4 +40,29 @@ async def get_datasets_metadata(
         total=total,
         offset=offset,
         limit=limit,
+    )
+
+
+async def get_dataset_metadata_by_id(
+        dataset_id: uuid.UUID,
+        session: AsyncSession) -> DataSetMetadata:
+    """Orchestrates single dataset retrieval: validates ID and returns its metadata.
+
+    Args:
+        dataset_id: The UUID of the dataset to retrieve.
+        session: Async SQLAlchemy session injected by FastAPI.
+
+    Returns:
+        The dataset metadata (id, name, created_at).
+
+    Raises:
+        HTTPException 404: No dataset exists with the given ID.
+    """
+
+    dataset = await _get_dataset_or_404(dataset_id, session)
+
+    return DataSetMetadata(
+        id=dataset.id,
+        name=dataset.name,
+        created_at=dataset.created_at,
     )

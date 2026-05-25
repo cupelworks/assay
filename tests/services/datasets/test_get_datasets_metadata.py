@@ -1,9 +1,15 @@
 import asyncio
 import uuid
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from assay.services.datasets.get_datasets_metadata import get_datasets_metadata
+import pytest
+from fastapi import HTTPException
+
+from assay.services import (
+    get_dataset_metadata_by_id,
+    get_datasets_metadata,
+)
 
 
 def _make_dataset(dataset_id: uuid.UUID = None, name: str = "My Dataset") -> MagicMock:
@@ -61,3 +67,30 @@ def test_get_datasets_metadata_empty():
 
     assert result.items == []
     assert result.total == 0
+
+
+# --- get_dataset_metadata_by_id ---
+
+def test_get_dataset_metadata_by_id_returns_correct_metadata():
+    dataset = _make_dataset()
+    session = AsyncMock()
+
+    with patch("assay.services.datasets.get_datasets_metadata._get_dataset_or_404",
+               new=AsyncMock(return_value=dataset)):
+        result = asyncio.run(get_dataset_metadata_by_id(dataset.id, session))
+
+    assert result.id == dataset.id
+    assert result.name == dataset.name
+    assert result.created_at == dataset.created_at
+
+
+def test_get_dataset_metadata_by_id_missing_raises_404():
+    session = AsyncMock()
+
+    with patch(
+        "assay.services.datasets.get_datasets_metadata._get_dataset_or_404",
+        new=AsyncMock(side_effect=HTTPException(status_code=404, detail="Dataset not found")),
+    ), pytest.raises(HTTPException) as exc:
+        asyncio.run(get_dataset_metadata_by_id(uuid.uuid4(), session))
+
+    assert exc.value.status_code == 404

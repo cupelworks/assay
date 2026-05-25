@@ -1,3 +1,4 @@
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -13,6 +14,7 @@ from assay.schemas import (
     DataSetImportViaPathRequest,
     DataSetImportViaPathResponse,
     DataSetInfo,
+    DataSetMetadata,
     DataSetRowToUpdate,
     DataSetRowUpdatedData,
     PaginatedDataSetResponse,
@@ -22,6 +24,7 @@ from assay.schemas import (
 from assay.services import (
     delete_dataset_by_id,
     delete_dataset_rows_by_ids,
+    get_dataset_metadata_by_id,
     get_datasets_metadata,
     replace_dataset_content_by_dataset_id,
     run_z_test,
@@ -86,6 +89,37 @@ async def get_all_datasets_metadata(
     """
 
     return await get_datasets_metadata(offset, limit, session)
+
+
+@router.get(
+    path="/datasets/{dataset_id}",
+    responses={
+        404: {
+            "description": "No dataset exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset with id <example-id> not found"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    tags=["dataset"],
+    response_model=DataSetMetadata,
+)
+async def get_dataset_metadata(
+        dataset_id: uuid.UUID,
+        session: SessionDep) -> DataSetMetadata:  # pragma: no cover
+    """Retrieve metadata for a single dataset by its ID.
+
+    Returns the dataset `id`, `name`, and `created_at` timestamp.
+    """
+
+    return await get_dataset_metadata_by_id(dataset_id, session)
 
 
 @router.post(
