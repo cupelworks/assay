@@ -9,10 +9,12 @@ from assay.schemas.datasets import (
     DataSetImportViaPathResponse,
     DataSetInfo,
     DataSetMetadata,
+    DataSetRow,
     DataSetRowSchema,
-    DataSetRowToUpdate,
     DataSetRowUpdatedData,
     PaginatedDataSetResponse,
+    PaginatedDataSetRowResponse,
+    Pagination,
 )
 from assay.schemas.stats import ZTestRequest, ZTestResult
 
@@ -24,7 +26,7 @@ __all__ = [
     "DataSetImportViaPathRequest",
     "DataSetImportViaPathResponse",
     "DataSetRowSchema",
-    "DataSetRowToUpdate",
+    "DataSetRow",
     "DataSetID",
     "DataSetDeletedData",
     "DataSetDeletingData",
@@ -33,4 +35,6 @@ __all__ = [
     "DataSetRowUpdatedData",
     "DataSetMetadata",
     "PaginatedDataSetResponse",
+    "PaginatedDataSetRowResponse",
+    "Pagination",
 ]

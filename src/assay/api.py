@@ -15,9 +15,10 @@ from assay.schemas import (
     DataSetImportViaPathResponse,
     DataSetInfo,
     DataSetMetadata,
-    DataSetRowToUpdate,
+    DataSetRow,
     DataSetRowUpdatedData,
     PaginatedDataSetResponse,
+    PaginatedDataSetRowResponse,
     ZTestRequest,
     ZTestResult,
 )
@@ -25,6 +26,7 @@ from assay.services import (
     delete_dataset_by_id,
     delete_dataset_rows_by_ids,
     get_dataset_metadata_by_id,
+    get_dataset_rows_by_id,
     get_datasets_metadata,
     replace_dataset_content_by_dataset_id,
     run_z_test,
@@ -124,16 +126,37 @@ async def get_dataset_metadata(
 
 @router.get(
     path="/datasets/{dataset_id}/rows",
-    responses={},
+    responses={
+        404: {
+            "description": "No dataset exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset with id <example-id> not found"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
     tags=["dataset"],
+    response_model=PaginatedDataSetRowResponse,
 )
 async def get_dataset_rows(
     dataset_id: uuid.UUID,
     session: SessionDep,
     offset: int = Query(description="Number of records to skip for pagination."),
-    limit: int = Query(description="Maximum number of records to return for pagination."),
-):
-    ...
+    limit: int = Query(description="Maximum number of records to return."),
+) -> PaginatedDataSetRowResponse:  # pragma: no cover
+    """List all rows in a dataset, paginated.
+
+    Use `offset` and `limit` to page through results. The response includes the total
+    number of rows so the client can calculate the number of pages.
+    """
+    
+    return await get_dataset_rows_by_id(dataset_id, session, offset, limit)
 
 
 @router.post(
@@ -318,7 +341,7 @@ async def update_dataset_name(request: DataSetInfo, session: SessionDep): # prag
     response_model=DataSetRowUpdatedData,
 )
 async def update_dataset_rows(
-        request: list[DataSetRowToUpdate],
+        request: list[DataSetRow],
         session: SessionDep) -> DataSetRowUpdatedData:  # pragma: no cover
     """Update existing dataset rows by their IDs.
 

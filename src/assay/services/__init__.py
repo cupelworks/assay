@@ -2,6 +2,7 @@ from assay.services.datasets import (
     delete_dataset_by_id,
     delete_dataset_rows_by_ids,
     get_dataset_metadata_by_id,
+    get_dataset_rows_by_id,
     get_datasets_metadata,
     replace_dataset_content_by_dataset_id,
     update_dataset_name_by_id,
@@ -14,6 +15,7 @@ from assay.services.stats import run_z_test
 __all__ = [
     "get_datasets_metadata",
     "get_dataset_metadata_by_id",
+    "get_dataset_rows_by_id",
     "run_z_test",
     "update_dataset_name_by_id",
     "update_dataset_rows_by_id",

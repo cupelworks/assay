@@ -1,11 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.schemas import DataRowInfo, DataSetInfo, DataSetRowToUpdate, DataSetRowUpdatedData
+from assay.schemas import DataRowInfo, DataSetInfo, DataSetRow, DataSetRowUpdatedData
 from assay.services.datasets._common import _get_rows_or_404
 
 
 async def update_dataset_rows_by_id(
-        request: list[DataSetRowToUpdate],
+        request: list[DataSetRow],
         session: AsyncSession) -> DataSetRowUpdatedData:
     """Orchestrates row update: validates IDs, mutates attributes, commits, and returns the result.
 
