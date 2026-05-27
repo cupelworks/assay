@@ -8,6 +8,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from assay.models.base import Base
+from assay.models.datasets import DatasetRowModel
 
 if TYPE_CHECKING:
     from assay.models.stats import StatisticalVerificationModel
@@ -48,46 +49,36 @@ class TestTypesModel(Base):
                                                  default=lambda: datetime.now().astimezone())
 
 
-class PendingTestModel(Base):
-    """A test queued for execution — holds the input and the metrics to evaluate."""
+class TestRunModel(Base):
+    """An evaluation run of a dataset row — tracks metric scoring lifecycle."""
 
-    __tablename__ = "pending_tests"
+    __tablename__ = "test_runs"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    input: Mapped[str] = mapped_column(Text)
-    expected_output: Mapped[str] = mapped_column(Text)
-    model_output: Mapped[str] = mapped_column(Text)
-    # Metric names to compute (e.g. ["rouge", "bertscore"]).
-    metrics: Mapped[list] = mapped_column(JSON, default=list)
-    status: Mapped[TestStatus] = mapped_column(SAEnum(TestStatus), default=TestStatus.pending)
+
+    # Source of truth for input/expected_output/model_output
+    dataset_row_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("dataset_rows.id"), nullable=True, index=True
+    )
+    dataset_row: Mapped["DatasetRowModel | None"] = relationship()
+
+    # Which test types to run
+    test_type_ids: Mapped[list] = mapped_column(JSON, default=list)
+
+    # Lifecycle
+    status: Mapped[TestStatus] = mapped_column(
+        SAEnum(TestStatus), default=TestStatus.pending, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )
 
-    result: Mapped["ExecutedTestModel | None"] = relationship(
-        back_populates="pending_test", uselist=False
-    )
+    # Results — populated on completion
+    scores: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-
-class ExecutedTestModel(Base):
-    """The outcome of a completed test — actual output and per-metric scores."""
-
-    __tablename__ = "executed_tests"
-
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    pending_test_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("pending_tests.id"), index=True
-    )
-    actual_output: Mapped[str] = mapped_column(Text)
-    # {metric_name: score} — e.g. {"rouge": 0.81, "bertscore": 0.74}
-    scores: Mapped[dict] = mapped_column(JSON, default=dict)
-    latency_ms: Mapped[float | None] = mapped_column(Float)
-    error: Mapped[str | None] = mapped_column(Text)
-    executed_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
-    )
-
-    pending_test: Mapped["PendingTestModel"] = relationship(back_populates="result")
     statistical_verifications: Mapped[list["StatisticalVerificationModel"]] = relationship(
-        back_populates="executed_test", cascade="all, delete-orphan"
+        back_populates="test_run", cascade="all, delete-orphan"
     )

@@ -9,10 +9,10 @@ from assay.models.base import Base
 
 # Imported only during static analysis (Pyright/mypy), never at runtime.
 # Avoids a circular import: stats.py → test.py → stats.py.
-# At runtime, SQLAlchemy resolves "ExecutedTestModel" from its own mapper registry
+# At runtime, SQLAlchemy resolves "TestRunModel" from its own mapper registry
 # (populated when models/__init__.py imports both modules), so no Python import is needed.
 if TYPE_CHECKING:
-    from assay.models.test import ExecutedTestModel
+    from assay.models.test import TestRunModel
 
 
 class StatisticalVerificationModel(Base):
@@ -22,7 +22,7 @@ class StatisticalVerificationModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     executed_test_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("executed_tests.id"), index=True, nullable=True
+        ForeignKey("test_runs.id"), index=True, nullable=True
     )
     # The metric these scores belong to (e.g. "rouge").
     metric: Mapped[str] = mapped_column(String(255))
@@ -39,6 +39,6 @@ class StatisticalVerificationModel(Base):
         DateTime, default=lambda: datetime.now().astimezone()
     )
 
-    executed_test: Mapped["ExecutedTestModel"] = relationship(
+    test_run: Mapped["TestRunModel"] = relationship(
         back_populates="statistical_verifications"
     )

@@ -3,13 +3,16 @@
 from assay.models.base import Base
 from assay.models.datasets import DatasetModel, DatasetRowModel
 from assay.models.stats import StatisticalVerificationModel
-from assay.models.test import ExecutedTestModel, PendingTestModel
+from assay.models.test import TestRunModel, TestStatus, TestTypes, TestTypesCost, TestTypesModel
 
 __all__ = [
     "Base",
     "DatasetModel",
     "DatasetRowModel",
-    "ExecutedTestModel",
-    "PendingTestModel",
     "StatisticalVerificationModel",
+    "TestRunModel",
+    "TestStatus",
+    "TestTypes",
+    "TestTypesCost",
+    "TestTypesModel",
 ]
