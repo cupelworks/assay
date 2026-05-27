@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,10 +14,38 @@ if TYPE_CHECKING:
 
 
 class TestStatus(StrEnum):
-    pending = "pending"
-    running = "running"
-    completed = "completed"
-    failed = "failed"
+    pending = "Pending"
+    running = "Running"
+    completed = "Completed"
+    failed = "Failed"
+
+
+class TestTypes(StrEnum):
+    deterministic = "Deterministic"
+    nlp_metric = "NLP Metric"
+    llm_as_judge = "LLM-As-Judge"
+
+
+class TestTypesCost(StrEnum):
+    very_fast = "Free & Lightning Fast"
+    fast = "Free & Fast"
+    expensive = "Expensive & Slow"
+
+
+class TestTypesModel(Base):
+    __tablename__ = "test_types"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    category: Mapped[str] = mapped_column(SAEnum(TestTypes), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    best_for: Mapped[str] = mapped_column(Text, nullable=True)
+    cost: Mapped[str] = mapped_column(SAEnum(TestTypesCost), nullable=True)
+    limitations: Mapped[str] = mapped_column(Text, nullable=True)
+    required_reference: Mapped[bool] = mapped_column(Boolean, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=True,
+                                                 default=lambda: datetime.now().astimezone())
 
 
 class PendingTestModel(Base):
