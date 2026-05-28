@@ -26,15 +26,23 @@ if TYPE_CHECKING:
 #      dataset row it may have originated from. The dataset_row_id is kept only
 #      for traceability (e.g. computing dataset coverage), never for data sync.
 #
+#      Test types are assigned via TestTypeAssignmentModel, a junction table
+#      that references TestTypesModel by name rather than UUID, making
+#      assignments stable against table rebuilds and human-readable in the DB.
+#
 #   2. TEST SET (TestSetModel + TestSetEntryModel)
 #      A named, ordered collection of tests. When a test is added to a test set,
 #      a snapshot (TestSetEntryModel) is created at that exact moment — copying
-#      input, expected_output, and test_type_ids from the live TestModel. From
+#      input, expected_output, and test_type_names from the live TestModel. From
 #      that point on, the snapshot is immutable: changes to the live test do NOT
 #      propagate into the set. This mirrors the behavior of test management
 #      tools like Jira/Zephyr, where a test set represents a stable, auditable
 #      baseline. The live TestModel remains editable and can be snapshotted again
 #      into the same or different test sets at any time.
+#
+#      Test type names (not UUIDs) are stored in the snapshot as a JSON list of
+#      strings. This keeps the snapshot self-contained and human-readable, and
+#      consistent with the name-based FK used in TestTypeAssignmentModel.
 #
 #   3. TEST PLAN (TestPlanModel + TestPlanEntryModel)
 #      A named collection of test sets to be executed together as a campaign.
@@ -90,6 +98,7 @@ if TYPE_CHECKING:
 #
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestStatus(StrEnum):
     pending = "Pending"
     running = "Running"
@@ -119,13 +128,12 @@ class TestTypesModel(Base):
     user choose the right one (cost, limitations, whether a reference output is
     required).
 
-    Tests reference test types via a JSON list of IDs (test_type_ids) rather
-    than a junction table. This is a deliberate simplification: test type
-    selection is treated as lightweight configuration, not a relational concern.
-    If querying "all tests using type X" becomes a frequent need, migrating to
-    a proper junction table should be considered.
+    Tests assign test types via TestTypeAssignmentModel, a junction table that
+    references this model by name rather than UUID. This keeps assignments
+    stable if the table is ever reseeded — name is the stable, human-readable
+    identifier, while id is internal only.
     """
-    
+
     __tablename__ = "test_types"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -138,8 +146,9 @@ class TestTypesModel(Base):
     # If True, the test type requires an expected_output to function correctly.
     required_reference: Mapped[bool] = mapped_column(Boolean, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=True,
-                                                 default=lambda: datetime.now().astimezone())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=True, default=lambda: datetime.now().astimezone()
+    )
 
 
 class TestModel(Base):
@@ -156,6 +165,12 @@ class TestModel(Base):
     When added to a TestSetModel, a frozen snapshot (TestSetEntryModel) is
     created from the test's current state. The live TestModel continues to
     be editable and can be snapshotted multiple times into different sets.
+
+    Test types are assigned via TestTypeAssignmentModel, a junction table that
+    references TestTypesModel by name rather than UUID. This makes the
+    assignment stable against table rebuilds and human-readable in the DB.
+    The convenience relationship test_types allows direct access to the full
+    TestTypesModel records without going through the junction manually.
 
     A test can also be run directly (standalone), without being part of any
     set or plan, via a TestRunModel with test_id set and test_set_entry_id
@@ -176,17 +191,23 @@ class TestModel(Base):
 
     name: Mapped[str] = mapped_column(Text, nullable=False)
     input: Mapped[str] = mapped_column(Text)
-    expected_output: Mapped[str] = mapped_column(Text)
-    model_output: Mapped[str] = mapped_column(Text)
-    # List of TestTypesModel UUIDs to run against this test.
-    # TODO: not the best idea putting the test types all together in a JSON list.
-    #   If querying tests by type becomes necessary, replace with a junction table.
-    test_type_ids: Mapped[list] = mapped_column(JSON, default=list)
+    expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Junction-based test type assignments — queryable relationally.
+    # Use test_types for convenient access to the full TestTypesModel records,
+    # or test_type_assignments if you need to work with the junction directly.
+    test_type_assignments: Mapped[list["TestTypeAssignmentModel"]] = relationship(
+        back_populates="test"
+    )
+    test_types: Mapped[list["TestTypesModel"]] = relationship(secondary="test_type_assignments")
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )
 
     # All snapshots of this test across every test set it has been added to.
+    # Navigate via set_entries → runs to retrieve the full execution history.
     set_entries: Mapped[list["TestSetEntryModel"]] = relationship(back_populates="test")
 
     # Standalone runs only — set-based runs are accessed via set_entries → runs.
@@ -194,6 +215,29 @@ class TestModel(Base):
         back_populates="test",
         foreign_keys="TestRunModel.test_id"
     )
+
+
+class TestTypeAssignmentModel(Base):
+    """
+    Junction record assigning a test type to a TestModel.
+
+    Uses test_type_name (the unique name from TestTypesModel) as the FK rather
+    than the UUID. This makes assignments stable against table rebuilds and
+    keeps the data human-readable directly in the DB — if test_types is
+    reseeded with new UUIDs, no assignment records need to be updated.
+
+    The composite primary key (test_id, test_type_name) naturally enforces
+    uniqueness — a test type can only be assigned once per test.
+    """
+
+    __tablename__ = "test_type_assignments"
+
+    test_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tests.id"), primary_key=True)
+    # References TestTypesModel.name — stable, human-readable, unique.
+    test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), primary_key=True)
+
+    test: Mapped["TestModel"] = relationship(back_populates="test_type_assignments")
+    test_type: Mapped["TestTypesModel"] = relationship()
 
 
 class TestSetModel(Base):
@@ -226,8 +270,13 @@ class TestSetEntryModel(Base):
     An immutable snapshot of a TestModel at the moment it was added to a TestSetModel.
 
     This is the frozen record that test set executions run against. It captures
-    input, expected_output, and test_type_ids exactly as they were at snapshot
+    input, expected_output, and test_type_names exactly as they were at snapshot
     time. Subsequent edits to the originating TestModel have no effect here.
+
+    Test type names (not UUIDs) are stored as a JSON list of strings. This keeps
+    the snapshot self-contained and human-readable, and consistent with the
+    name-based FK used in TestTypeAssignmentModel. The service layer populates
+    this by copying [tt.name for tt in test.test_types] at snapshot time.
 
     The test_id FK is kept for traceability — it allows navigating from a
     snapshot back to the current live test — but it is never used to pull or
@@ -252,7 +301,9 @@ class TestSetEntryModel(Base):
     # Immutable snapshot fields — copied from TestModel at inclusion time.
     input: Mapped[str] = mapped_column(Text, nullable=False)
     expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
-    test_type_ids: Mapped[list] = mapped_column(JSON, default=list)
+    # Snapshot of test type names at inclusion time — stored as strings, not
+    # UUIDs, for human-readability and resilience against table rebuilds.
+    test_type_names: Mapped[list[str]] = mapped_column(JSON, default=list)
     snapshot_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )

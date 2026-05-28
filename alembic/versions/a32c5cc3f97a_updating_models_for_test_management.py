@@ -37,13 +37,18 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_test_runs_dataset_row_id'), ['dataset_row_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_test_runs_status'), ['status'], unique=False)
 
-    # Fix statistical_verifications BEFORE dropping executed_tests
+    # Fix statistical_verifications BEFORE dropping executed_tests.
+    # Using add+drop instead of rename so the unnamed FK to executed_tests
+    # is dropped together with the old column, not preserved in the new schema.
     with op.batch_alter_table('statistical_verifications', schema=None) as batch_op:
-        batch_op.alter_column('executed_test_id', new_column_name='test_run_id')
+        batch_op.add_column(sa.Column('test_run_id', sa.Uuid(), nullable=True))
+        batch_op.create_index(batch_op.f('ix_statistical_verifications_test_run_id'), ['test_run_id'], unique=False)
         batch_op.create_foreign_key(
             'fk_statistical_verifications_test_run_id',
             'test_runs', ['test_run_id'], ['id']
         )
+        batch_op.drop_index(batch_op.f('ix_statistical_verifications_executed_test_id'))
+        batch_op.drop_column('executed_test_id')
 
     op.drop_table('pending_tests')
     with op.batch_alter_table('executed_tests', schema=None) as batch_op:
@@ -66,7 +71,9 @@ def downgrade() -> None:
 
     with op.batch_alter_table('statistical_verifications', schema=None) as batch_op:
         batch_op.drop_constraint('fk_statistical_verifications_test_run_id', type_='foreignkey')
-        batch_op.alter_column('test_run_id', new_column_name='executed_test_id')
+        batch_op.add_column(sa.Column('executed_test_id', sa.Uuid(), nullable=True))
+        batch_op.create_index(batch_op.f('ix_statistical_verifications_executed_test_id'), ['executed_test_id'], unique=False)
+        batch_op.drop_column('test_run_id')
 
     op.create_table('executed_tests',
     sa.Column('id', sa.CHAR(length=32), nullable=False),
