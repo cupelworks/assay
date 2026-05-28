@@ -409,7 +409,7 @@ class TestRunModel(Base):
     )
 
     status: Mapped[TestStatus] = mapped_column(
-        SAEnum(TestStatus), create_constraint=True, default=TestStatus.pending, index=True
+        SAEnum(TestStatus, create_constraint=True), default=TestStatus.pending, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()

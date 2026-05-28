@@ -19,8 +19,6 @@ from assay.schemas import (
     DataSetRowUpdatedData,
     PaginatedDataSetResponse,
     PaginatedDataSetRowResponse,
-    ZTestRequest,
-    ZTestResult,
 )
 from assay.services import (
     delete_dataset_by_id,
@@ -29,53 +27,20 @@ from assay.services import (
     get_dataset_rows_by_id,
     get_datasets_metadata,
     replace_dataset_content_by_dataset_id,
-    run_z_test,
     update_dataset_name_by_id,
     update_dataset_rows_by_id,
     upload_dataset_via_path,
     upload_new_rows_in_existing_dataset,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["dataset"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-
-@router.get("/health", tags=["meta"])
-def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@router.post(
-    path="/statistical-tests/z-test",
-    tags=["analysis"],
-    response_model=ZTestResult,
-)
-async def z_test(request: ZTestRequest, session: SessionDep) -> ZTestResult: # pragma: no cover
-    """One-sample z-test for metric score distributions.
-
-    Tests whether the population mean of `scores` is statistically different from
-    `threshold` at the given significance level (`alpha`).
-
-    Typical use: pass 100 ROUGE scores and a minimum quality threshold — the
-    response tells you whether the difference is statistically significant or
-    could be due to chance.
-
-    **Interpretation**
-    - `passed: true` — reject H0; sufficient evidence the true mean clears the threshold.
-    - `p_value` — probability of observing this result if H0 were true; lower is stronger evidence.
-    - `confidence_interval` — two-sided (1 - alpha) CI for the true population mean.
-
-    **Note:** reliable for n ≥ 30. For smaller samples the t-distribution would be more appropriate.
-    """
-
-    return await run_z_test(request, session)
 
 
 @router.get(
     path="/datasets",
     responses={},
-    tags=["dataset"],
     response_model=PaginatedDataSetResponse,
 )
 async def get_all_datasets_metadata(
@@ -110,7 +75,6 @@ async def get_all_datasets_metadata(
             },
         },
     },
-    tags=["dataset"],
     response_model=DataSetMetadata,
 )
 async def get_dataset_metadata(
@@ -141,7 +105,6 @@ async def get_dataset_metadata(
             },
         },
     },
-    tags=["dataset"],
     response_model=PaginatedDataSetRowResponse,
 )
 async def get_dataset_rows(
@@ -155,7 +118,7 @@ async def get_dataset_rows(
     Use `offset` and `limit` to page through results. The response includes the total
     number of rows so the client can calculate the number of pages.
     """
-    
+
     return await get_dataset_rows_by_id(dataset_id, session, offset, limit)
 
 
@@ -211,12 +174,11 @@ async def get_dataset_rows(
             },
         },
     },
-    tags=["dataset"],
     response_model=DataSetImportViaPathResponse,
 )
 async def create_dataset_from_path(
         request: DataSetImportViaPathRequest,
-        session: SessionDep): # pragma: no cover
+        session: SessionDep):  # pragma: no cover
     """Load a dataset from a local `.jsonl` file and persist it as a Dataset with its rows.
 
     Each line must be a valid JSON object matching the dataset schema (`prompt`, `model_output`,
@@ -260,7 +222,6 @@ async def create_dataset_from_path(
             },
         },
     },
-    tags=["dataset"],
     response_model=DataSetImportedData,
 )
 async def add_dataset_rows(
@@ -306,10 +267,9 @@ async def add_dataset_rows(
             },
         },
     },
-    tags=["dataset"],
     response_model=DataSetInfo,
 )
-async def update_dataset_name(request: DataSetInfo, session: SessionDep): # pragma: no cover
+async def update_dataset_name(request: DataSetInfo, session: SessionDep):  # pragma: no cover
     """Rename a dataset by its ID.
 
     The request body must include both the dataset `id` and the desired `name`.
@@ -337,7 +297,6 @@ async def update_dataset_name(request: DataSetInfo, session: SessionDep): # prag
             },
         },
     },
-    tags=["dataset"],
     response_model=DataSetRowUpdatedData,
 )
 async def update_dataset_rows(
@@ -370,7 +329,6 @@ async def update_dataset_rows(
             },
         },
     },
-    tags=["dataset"],
     response_model=DataSetImportedData,
 )
 async def replace_dataset_content(
@@ -404,7 +362,6 @@ async def replace_dataset_content(
             },
         },
     },
-    tags=["dataset"],
     response_model=DataSetDeletedData,
 )
 async def delete_dataset(request: DataSetID, session: SessionDep):  # pragma: no cover
@@ -436,7 +393,6 @@ async def delete_dataset(request: DataSetID, session: SessionDep):  # pragma: no
             },
         },
     },
-    tags=["dataset"],
     response_model=DataSetDeletedData,
 )
 async def delete_dataset_rows(  # pragma: no cover
