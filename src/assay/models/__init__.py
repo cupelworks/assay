@@ -16,12 +16,16 @@ from assay.models.test import (
     TestTypesCost,
     TestTypesModel,
 )
+from assay.schemas.tests import CreateTestCaseRequest, CreateTestCaseResponse, TestCaseID
 
 __all__ = [
     "Base",
+    "CreateTestCaseRequest",
+    "CreateTestCaseResponse",
     "DatasetModel",
     "DatasetRowModel",
     "StatisticalVerificationModel",
+    "TestCaseID",
     "TestModel",
     "TestPlanEntryModel",
     "TestPlanModel",
