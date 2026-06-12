@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field
 
 
 class CreateTestCaseRequest(BaseModel):
-    name: str | None = Field(
-        None,
+    name: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
         description="Name of test case",
     )
     input: str = Field(

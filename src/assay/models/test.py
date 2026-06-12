@@ -200,7 +200,10 @@ class TestModel(Base):
     test_type_assignments: Mapped[list["TestTypeAssignmentModel"]] = relationship(
         back_populates="test"
     )
-    test_types: Mapped[list["TestTypesModel"]] = relationship(secondary="test_type_assignments")
+    test_types: Mapped[list["TestTypesModel"]] = relationship(
+        secondary="test_type_assignments",
+        overlaps="test_type_assignments",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
@@ -236,8 +239,9 @@ class TestTypeAssignmentModel(Base):
     # References TestTypesModel.name — stable, human-readable, unique.
     test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), primary_key=True)
 
-    test: Mapped["TestModel"] = relationship(back_populates="test_type_assignments")
-    test_type: Mapped["TestTypesModel"] = relationship()
+    test: Mapped["TestModel"] = relationship(back_populates="test_type_assignments",
+                                             overlaps="test_types")
+    test_type: Mapped["TestTypesModel"] = relationship(viewonly=True)
 
 
 class TestSetModel(Base):

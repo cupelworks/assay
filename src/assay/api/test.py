@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
-from assay.models import TestModel
 from assay.schemas.tests import CreateTestCaseRequest, CreateTestCaseResponse
+from assay.services import create_new_test
 
 router = APIRouter(tags=["test"])
 
@@ -14,20 +14,39 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 @router.post(
     path="/tests",
-    responses={},
-    # response_model=CreateTestCaseResponse,
+    responses={
+        200: {
+            "description": "Test case created successfully.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                        "name": "My test case",
+                        "input": "Summarise this article in one sentence.",
+                        "expected_output": "A concise one-sentence summary.",
+                        "model_output": None,
+                    }
+                }
+            },
+        },
+    },
+    response_model=CreateTestCaseResponse,
 )
 async def create_test_manually(
-        request: CreateTestCaseRequest, 
-        session: SessionDep): # pragma: no cover
+        request: CreateTestCaseRequest,
+        session: SessionDep) -> CreateTestCaseResponse:  # pragma: no cover
+    """Create a new test case manually.
 
-    session.add(
-        TestModel(
-            name=request.name,
-            input=request.input,
-            model_output=request.model_output,
-            expected_output=request.expected_output,
-        )
-    )
-    await session.commit()
-    ...
+    Persists a single test definition with its input and optional reference outputs.
+    The test is immediately available for standalone execution or inclusion in a test set.
+
+    `name` defaults to a fresh UUID if omitted.
+    `expected_output` is required by test types that compare against a reference (e.g. NLP metrics,
+    LLM-as-judge). Leave it `null` for deterministic checks that do not need one.
+    `model_output` can be pre-populated if the model response is already known;
+    otherwise leave it `null` and it will be filled in when the test is run.
+
+    On success, returns the created test case with its generated `id` and all input fields.
+    """
+
+    return await create_new_test(request, session)
