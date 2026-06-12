@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestModel
@@ -17,6 +19,7 @@ async def create_new_test(
         The created test case with its generated ID and all input fields.
     """
     test = TestModel(
+        id=uuid.uuid4(),
         name=request.name,
         input=request.input,
         model_output=request.model_output,
