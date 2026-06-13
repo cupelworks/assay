@@ -20,6 +20,11 @@ class CreateTestCaseRequest(BaseModel):
         None,
         description="The real output of the model",
     )
+    test_type_names: list[str] = Field(
+        default_factory=list,
+        description="Names of test types to assign to "
+                    "this test case (must exist in test_types table).",
+    )
 
 
 class TestCaseID(BaseModel):

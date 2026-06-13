@@ -25,6 +25,17 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                         "input": "Summarise this article in one sentence.",
                         "expected_output": "A concise one-sentence summary.",
                         "model_output": None,
+                        "test_type_names": ["ROUGE", "BERTScore"],
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "One or more test type names are not in the catalogue.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Unknown test types: {'Invalid Type'}"
                     }
                 }
             },
@@ -45,6 +56,8 @@ async def create_test_manually(
     LLM-as-judge). Leave it `null` for deterministic checks that do not need one.
     `model_output` can be pre-populated if the model response is already known;
     otherwise leave it `null` and it will be filled in when the test is run.
+    `test_type_names` is an optional list of evaluation strategies to assign. Each name must exist
+    in the test types catalogue — a 422 is returned if any name is unrecognized.
 
     On success, returns the created test case with its generated `id` and all input fields.
     """
