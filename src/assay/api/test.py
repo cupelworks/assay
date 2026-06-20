@@ -19,7 +19,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 @router.post(
-    path="/tests",
+    path=".tests",
     responses={
         200: {
             "description": "Test case created successfully.",
