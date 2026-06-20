@@ -139,6 +139,8 @@ async def create_test_from_dataset(
     `test_type_names` is an optional list of evaluation strategies to assign. Each name must exist
     in the test types catalogue — a 422 is returned if any name is unrecognized.
 
+    Returns a 404 if the dataset does not exist or has no rows.
+
     Returns the dataset ID and the IDs of all created test cases.
     """
 
