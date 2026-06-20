@@ -17,13 +17,21 @@ from assay.schemas.datasets import (
     Pagination,
 )
 from assay.schemas.stats import ZTestRequest, ZTestResult
-from assay.schemas.tests import CreateTestCaseRequest, CreateTestCaseResponse, TestCaseID
+from assay.schemas.tests import (
+    CreateTestCaseFromDatasetRequest,
+    CreateTestCaseFromDatasetResponse,
+    CreateTestCaseRequest,
+    CreateTestCaseResponse,
+    TestCaseID,
+)
 
 __all__ = [
     "ZTestRequest",
     "ZTestResult",
     "CreateTestCaseRequest",
     "CreateTestCaseResponse",
+    "CreateTestCaseFromDatasetRequest",
+    "CreateTestCaseFromDatasetResponse",
     "DataSetInfo",
     "DataRowInfo",
     "DataSetImportViaPathRequest",

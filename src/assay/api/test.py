@@ -4,8 +4,14 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
-from assay.schemas.tests import CreateTestCaseRequest, CreateTestCaseResponse
+from assay.schemas import CreateTestCaseFromDatasetResponse, DataSetID
+from assay.schemas.tests import (
+    CreateTestCaseFromDatasetRequest,
+    CreateTestCaseRequest,
+    CreateTestCaseResponse,
+)
 from assay.services import create_new_test
+from assay.services.tests import create_new_test_from_dataset
 
 router = APIRouter(tags=["test"])
 
@@ -63,3 +69,77 @@ async def create_test_manually(
     """
 
     return await create_new_test(request, session)
+
+
+@router.post(
+    path="/tests/from-dataset",
+    responses={
+        200: {
+            "description": "Test cases created successfully for every row in the dataset.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                        "test_cases": [
+                            {"id": "11111111-1111-1111-1111-111111111111"},
+                            {"id": "22222222-2222-2222-2222-222222222222"},
+                        ],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "Dataset not found, or the dataset has no rows.",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "dataset_not_found": {
+                            "summary": "Dataset not found",
+                            "value": {
+                                "detail": (
+                                    "Dataset with id"
+                                    " a1b2c3d4-e5f6-7890-abcd-ef1234567890 not found"
+                                )
+                            },
+                        },
+                        "no_rows": {
+                            "summary": "Dataset has no rows",
+                            "value": {
+                                "detail": (
+                                    "No Dataset Rows were found with dataset id"
+                                    " a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                                )
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "One or more test type names are not in the catalogue.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Unknown test types: {'Invalid Type'}"
+                    }
+                }
+            },
+        },
+    },
+    response_model=CreateTestCaseFromDatasetResponse,
+)
+async def create_test_from_dataset(
+        request: CreateTestCaseFromDatasetRequest,
+        session: SessionDep) -> CreateTestCaseFromDatasetResponse:  # pragma: no cover
+    """Create test cases in bulk from all rows of an existing dataset.
+
+    Each row in the dataset becomes a separate test case. All created tests share
+    the same optional list of evaluation strategies (`test_type_names`).
+
+    `test_type_names` is an optional list of evaluation strategies to assign. Each name must exist
+    in the test types catalogue — a 422 is returned if any name is unrecognized.
+
+    Returns the dataset ID and the IDs of all created test cases.
+    """
+
+    return await create_new_test_from_dataset(request, session)

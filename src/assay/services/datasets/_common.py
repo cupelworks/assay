@@ -33,6 +33,33 @@ async def _get_dataset_or_404(dataset_id: uuid.UUID, session: AsyncSession) -> D
     return dataset
 
 
+async def _get_all_rows_or_404(
+        dataset_id: uuid.UUID,
+        session: AsyncSession,) -> list[DatasetRowModel]:
+    """Fetch all rows associated with a dataset or raise 404.
+
+    Args:
+        dataset_id: UUID of the parent dataset.
+        session: Active async database session.
+
+    Returns:
+        List of all `DatasetRowModel` instances belonging to the dataset.
+
+    Raises:
+        HTTPException: 404 if no rows are found for the given dataset ID.
+    """
+    rows = list((await session.scalars(
+        select(DatasetRowModel)
+        .where(DatasetRowModel.dataset_id == dataset_id)
+    )).all())
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No Dataset Rows were found with dataset id {dataset_id}",
+        )
+    return rows
+
+
 async def _get_rows_or_404(
         row_ids: list[uuid.UUID],
         session: AsyncSession) -> list[DatasetRowModel]:

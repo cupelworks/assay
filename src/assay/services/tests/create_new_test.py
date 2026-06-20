@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
 from assay.models import TestModel, TestTypeAssignmentModel, TestTypesModel
-from assay.schemas import CreateTestCaseRequest, CreateTestCaseResponse
+from assay.schemas import (
+    CreateTestCaseFromDatasetRequest,
+    CreateTestCaseFromDatasetResponse,
+    CreateTestCaseRequest,
+    CreateTestCaseResponse,
+    TestCaseID,
+)
+from assay.services.datasets._common import _get_all_rows_or_404, _get_dataset_or_404
 
 
 async def create_new_test(
@@ -55,6 +62,63 @@ async def create_new_test(
         model_output=test.model_output,
         expected_output=test.expected_output,
         test_type_names=request.test_type_names,
+    )
+
+
+async def create_new_test_from_dataset(
+        request: CreateTestCaseFromDatasetRequest,
+        session: AsyncSession) -> CreateTestCaseFromDatasetResponse:
+    """Create test cases in bulk from all rows of an existing dataset.
+
+    Args:
+        request: Dataset ID and optional list of test type names to assign.
+        session: Active async database session.
+
+    Returns:
+        `CreateTestCaseFromDatasetResponse` with the dataset ID and the IDs of all created tests.
+
+    Raises:
+        HTTPException: 404 if the dataset or its rows are not found.
+        HTTPException: 422 if any test type name is not in the catalogue.
+    """
+    await _get_dataset_or_404(request.id, session)
+    rows = await _get_all_rows_or_404(request.id, session)
+    
+    if request.test_type_names:
+        await _validate_test_type_name(session, request.test_type_names)
+        
+    tests = [
+        TestModel(
+            id=uuid.uuid4(),
+            dataset_row_id=row.id,
+            name=str(uuid.uuid4()),
+            input=row.input,
+            model_output=row.model_output,
+            expected_output=row.expected_output,
+        )
+        for row in rows
+    ]
+
+    test_types = [
+        TestTypeAssignmentModel(
+            test_id=test.id,
+            test_type_name=test_type_name
+        )
+        for test in tests for test_type_name in request.test_type_names
+    ]
+
+    session.add_all(tests)
+    session.add_all(test_types)
+    await session.commit()
+
+    return CreateTestCaseFromDatasetResponse(
+        test_cases=[
+            TestCaseID(
+                id=test.id
+            )
+            for test in tests
+        ],
+        id=request.id
     )
 
 

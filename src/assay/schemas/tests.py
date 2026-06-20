@@ -2,6 +2,8 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+from assay.schemas import DataSetID
+
 
 class CreateTestCaseRequest(BaseModel):
     name: str = Field(
@@ -25,6 +27,14 @@ class CreateTestCaseRequest(BaseModel):
         description="Names of test types to assign to "
                     "this test case (must exist in test_types table).",
     )
+    
+
+class CreateTestCaseFromDatasetRequest(DataSetID):
+    test_type_names: list[str] = Field(
+        default_factory=list,
+        description="Names of test types to assign to "
+        "this test case (must exist in test_types table).",
+    )
 
 
 class TestCaseID(BaseModel):
@@ -36,3 +46,7 @@ class TestCaseID(BaseModel):
 
 class CreateTestCaseResponse(TestCaseID, CreateTestCaseRequest):
     pass
+
+
+class CreateTestCaseFromDatasetResponse(DataSetID):
+    test_cases: list[TestCaseID]
