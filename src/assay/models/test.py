@@ -198,7 +198,8 @@ class TestModel(Base):
     # Use test_types for convenient access to the full TestTypesModel records,
     # or test_type_assignments if you need to work with the junction directly.
     test_type_assignments: Mapped[list["TestTypeAssignmentModel"]] = relationship(
-        back_populates="test"
+        back_populates="test",
+        cascade="all, delete-orphan",
     )
     test_types: Mapped[list["TestTypesModel"]] = relationship(
         secondary="test_type_assignments",
@@ -235,7 +236,8 @@ class TestTypeAssignmentModel(Base):
 
     __tablename__ = "test_type_assignments"
 
-    test_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tests.id"), primary_key=True)
+    test_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tests.id", ondelete="CASCADE"),
+                                               primary_key=True,)
     # References TestTypesModel.name — stable, human-readable, unique.
     test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), primary_key=True)
 

@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
-from assay.schemas import CreateTestCaseFromDatasetResponse, DataSetID
+from assay.schemas import CreateTestCaseFromDatasetResponse
 from assay.schemas.tests import (
     CreateTestCaseFromDatasetRequest,
     CreateTestCaseRequest,
     CreateTestCaseResponse,
+    TestCaseID,
 )
-from assay.services import create_new_test
-from assay.services.tests import create_new_test_from_dataset
+from assay.services import create_new_test, create_new_test_from_dataset, delete_test_by_id
 
 router = APIRouter(tags=["test"])
 
@@ -19,7 +19,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 @router.post(
-    path=".tests",
+    path="/tests",
     responses={
         200: {
             "description": "Test case created successfully.",
@@ -145,3 +145,66 @@ async def create_test_from_dataset(
     """
 
     return await create_new_test_from_dataset(request, session)
+
+
+@router.delete(
+    "/tests",
+    responses={
+        200: {"description": "Test cases deleted successfully."},
+        404: {
+            "description": "One or more test case IDs were not found.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": (
+                            "Tests with ids ['a1b2c3d4-e5f6-7890-abcd-ef1234567890'] not found"
+                        )
+                    }
+                }
+            },
+        },
+        409: {
+            "description": "One or more tests are linked to a test "
+                           "set or test run and cannot be deleted.",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "linked_to_test_set": {
+                            "summary": "Test linked to a test set",
+                            "value": {
+                                "detail": (
+                                    "Tests with ids ['a1b2c3d4-e5f6-7890-abcd-ef1234567890']"
+                                    " cannot be deleted because they are linked to test sets"
+                                )
+                            },
+                        },
+                        "linked_to_test_run": {
+                            "summary": "Test linked to a test run",
+                            "value": {
+                                "detail": (
+                                    "Tests with ids ['a1b2c3d4-e5f6-7890-abcd-ef1234567890']"
+                                    " cannot be deleted because they are linked to test runs"
+                                )
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+)
+async def delete_test(
+        request: list[TestCaseID],
+        session: SessionDep) -> dict: # pragma: no cover
+    """Delete one or more test cases by ID.
+
+    Accepts a list of test case IDs and deletes them in a single bulk operation.
+
+    Returns a 404 if any of the requested IDs do not exist.
+
+    Returns a 409 if any test cannot be safely deleted:
+    - if the test is included in a test set, it must be unlinked from the set first.
+    - if the test has past execution records (test runs), those must be deleted first.
+    """
+    await delete_test_by_id(request, session)
+    return {}
