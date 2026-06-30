@@ -2,6 +2,7 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+from assay.models import Pagination
 from assay.schemas import DataSetID
 
 
@@ -50,3 +51,7 @@ class CreateTestCaseResponse(TestCaseID, CreateTestCaseRequest):
 
 class CreateTestCaseFromDatasetResponse(DataSetID):
     test_cases: list[TestCaseID]
+
+
+class PaginatedTestCases(Pagination):
+    test_cases: list[CreateTestCaseResponse]

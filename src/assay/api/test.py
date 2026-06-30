@@ -1,21 +1,69 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
-from assay.schemas import CreateTestCaseFromDatasetResponse
-from assay.schemas.tests import (
+from assay.schemas import (
     CreateTestCaseFromDatasetRequest,
+    CreateTestCaseFromDatasetResponse,
     CreateTestCaseRequest,
     CreateTestCaseResponse,
+    PaginatedTestCases,
     TestCaseID,
 )
-from assay.services import create_new_test, create_new_test_from_dataset, delete_test_by_id
+from assay.services import (
+    create_new_test,
+    create_new_test_from_dataset,
+    delete_test_by_id,
+    get_all_created_tests,
+)
 
 router = APIRouter(tags=["test"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.get(
+    path="/tests",
+    responses={
+        200: {
+            "description": "Paginated list of test cases.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "test_cases": [
+                            {
+                                "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                                "name": "My test case",
+                                "input": "Summarise this article in one sentence.",
+                                "expected_output": "A concise one-sentence summary.",
+                                "model_output": "A concise one-sentence summary.",
+                                "test_type_names": ["ROUGE", "BERTScore"],
+                            }
+                        ],
+                        "total": 1,
+                        "offset": 0,
+                        "limit": 100,
+                    }
+                }
+            },
+        }
+    },
+    response_model=PaginatedTestCases
+)
+async def get_all_tests(
+        session: SessionDep,
+        offset: int = Query(default=0, description="Number of records to skip."),
+        limit: int = Query(default=100, description="Maximum number of records to return."),
+) -> PaginatedTestCases: # pragma: no cover
+    """Return a paginated list of all test cases.
+
+    Use `offset` and `limit` to page through results. The response always includes
+    `total` — the count of all tests in the database — so clients can determine
+    whether more pages exist.
+    """
+    return await get_all_created_tests(session, offset, limit)
 
 
 @router.post(

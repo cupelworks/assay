@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations and the z-test are implemented. LLM-as-judge evaluators and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, and test case management (create, list, delete) are implemented. LLM-as-judge evaluators, test sets, test plans, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -15,6 +15,7 @@ Active development. Dataset CRUD operations and the z-test are implemented. LLM-
 - **Alembic** for schema migrations
 - **aiosqlite** — async SQLite driver (local dev)
 - **asyncpg** — async PostgreSQL driver (production)
+- **Prometheus FastAPI Instrumentator** — request metrics at `GET /metrics`
 
 ## Quickstart
 
@@ -42,11 +43,16 @@ Then open <http://127.0.0.1:8000/docs> for the interactive OpenAPI UI.
 src/assay/
 ├── main.py              # FastAPI app factory
 ├── config.py            # Pydantic settings (reads ASSAY_* env vars)
-├── db.py                # Async SQLAlchemy engine and session dependency
-├── api.py               # HTTP routes
+├── db.py                # Async SQLAlchemy engine, session dependency, SQLite FK pragma
+├── api/                 # HTTP routes — one file per domain
+│   ├── datasets.py      # Dataset endpoints
+│   ├── test.py          # Test case endpoints
+│   ├── stats.py         # Statistical test endpoints
+│   └── meta.py          # Health check
 ├── schemas/             # Pydantic models — API validation and serialization
 │   ├── __init__.py      # Re-exports all public models
 │   ├── datasets.py      # Dataset and row schemas
+│   ├── tests.py         # Test case schemas (CreateTestCaseRequest, PaginatedTestCases, etc.)
 │   └── stats.py         # ZTestRequest, ZTestResult
 ├── services/            # Business logic — one file per operation
 │   ├── datasets/
@@ -60,15 +66,56 @@ src/assay/
 │   │   ├── update_dataset_rows.py
 │   │   ├── delete_full_dataset.py
 │   │   └── delete_dataset_rows.py
+│   ├── tests/
+│   │   ├── _common.py                  # Shared helpers (_find_all_tests_or_404)
+│   │   ├── create_new_test.py          # Manual creation and bulk creation from dataset
+│   │   ├── get_tests.py                # Paginated listing
+│   │   └── delete_test.py              # Bulk delete with referential integrity checks
 │   └── stats.py         # run_z_test
 └── models/              # SQLAlchemy ORM models — database table definitions
     ├── __init__.py
+    ├── base.py          # Shared DeclarativeBase
     ├── datasets.py      # DatasetModel, DatasetRowModel
-    └── base.py          # Shared DeclarativeBase
+    ├── stats.py         # Statistical model
+    └── test.py          # TestModel, TestSetModel, TestPlanModel, TestRunModel, and related junction tables
 alembic/                 # Alembic migration environment
 alembic.ini              # Alembic configuration (URL is read from ASSAY_DATABASE_URL at runtime)
-tests/                   # Pytest suite
+tests/                   # Pytest suite mirroring src/assay/services/
 ```
+
+## API surface
+
+### Health
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Returns `{"status": "ok"}` |
+
+### Datasets
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/datasets` | List all datasets (paginated) |
+| `GET` | `/datasets/{dataset_id}` | Retrieve metadata for a single dataset |
+| `GET` | `/datasets/{dataset_id}/rows` | List rows in a dataset (paginated) |
+| `POST` | `/upload-dataset/path` | Create a dataset from a local `.jsonl` file |
+| `POST` | `/upload-dataset/upload-dataset-rows` | Append rows to an existing dataset |
+| `PUT` | `/update-dataset` | Replace all rows in a dataset |
+| `PATCH` | `/update-dataset/name` | Rename a dataset |
+| `PATCH` | `/update-dataset/rows` | Update existing rows by ID |
+| `DELETE` | `/delete-dataset` | Delete a dataset and all its rows |
+| `DELETE` | `/delete-dataset/delete-dataset-rows` | Delete specific rows by ID |
+
+### Test cases
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/tests` | List all test cases (paginated, includes total count) |
+| `POST` | `/tests` | Create a single test case manually |
+| `POST` | `/tests/from-dataset` | Bulk-create test cases from all rows in a dataset |
+| `DELETE` | `/tests` | Delete test cases by ID (guards against linked test sets and test runs) |
+
+### Statistical tests
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/statistical-tests/z-test` | One-sample z-test for metric score distributions |
 
 ## Database
 
@@ -80,6 +127,8 @@ The database URL is controlled by `ASSAY_DATABASE_URL`. No code changes are need
 | Production | `postgresql+asyncpg://user:pass@host:5432/assay` |
 
 Copy `.env.example` to `.env` and set the variable there for local development.
+
+SQLite foreign key enforcement is enabled automatically on every connection via a `PRAGMA foreign_keys=ON` hook in `db.py`. This is required for `ON DELETE CASCADE` to work in SQLite.
 
 ### Migrations
 
@@ -96,6 +145,7 @@ alembic upgrade head
 alembic revision --autogenerate -m "describe the change"
 alembic downgrade -1
 ```
+
 ## Observability
 
 Assay exposes a Prometheus-compatible scrape endpoint at `GET /metrics`. It is not listed in the OpenAPI docs (`/docs`) because it returns plain text rather than JSON, but it is active on every running instance.
@@ -138,3 +188,5 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 ## TODOs
 
 - `services/datasets/replace_dataset_content.py` — Consider what happens when a dataset row has a relationship with executed tests (cascading deletes or constraint violations on full replacement).
+- Test sets, test plans, and test runs — domain models are defined in `models/test.py` but service and API layers are not yet implemented.
+- LLM-as-judge evaluators and the broader statistics engine are stubbed.

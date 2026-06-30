@@ -22,12 +22,17 @@ from assay.schemas.tests import (
     CreateTestCaseFromDatasetResponse,
     CreateTestCaseRequest,
     CreateTestCaseResponse,
+    PaginatedTestCases,
     TestCaseID,
 )
 
 __all__ = [
     "ZTestRequest",
     "ZTestResult",
+    "CreateTestCaseRequest",
+    "CreateTestCaseResponse",
+    "PaginatedTestCases",
+    "TestCaseID",
     "CreateTestCaseRequest",
     "CreateTestCaseResponse",
     "CreateTestCaseFromDatasetRequest",
