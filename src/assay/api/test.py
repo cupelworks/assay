@@ -1,3 +1,4 @@
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -17,11 +18,56 @@ from assay.services import (
     create_new_test_from_dataset,
     delete_test_by_id,
     get_all_created_tests,
+    get_test_case_by_id,
 )
 
 router = APIRouter(tags=["test"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.get(
+    path="/tests/{test_case_id}",
+    responses={
+        200: {
+            "description": "Test case found.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                        "name": "My test case",
+                        "input": "Summarise this article in one sentence.",
+                        "expected_output": "A concise one-sentence summary.",
+                        "model_output": "A concise one-sentence summary.",
+                        "test_type_names": ["ROUGE", "BERTScore"],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "Test case not found.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test with id a1b2c3d4-e5f6-7890-abcd-ef1234567890 not found"
+                    }
+                }
+            },
+        },
+    },
+    response_model=CreateTestCaseResponse,
+)
+async def get_specific_test(
+        test_case_id: uuid.UUID,
+        session: SessionDep,
+) -> CreateTestCaseResponse: # pragma: no cover
+    """Retrieve a single test case by ID.
+
+    Returns the test case with all fields and its assigned test type names.
+
+    Returns a 404 if no test case with the given ID exists.
+    """
+    return await get_test_case_by_id(test_case_id, session)
 
 
 @router.get(

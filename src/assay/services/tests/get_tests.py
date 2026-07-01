@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -5,6 +7,7 @@ from sqlalchemy.sql.expression import select
 
 from assay.models import TestModel
 from assay.schemas import CreateTestCaseResponse, PaginatedTestCases
+from assay.services.tests._common import _find_test_by_id_or_404
 
 
 async def get_all_created_tests(
@@ -24,7 +27,8 @@ async def get_all_created_tests(
         tests in the database, and the offset and limit used for the query.
         Returns an empty item list if no tests exist.
     """
-    # selectinload eagerly fetches test_type_assignments in a second query
+    # selectinload eagerly fetches test_type_assignments in a second query,
+    # avoiding N+1 when mapping type names below.
     test_models = list((await session.scalars(
         select(TestModel).offset(offset).limit(limit)
         .options(selectinload(TestModel.test_type_assignments))
@@ -52,4 +56,35 @@ async def get_all_created_tests(
         offset=offset,
         limit=limit,
         total=total,
+    )
+
+
+async def get_test_case_by_id(
+        test_case_id: uuid.UUID,
+        session: AsyncSession,
+) -> CreateTestCaseResponse:
+    """Fetch a single test case by ID and return it as a response schema.
+
+    Args:
+        test_case_id: UUID of the test case to retrieve.
+        session: Active async database session.
+
+    Returns:
+        The matching test case with all fields and assigned test type names.
+
+    Raises:
+        HTTPException: 404 if no test case with the given ID exists.
+    """
+    test = await _find_test_by_id_or_404(test_case_id, session)
+    
+    return CreateTestCaseResponse(
+        id=test.id,
+        name=test.name,
+        input=test.input,
+        model_output=test.model_output,
+        expected_output=test.expected_output,
+        test_type_names=[
+            test_type.test_type_name
+            for test_type in test.test_type_assignments
+        ],
     )

@@ -2,7 +2,10 @@ import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
-from assay.services import get_all_created_tests
+import pytest
+from fastapi import HTTPException
+
+from assay.services import get_all_created_tests, get_test_case_by_id
 
 # --- get_all_created_tests ---
 
@@ -73,3 +76,40 @@ def test_no_test_types_returns_empty_list():
     test_cases = asyncio.run(get_all_created_tests(session))
 
     assert test_cases.test_cases[0].test_type_names == []
+
+
+# --- get_test_case_by_id ---
+
+def test_no_test_found():
+    session = AsyncMock()
+    session.scalar.return_value = None
+
+    test_id = uuid.uuid4()
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(get_test_case_by_id(test_id, session))
+
+    assert e.value.status_code == 404
+    assert str(test_id) in str(e.value.detail)
+
+
+def test_found_test_mapping():
+    mock_test = MagicMock()
+    mock_test.id = uuid.uuid4()
+    mock_test.name = "test"
+    mock_test.input = "my input"
+    mock_test.model_output = "my model output"
+    mock_test.expected_output = "my expected output"
+    mock_test.test_type_assignments = []
+
+    session = AsyncMock()
+    session.scalar.return_value = mock_test
+
+    test_case = asyncio.run(get_test_case_by_id(mock_test.id, session))
+
+    assert test_case.id == mock_test.id
+    assert test_case.name == mock_test.name
+    assert test_case.input == mock_test.input
+    assert test_case.model_output == mock_test.model_output
+    assert test_case.expected_output == mock_test.expected_output
+    assert test_case.test_type_names == []

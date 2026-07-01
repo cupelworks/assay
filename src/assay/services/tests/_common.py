@@ -3,6 +3,7 @@ import uuid
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from starlette import status
 
 from assay.models import TestModel
@@ -34,3 +35,33 @@ async def _find_all_tests_or_404(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Tests with ids {[str(test_id) for test_id in difference]} not found",
         )
+
+
+async def _find_test_by_id_or_404(
+        test_id: uuid.UUID,
+        session: AsyncSession
+):
+    """Fetch a single test case by ID, eagerly loading its type assignments, or raise 404.
+
+    Args:
+        test_id: UUID of the test case to fetch.
+        session: Active async database session.
+
+    Returns:
+        The matching TestModel with test_type_assignments already loaded.
+
+    Raises:
+        HTTPException: 404 if no test with the given ID exists.
+    """
+    found = await session.scalar(
+        select(TestModel).where(TestModel.id == test_id)
+        .options(selectinload(TestModel.test_type_assignments))
+    )
+    
+    if not found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Test with id {str(test_id)} not found",
+        )
+
+    return found
