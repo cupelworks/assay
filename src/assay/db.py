@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from assay.config import settings
@@ -10,6 +11,14 @@ engine = create_async_engine(
     # Echo SQL to stdout when log level is DEBUG — useful locally, too noisy in prod.
     echo=settings.log_level == "DEBUG",
 )
+
+
+# SQLite does not enforce foreign keys by default — this enables ON DELETE CASCADE.
+@event.listens_for(engine.sync_engine, "connect")
+def set_sqlite_pragma(dbapi_connection, _connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 # expire_on_commit=False keeps ORM objects usable after a commit without re-querying.
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)

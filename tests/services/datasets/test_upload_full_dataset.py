@@ -6,15 +6,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from assay.schemas import DataSetJsonStructure
-from assay.services.datasets import (
+from assay.schemas import DataSetRowSchema
+from assay.services.datasets._common import _check_name_unique
+from assay.services.datasets.upload_full_dataset import (
     _build_dataset_model,
+    _build_response,
     _check_file_exists,
-    _check_name_unique,
     _parse_and_validate_rows,
     _persist_dataset,
     _raise_if_errors,
-    _build_response,
 )
 
 # --- _check_file_exists ---
@@ -37,30 +37,9 @@ def test_check_file_not_existing(tmp_path):
     assert e.value.detail == f"File not found: {str(f)}"
 
 
-# --- _check_name_unique ---
-
-dataset_name = "Test Dataset"
-
-def test_dataset_name_unique():
-    session = AsyncMock()
-    session.scalar.return_value = None
-
-    asyncio.run(_check_name_unique(dataset_name, session))
-
-
-def test_dataset_name_not_unique():
-    session = AsyncMock()
-    session.scalar.return_value = MagicMock()
-
-    with pytest.raises(HTTPException) as e:
-        asyncio.run(_check_name_unique(dataset_name, session))
-
-    assert e.value.status_code == 409
-    assert e.value.detail == f"Dataset name '{dataset_name}' already exists."
-
-
 # --- _build_dataset_model ---
 
+dataset_name = "Test Dataset"
 prompt = "Prompt"
 expected_output = "Expected Output"
 model_output = "Model Output"
@@ -72,9 +51,9 @@ def test_build_dataset_model_correct_name():
 
 
 def test_build_dataset_model_rows_mapping():
-    data_row = DataSetJsonStructure(prompt=prompt,
-                                    expected_output=expected_output,
-                                    model_output=model_output)
+    data_row = DataSetRowSchema(prompt=prompt,
+                                expected_output=expected_output,
+                                model_output=model_output)
 
     model_rows = _build_dataset_model("", [data_row]).rows
     assert len(model_rows) == 1
@@ -84,9 +63,9 @@ def test_build_dataset_model_rows_mapping():
 
 
 def test_build_dataset_model_multiple_rows():
-    data_rows = [DataSetJsonStructure(prompt=prompt,
-                                      expected_output=expected_output,
-                                      model_output=model_output) for _ in range(3)]
+    data_rows = [DataSetRowSchema(prompt=prompt,
+                                  expected_output=expected_output,
+                                  model_output=model_output) for _ in range(3)]
 
     model_rows = _build_dataset_model("", data_rows).rows
     assert len(model_rows) == 3
