@@ -262,7 +262,7 @@ class TestSetModel(Base):
     __tablename__ = "test_sets"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )
