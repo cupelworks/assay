@@ -1,11 +1,8 @@
 import uuid
 
-from fastapi import HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette import status
 
-from assay.models import TestModel, TestTypeAssignmentModel, TestTypesModel
+from assay.models import TestModel, TestTypeAssignmentModel
 from assay.schemas import (
     CreateTestCaseFromDatasetRequest,
     CreateTestCaseFromDatasetResponse,
@@ -14,6 +11,7 @@ from assay.schemas import (
     TestCaseID,
 )
 from assay.services.datasets._common import _get_all_rows_or_404, _get_dataset_or_404
+from assay.services.tests._common import _validate_test_type_name
 
 
 async def create_new_test(
@@ -120,28 +118,3 @@ async def create_new_test_from_dataset(
         ],
         id=request.id
     )
-
-
-async def _validate_test_type_name(
-        session: AsyncSession,
-        test_type_names: list[str]) -> None:
-    """Checks that all requested test type names exist in the test_types catalogue.
-
-    Args:
-        session: Async SQLAlchemy session.
-        test_type_names: Names to validate against the catalogue.
-
-    Raises:
-        HTTPException: 422 if any name is not found in test_types.
-    """
-    found = await session.scalars(
-        select(TestTypesModel.name)
-        .where(TestTypesModel.name.in_(test_type_names))
-    )
-
-    difference_set = set(test_type_names) - set(found.all())
-    if difference_set:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Unknown test types: {difference_set}"
-        )

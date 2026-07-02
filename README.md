@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, and test case management (create, list, delete) are implemented. LLM-as-judge evaluators, test sets, test plans, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, and test case management (create, list, get, update, delete) are implemented. LLM-as-judge evaluators, test sets, test plans, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -67,9 +67,10 @@ src/assay/
 │   │   ├── delete_full_dataset.py
 │   │   └── delete_dataset_rows.py
 │   ├── tests/
-│   │   ├── _common.py                  # Shared helpers (_find_all_tests_or_404)
+│   │   ├── _common.py                  # Shared helpers (_find_all_tests_or_404, _find_test_by_id_or_404, _validate_test_type_name)
 │   │   ├── create_new_test.py          # Manual creation and bulk creation from dataset
-│   │   ├── get_tests.py                # Paginated listing
+│   │   ├── get_tests.py                # Paginated listing and single fetch by ID
+│   │   ├── update_test.py              # Partial update with field-level null semantics
 │   │   └── delete_test.py              # Bulk delete with referential integrity checks
 │   └── stats.py         # run_z_test
 └── models/              # SQLAlchemy ORM models — database table definitions
@@ -108,8 +109,10 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/tests` | List all test cases (paginated, includes total count) |
+| `GET` | `/tests/{test_case_id}` | Retrieve a single test case by ID |
 | `POST` | `/tests` | Create a single test case manually |
 | `POST` | `/tests/from-dataset` | Bulk-create test cases from all rows in a dataset |
+| `PATCH` | `/tests/{test_case_id}` | Partially update a test case — only sent fields are changed; unknown fields are rejected |
 | `DELETE` | `/tests` | Delete test cases by ID (guards against linked test sets and test runs) |
 
 ### Statistical tests

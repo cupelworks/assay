@@ -10,6 +10,7 @@ from assay.schemas import (
     CreateTestCaseFromDatasetResponse,
     CreateTestCaseRequest,
     CreateTestCaseResponse,
+    ModifyTestCaseRequest,
     PaginatedTestCases,
     TestCaseID,
 )
@@ -19,11 +20,93 @@ from assay.services import (
     delete_test_by_id,
     get_all_created_tests,
     get_test_case_by_id,
+    modify_test_by_id,
 )
 
 router = APIRouter(tags=["test"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.patch(
+    path="/tests/{test_case_id}",
+    responses={
+        200: {
+            "description": "Test case updated successfully. Returns the full updated test case.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                        "name": "Updated name",
+                        "input": "Summarise this article in one sentence.",
+                        "expected_output": "A concise one-sentence summary.",
+                        "model_output": "A concise one-sentence summary.",
+                        "test_type_names": ["ROUGE", "BERTScore"],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "Test case not found.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test with id a1b2c3d4-e5f6-7890-abcd-ef1234567890 not found"
+                    }
+                }
+            },
+        },
+        422: {
+            "description": (
+                "Validation error — either an unknown field was sent in the request body, "
+                "or one or more test type names are not in the catalogue."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "unknown_field": {
+                            "summary": "Unknown field in body",
+                            "value": {
+                                "detail": [
+                                    {
+                                        "type": "extra_forbidden",
+                                        "loc": ["body", "id"],
+                                        "msg": "Extra inputs are not permitted",
+                                    }
+                                ]
+                            },
+                        },
+                        "unknown_test_type": {
+                            "summary": "Unknown test type name",
+                            "value": {"detail": "Unknown test types: {'Invalid Type'}"},
+                        },
+                    }
+                }
+            },
+        },
+    },
+    response_model=CreateTestCaseResponse,
+)
+async def update_test(
+        test_case_id: uuid.UUID,
+        request: ModifyTestCaseRequest,
+        session: SessionDep,
+) -> CreateTestCaseResponse: # pragma: no cover
+    """Partially update a test case by ID.
+
+    Only the fields included in the request body are updated — omitted fields are left unchanged.
+    `test_type_names: null` leaves type assignments untouched;
+    `test_type_names: []` removes all assignments.
+
+    Unknown body fields are rejected with a 422 — the schema uses `extra="forbid"` to
+    prevent silently ignoring misplaced fields such as `id`.
+
+    Returns the full updated test case so the client does not need a follow-up GET to refresh.
+
+    Returns a 404 if no test case with the given ID exists.
+    Returns a 422 if any unknown field is sent or if any test type name is not in the catalogue.
+    """
+    return await modify_test_by_id(test_case_id, request, session)
 
 
 @router.get(

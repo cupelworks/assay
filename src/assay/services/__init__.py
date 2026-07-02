@@ -17,6 +17,7 @@ from assay.services.tests import (
     delete_test_by_id,
     get_all_created_tests,
     get_test_case_by_id,
+    modify_test_by_id,
 )
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "upload_new_rows_in_existing_dataset",
     "upload_dataset_via_path",
     "delete_dataset_by_id",
+    "modify_test_by_id",
     "replace_dataset_content_by_dataset_id",
 ]

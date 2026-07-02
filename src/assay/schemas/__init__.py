@@ -22,6 +22,7 @@ from assay.schemas.tests import (
     CreateTestCaseFromDatasetResponse,
     CreateTestCaseRequest,
     CreateTestCaseResponse,
+    ModifyTestCaseRequest,
     PaginatedTestCases,
     TestCaseID,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "DataSetImportingData",
     "DataSetRowUpdatedData",
     "DataSetMetadata",
+    "ModifyTestCaseRequest",
     "PaginatedDataSetResponse",
     "PaginatedDataSetRowResponse",
     "Pagination",

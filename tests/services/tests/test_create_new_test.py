@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from assay.schemas import CreateTestCaseRequest
 from assay.services import create_new_test, create_new_test_from_dataset
-from assay.services.tests.create_new_test import _validate_test_type_name
+from assay.services.tests._common import _validate_test_type_name
 
 name = "Test Name"
 model_input = "My Input"
