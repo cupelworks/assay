@@ -305,8 +305,11 @@ class TestSetEntryModel(Base):
     )
 
     # Immutable snapshot fields — copied from TestModel at inclusion time.
-    input: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    input: Mapped[str] = mapped_column(Text)
     expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
     # Snapshot of test type names at inclusion time — stored as strings, not
     # UUIDs, for human-readability and resilience against table rebuilds.
     test_type_names: Mapped[list[str]] = mapped_column(JSON, default=list)
