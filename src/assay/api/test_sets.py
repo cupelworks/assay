@@ -1,15 +1,67 @@
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
-from assay.schemas import PaginatedTestSetMetadataResponse, TestSetCreationResponse, TestSetName
-from assay.services import create_new_test_set, get_all_test_sets_metadata
+from assay.schemas import (
+    PaginatedTestSetMetadataResponse,
+    TestSetCreationResponse,
+    TestSetMetadata,
+    TestSetName,
+)
+from assay.services import (
+    create_new_test_set,
+    get_all_test_sets_metadata,
+    get_test_set_metadata_by_id,
+)
 
 router = APIRouter(tags=["test set"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.get(
+    path="/test-sets/{test_set_id}",
+    responses={
+        200: {
+            "description": "Metadata for the requested test set.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                        "name": "Regression suite",
+                        "created_at": "2026-07-03T15:43:09.032480",
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "No test set exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Test set with id <example-id> not found"},
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    response_model=TestSetMetadata,
+)
+async def get_single_test_set_metadata(
+        test_set_id: uuid.UUID,
+        session: SessionDep,
+) -> TestSetMetadata: # pragma: no cover
+    """Retrieve metadata for a single test set by its ID.
+
+    Returns the test set's `id`, `name`, and `created_at` timestamp.
+    """
+    return await get_test_set_metadata_by_id(test_set_id, session)
 
 
 @router.get(
