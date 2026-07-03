@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, and test case management (create, list, get, update, delete) are implemented. LLM-as-judge evaluators, test sets, test plans, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), and the test set layer (create, list, get) are implemented. LLM-as-judge evaluators, test plans, test runs, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -47,11 +47,14 @@ src/assay/
 ├── api/                 # HTTP routes — one file per domain
 │   ├── datasets.py      # Dataset endpoints
 │   ├── test.py          # Test case endpoints
+│   ├── test_sets.py     # Test set endpoints
 │   ├── stats.py         # Statistical test endpoints
 │   └── meta.py          # Health check
 ├── schemas/             # Pydantic models — API validation and serialization
 │   ├── __init__.py      # Re-exports all public models
+│   ├── _common.py       # Shared base models (Pagination)
 │   ├── datasets.py      # Dataset and row schemas
+│   ├── test_sets.py     # Test set schemas (TestSetMetadata, PaginatedTestSetMetadataResponse, etc.)
 │   ├── tests.py         # Test case schemas (CreateTestCaseRequest, PaginatedTestCases, etc.)
 │   └── stats.py         # ZTestRequest, ZTestResult
 ├── services/            # Business logic — one file per operation
@@ -66,6 +69,10 @@ src/assay/
 │   │   ├── update_dataset_rows.py
 │   │   ├── delete_full_dataset.py
 │   │   └── delete_dataset_rows.py
+│   ├── test_sets/
+│   │   ├── _common.py                  # Shared helpers (_find_test_set_or_404, _check_unique_test_set_name_or_409)
+│   │   ├── create_test_set.py
+│   │   └── get_test_sets_metadata.py   # Paginated listing and single fetch by ID
 │   ├── tests/
 │   │   ├── _common.py                  # Shared helpers (_find_all_tests_or_404, _find_test_by_id_or_404, _validate_test_type_name)
 │   │   ├── create_new_test.py          # Manual creation and bulk creation from dataset
@@ -77,8 +84,9 @@ src/assay/
     ├── __init__.py
     ├── base.py          # Shared DeclarativeBase
     ├── datasets.py      # DatasetModel, DatasetRowModel
-    ├── stats.py         # Statistical model
-    └── test.py          # TestModel, TestSetModel, TestPlanModel, TestRunModel, and related junction tables
+    ├── stats.py         # StatisticalVerificationModel
+    └── test.py          # TestModel, TestSetModel, TestSetEntryModel, TestPlanModel,
+                         # TestRunModel, and related junction tables
 alembic/                 # Alembic migration environment
 alembic.ini              # Alembic configuration (URL is read from ASSAY_DATABASE_URL at runtime)
 tests/                   # Pytest suite mirroring src/assay/services/
@@ -97,13 +105,13 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/datasets` | List all datasets (paginated) |
 | `GET` | `/datasets/{dataset_id}` | Retrieve metadata for a single dataset |
 | `GET` | `/datasets/{dataset_id}/rows` | List rows in a dataset (paginated) |
-| `POST` | `/upload-dataset/path` | Create a dataset from a local `.jsonl` file |
-| `POST` | `/upload-dataset/upload-dataset-rows` | Append rows to an existing dataset |
-| `PUT` | `/update-dataset` | Replace all rows in a dataset |
-| `PATCH` | `/update-dataset/name` | Rename a dataset |
-| `PATCH` | `/update-dataset/rows` | Update existing rows by ID |
-| `DELETE` | `/delete-dataset` | Delete a dataset and all its rows |
-| `DELETE` | `/delete-dataset/delete-dataset-rows` | Delete specific rows by ID |
+| `POST` | `/datasets/path` | Create a dataset from a local `.jsonl` file |
+| `POST` | `/datasets/rows` | Append rows to an existing dataset |
+| `PUT` | `/datasets/rows` | Replace all rows in a dataset |
+| `PATCH` | `/datasets/name` | Rename a dataset |
+| `PATCH` | `/datasets/rows` | Update existing rows by ID |
+| `DELETE` | `/datasets` | Delete a dataset and all its rows |
+| `DELETE` | `/datasets/rows` | Delete specific rows by ID |
 
 ### Test cases
 | Method | Path | Description |
@@ -114,6 +122,13 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `POST` | `/tests/from-dataset` | Bulk-create test cases from all rows in a dataset |
 | `PATCH` | `/tests/{test_case_id}` | Partially update a test case — only sent fields are changed; unknown fields are rejected |
 | `DELETE` | `/tests` | Delete test cases by ID (guards against linked test sets and test runs) |
+
+### Test sets
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/test-sets` | List all test sets (paginated) |
+| `GET` | `/test-sets/{test_set_id}` | Retrieve metadata for a single test set |
+| `POST` | `/test-sets` | Create a new test set (name must be unique) |
 
 ### Statistical tests
 | Method | Path | Description |
@@ -191,5 +206,6 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 ## TODOs
 
 - `services/datasets/replace_dataset_content.py` — Consider what happens when a dataset row has a relationship with executed tests (cascading deletes or constraint violations on full replacement).
-- Test sets, test plans, and test runs — domain models are defined in `models/test.py` but service and API layers are not yet implemented.
+- Test set entries — adding/removing tests from a set, and retrieving the snapshotted entries within a set.
+- Test plans and test runs — domain models are defined in `models/test.py` but service and API layers are not yet implemented.
 - LLM-as-judge evaluators and the broader statistics engine are stubbed.
