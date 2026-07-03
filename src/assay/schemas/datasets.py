@@ -4,6 +4,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
+from assay.schemas import Pagination
+
 
 class DataSetImportViaPathRequest(BaseModel):
     path: str = Field(
@@ -114,21 +116,6 @@ class DataSetMetadata(DataSetID, DataSetName):
     created_at: datetime = Field(
         ...,
         description="The creation date of the dataset.",
-    )
-
-
-class Pagination(BaseModel):
-    total: int = Field(
-        ...,
-        description="The total number of datasets in the database.",
-    )
-    offset: int = Field(
-        ...,
-        description="Number of records to skip for pagination."
-    )
-    limit: int = Field(
-        ...,
-        description="The maximum number of records to return for pagination.",
     )
 
 

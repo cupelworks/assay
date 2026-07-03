@@ -1,3 +1,4 @@
+from assay.schemas._common import Pagination
 from assay.schemas.datasets import (
     DataRowInfo,
     DataSetDeletedData,
@@ -14,7 +15,6 @@ from assay.schemas.datasets import (
     DataSetRowUpdatedData,
     PaginatedDataSetResponse,
     PaginatedDataSetRowResponse,
-    Pagination,
 )
 from assay.schemas.stats import ZTestRequest, ZTestResult
 from assay.schemas.test_sets import TestSetCreationResponse, TestSetID, TestSetName
