@@ -11,7 +11,7 @@ from assay.services.datasets import (
     upload_new_rows_in_existing_dataset,
 )
 from assay.services.stats import run_z_test
-from assay.services.test_sets import create_new_test_set
+from assay.services.test_sets import create_new_test_set, get_all_test_sets_metadata
 from assay.services.tests import (
     create_new_test,
     create_new_test_from_dataset,
@@ -31,6 +31,7 @@ __all__ = [
     "get_dataset_metadata_by_id",
     "get_dataset_rows_by_id",
     "get_test_case_by_id",
+    "get_all_test_sets_metadata",
     "run_z_test",
     "update_dataset_name_by_id",
     "update_dataset_rows_by_id",

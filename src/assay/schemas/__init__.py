@@ -17,7 +17,13 @@ from assay.schemas.datasets import (
     PaginatedDataSetRowResponse,
 )
 from assay.schemas.stats import ZTestRequest, ZTestResult
-from assay.schemas.test_sets import TestSetCreationResponse, TestSetID, TestSetName
+from assay.schemas.test_sets import (
+    PaginatedTestSetMetadataResponse,
+    TestSetCreationResponse,
+    TestSetID,
+    TestSetMetadata,
+    TestSetName,
+)
 from assay.schemas.tests import (
     CreateTestCaseFromDatasetRequest,
     CreateTestCaseFromDatasetResponse,
@@ -53,9 +59,11 @@ __all__ = [
     "ModifyTestCaseRequest",
     "PaginatedDataSetResponse",
     "PaginatedDataSetRowResponse",
+    "PaginatedTestSetMetadataResponse",
     "Pagination",
     "TestCaseID",
     "TestSetID",
+    "TestSetMetadata",
     "TestSetName",
     "TestSetCreationResponse",
 ]

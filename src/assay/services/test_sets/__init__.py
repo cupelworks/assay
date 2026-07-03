@@ -1,5 +1,7 @@
 from assay.services.test_sets.create_test_set import create_new_test_set
+from assay.services.test_sets.get_test_sets_metadata import get_all_test_sets_metadata
 
 __all__ = [
     "create_new_test_set",
+    "get_all_test_sets_metadata",
 ]
