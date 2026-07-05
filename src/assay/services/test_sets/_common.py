@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import select
 
-from assay.models import TestSetModel
+from assay.models import TestSetEntryModel, TestSetModel
 from assay.schemas import TestSetName
 
 
@@ -55,3 +55,36 @@ async def _find_test_set_or_404(test_set_id: uuid.UUID, session: AsyncSession):
         )
 
     return found
+
+
+async def _check_tests_not_in_test_set_or_409(
+        test_set_id: uuid.UUID,
+        test_ids: list[uuid.UUID],
+        session: AsyncSession,
+):
+    """Raise 409 if any of the given tests are already snapshotted in the test set.
+
+    Queries existing entries by (test_set_id, test_id) and raises immediately if
+    any overlap is found. The detail message lists the conflicting IDs so the caller
+    knows exactly which tests to remove from the request.
+
+    Args:
+        test_set_id: UUID of the test set to check against.
+        test_ids: List of test UUIDs the caller intends to add.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 409 listing the test IDs already present in the test set.
+    """
+    found = (await session.scalars(
+        select(TestSetEntryModel.test_id)
+        .where(TestSetEntryModel.test_set_id == test_set_id)
+        .where(TestSetEntryModel.test_id.in_(test_ids))
+    )).all()
+
+    if found:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Tests with ID '{[str(_id) for _id in found]}' "
+                   f"already linked to test set with ID '{test_set_id}'"
+        )

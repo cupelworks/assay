@@ -17,6 +17,7 @@ from assay.schemas.datasets import (
     PaginatedDataSetRowResponse,
 )
 from assay.schemas.stats import ZTestRequest, ZTestResult
+from assay.schemas.test_set_entries import TestSetEntryID
 from assay.schemas.test_sets import (
     PaginatedTestSetMetadataResponse,
     TestSetCreationResponse,
@@ -62,6 +63,7 @@ __all__ = [
     "PaginatedTestSetMetadataResponse",
     "Pagination",
     "TestCaseID",
+    "TestSetEntryID",
     "TestSetID",
     "TestSetMetadata",
     "TestSetName",

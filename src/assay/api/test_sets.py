@@ -7,11 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from assay.db import get_session
 from assay.schemas import (
     PaginatedTestSetMetadataResponse,
+    TestCaseID,
     TestSetCreationResponse,
+    TestSetEntryID,
     TestSetMetadata,
     TestSetName,
 )
 from assay.services import (
+    add_tests_to_test_set_by_test_id,
     create_new_test_set,
     get_all_test_sets_metadata,
     get_test_set_metadata_by_id,
@@ -20,6 +23,86 @@ from assay.services import (
 router = APIRouter(tags=["test set"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.post(
+    path="/test-sets/{test_set_id}/entries",
+    responses={
+        200: {
+            "description": "Snapshot entries created. Returns one entry ID per test added.",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {"id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"},
+                        {"id": "b2c3d4e5-f6a7-8901-bcde-f12345678901"},
+                    ]
+                }
+            },
+        },
+        404: {
+            "description": (
+                "The test set does not exist, or one or more test IDs in the request body "
+                "were not found. No entries are created."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_set_not_found": {
+                            "summary": "Test set not found",
+                            "value": {
+                                "detail": "Test set with ID '<test_set_id>' not found"
+                            },
+                        },
+                        "tests_not_found": {
+                            "summary": "One or more test IDs not found",
+                            "value": {
+                                "detail": "Tests with ids ['<id1>', '<id2>'] not found"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        409: {
+            "description": (
+                "One or more tests are already present in the test set. "
+                "No entries are created."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": (
+                            "Tests with ID ['<id1>'] already linked to test set"
+                            " with ID '<test_set_id>'"
+                        )
+                    }
+                }
+            },
+        },
+    },
+    response_model=list[TestSetEntryID]
+)
+async def add_tests_to_test_set(
+        test_set_id: uuid.UUID,
+        request: list[TestCaseID],
+        session: SessionDep,
+) -> list[TestSetEntryID]: # pragma: no cover
+    """Snapshot one or more tests into a test set, freezing their current state.
+
+    Each test in the request body is copied into an immutable entry that captures
+    `name`, `input`, `expected_output`, `model_output`, and `test_type_names` at
+    the moment this endpoint is called. Subsequent edits to the originating test
+    have no effect on the snapshot.
+
+    Three checks run before any data is written:
+    - The test set must exist (404 if not).
+    - All test IDs in the request body must exist (404 if any are missing).
+    - None of the tests may already be snapshotted in this set (409 if any overlap).
+
+    Duplicate IDs in the request body are silently deduplicated — each test produces
+    exactly one entry regardless of repetition.
+    """
+    return await add_tests_to_test_set_by_test_id(test_set_id, request, session)
 
 
 @router.get(

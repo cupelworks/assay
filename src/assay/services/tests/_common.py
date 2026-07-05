@@ -9,10 +9,36 @@ from starlette import status
 from assay.models import TestModel, TestTypesModel
 
 
+def _check_difference_between_found_tests_and_requested_tests(
+        test_ids: list[uuid.UUID],
+        found_test_ids: list[uuid.UUID],
+) -> None:
+    """Raise 404 if any requested test ID is absent from the found results.
+
+    Args:
+        test_ids: The IDs originally requested by the caller.
+        found_test_ids: The IDs actually returned by the database query.
+
+    Raises:
+        HTTPException: 404 listing the IDs present in test_ids but missing from found_test_ids.
+    """
+    # set difference identifies which requested IDs are missing from the DB
+    difference = set(test_ids) - set(found_test_ids)
+
+    if difference:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tests with ids {[str(test_id) for test_id in difference]} not found",
+        )
+
+
 async def _find_all_tests_or_404(
         test_ids: list[uuid.UUID],
         session: AsyncSession) -> None:
-    """Raise 404 if any of the given test IDs do not exist in the database.
+    """Validate that all given test IDs exist, raising 404 if any are missing.
+
+    Only fetches IDs from the database — use _find_all_tests_with_details_or_404
+    when full model instances are needed.
 
     Args:
         test_ids: List of test UUIDs to look up.
@@ -27,14 +53,36 @@ async def _find_all_tests_or_404(
         .where(TestModel.id.in_(test_ids))
     )).all())
 
-    # set difference identifies which requested IDs are missing from the DB
-    difference = set(test_ids) - set(found_test_ids)
+    _check_difference_between_found_tests_and_requested_tests(test_ids, found_test_ids)
 
-    if difference:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tests with ids {[str(test_id) for test_id in difference]} not found",
-        )
+
+async def _find_all_tests_with_details_or_404(
+        test_ids: list[uuid.UUID],
+        session: AsyncSession,
+):
+    """Fetch full TestModel instances for the given IDs, raising 404 if any are missing.
+
+    Args:
+        test_ids: List of test UUIDs to look up.
+        session: Active async database session.
+
+    Returns:
+        A list of TestModel instances matching the given IDs.
+
+    Raises:
+        HTTPException: 404 listing the IDs that were not found.
+    """
+    found_test = (await session.scalars(
+        select(TestModel)
+        .where(TestModel.id.in_(test_ids))
+        .options(selectinload(TestModel.test_type_assignments))
+    )).all()
+
+    _check_difference_between_found_tests_and_requested_tests(
+        test_ids, [test.id for test in found_test]
+    )
+
+    return found_test
 
 
 async def _find_test_by_id_or_404(
