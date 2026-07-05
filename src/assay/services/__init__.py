@@ -16,6 +16,7 @@ from assay.services.test_sets import (
     create_new_test_set,
     get_all_test_sets_metadata,
     get_test_set_metadata_by_id,
+    get_test_sets_linked_tests,
 )
 from assay.services.tests import (
     create_new_test,
@@ -39,6 +40,7 @@ __all__ = [
     "get_test_case_by_id",
     "get_all_test_sets_metadata",
     "get_test_set_metadata_by_id",
+    "get_test_sets_linked_tests",
     "run_z_test",
     "update_dataset_name_by_id",
     "update_dataset_rows_by_id",

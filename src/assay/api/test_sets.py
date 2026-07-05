@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
 from assay.schemas import (
+    PaginatedTestSetEntriesDetails,
     PaginatedTestSetMetadataResponse,
     TestCaseID,
     TestSetCreationResponse,
@@ -18,11 +19,100 @@ from assay.services import (
     create_new_test_set,
     get_all_test_sets_metadata,
     get_test_set_metadata_by_id,
+    get_test_sets_linked_tests,
 )
 
 router = APIRouter(tags=["test set"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.get(
+    path="/test-sets/{test_set_id}/entries",
+    responses={
+        200: {
+            "description": "A paginated list of the test set's entries, ordered by "
+                            "`name` (with `id` as a tiebreaker for entries sharing a name).",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "total": 2,
+                        "offset": 0,
+                        "limit": 100,
+                        "items": [
+                            {
+                                "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                                "test_case_id": {
+                                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                                },
+                                "name": "Refund request - happy path",
+                                "input": "I'd like a refund for order #4471.",
+                                "expected_output": "Sure, I've processed a refund for "
+                                                    "order #4471.",
+                                "model_output": "Your refund for order #4471 has been "
+                                                 "issued.",
+                                "test_type_names": ["semantic_similarity", "toxicity"],
+                            },
+                            {
+                                "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                                "test_case_id": {
+                                    "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                                },
+                                "name": "Refund request - missing order id",
+                                "input": "I want a refund but I don't have my order number.",
+                                "expected_output": "Could you share your order number or "
+                                                    "the email used at checkout?",
+                                "model_output": "I'm sorry, I can't process refunds "
+                                                 "without an order number.",
+                                "test_type_names": ["semantic_similarity"],
+                            },
+                        ],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "No test set exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test set with ID 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' "
+                                  "not found"
+                    },
+                    "schema": {
+                        "type": "object",
+                        "properties": {"detail": {"type": "string"}},
+                        "required": ["detail"],
+                    },
+                }
+            },
+        },
+    },
+    response_model=PaginatedTestSetEntriesDetails,
+)
+async def get_all_test_set_entries(
+        test_set_id: uuid.UUID,
+        session: SessionDep,
+        offset: int = Query(default=0, description="Number of records to skip for pagination."),
+        limit: int = Query(
+            default=100, description="Maximum number of records to return for pagination."
+        ),
+) -> PaginatedTestSetEntriesDetails: # pragma: no cover
+    """List all entries (snapshotted tests) belonging to a test set, paginated.
+
+    Each entry is an immutable snapshot captured at the moment a test was added to
+    the set via `POST /test-sets/{test_set_id}/entries` — `input`, `expected_output`,
+    `model_output`, and `test_type_names` reflect the test's state at that time, not
+    its current live state. `test_case_id` traces the entry back to the live test it
+    was created from.
+
+    Results are ordered by `name`, with `id` as a tiebreaker, so pagination is stable
+    across pages even when multiple entries share the same name.
+
+    Use `offset` and `limit` to page through results. The response includes `total`
+    so the client can calculate the number of pages.
+    """
+    return await get_test_sets_linked_tests(test_set_id, session, offset, limit)
 
 
 @router.post(
