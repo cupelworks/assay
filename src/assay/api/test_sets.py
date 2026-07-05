@@ -10,6 +10,7 @@ from assay.schemas import (
     PaginatedTestSetMetadataResponse,
     TestCaseID,
     TestSetCreationResponse,
+    TestSetEntryDetails,
     TestSetEntryID,
     TestSetMetadata,
     TestSetName,
@@ -18,6 +19,7 @@ from assay.services import (
     add_tests_to_test_set_by_test_id,
     create_new_test_set,
     get_all_test_sets_metadata,
+    get_test_set_linked_test_by_entry_id,
     get_test_set_metadata_by_id,
     get_test_sets_linked_tests,
 )
@@ -25,6 +27,72 @@ from assay.services import (
 router = APIRouter(tags=["test set"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.get(
+    path="/test-sets/{test_set_id}/entries/{entry_id}",
+    responses={
+        200: {
+            "description": "The requested test set entry.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                        "test_case_id": {
+                            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                        },
+                        "name": "Refund request - happy path",
+                        "input": "I'd like a refund for order #4471.",
+                        "expected_output": "Sure, I've processed a refund for "
+                                            "order #4471.",
+                        "model_output": "Your refund for order #4471 has been "
+                                         "issued.",
+                        "test_type_names": ["semantic_similarity", "toxicity"],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": (
+                "No test set exists with the given ID, or no entry with the given "
+                "ID exists within that test set."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_set_not_found": {
+                            "summary": "Test set not found",
+                            "value": {
+                                "detail": "Test set with ID '<test_set_id>' not found"
+                            },
+                        },
+                        "entry_not_found": {
+                            "summary": "Entry not found in this test set",
+                            "value": {
+                                "detail": "Test entry with ID '<entry_id>' not found "
+                                          "in test set with ID '<test_set_id>'"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+    response_model=TestSetEntryDetails,
+)
+async def get_single_test_set_entry(
+        test_set_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        session: SessionDep,
+) -> TestSetEntryDetails: # pragma: no cover
+    """Retrieve a single entry from a test set by its ID.
+
+    Returns the entry's frozen snapshot data (`name`, `input`, `expected_output`,
+    `model_output`, `test_type_names`) as it was at the moment the test was added to
+    the set, along with `test_case_id`, which traces the entry back to the live test
+    it was created from.
+    """
+    return await get_test_set_linked_test_by_entry_id(test_set_id, entry_id, session)
 
 
 @router.get(

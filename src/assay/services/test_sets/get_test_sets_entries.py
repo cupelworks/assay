@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestSetEntryModel
 from assay.schemas import PaginatedTestSetEntriesDetails, TestCaseID, TestSetEntryDetails
-from assay.services.test_sets._common import _find_test_set_or_404
+from assay.services.test_sets._common import _find_test_set_entry_or_404, _find_test_set_or_404
 
 
 async def get_test_sets_linked_tests(
@@ -61,8 +61,40 @@ async def get_test_sets_linked_tests(
                 input=test.input,
                 expected_output=test.expected_output,
                 model_output=test.model_output,
-                test_type_names=[test_type for test_type in test.test_type_names]
+                test_type_names=test.test_type_names,
             )
             for test in found
         ]
+    )
+
+
+async def get_test_set_linked_test_by_entry_id(
+        test_set_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        session: AsyncSession,
+) -> TestSetEntryDetails:
+    """Fetch a single entry from a test set by its ID.
+
+    Args:
+        test_set_id: UUID of the test set the entry must belong to.
+        entry_id: UUID of the entry to retrieve.
+        session: Async SQLAlchemy session injected by FastAPI.
+
+    Returns:
+        The entry's details, including a trace back to the live test it was snapshotted from.
+
+    Raises:
+        HTTPException 404: The test set does not exist, or no entry with that ID exists in it.
+    """
+    await _find_test_set_or_404(test_set_id, session)
+    found = await _find_test_set_entry_or_404(test_set_id, entry_id, session)
+
+    return TestSetEntryDetails(
+        id=found.id,
+        test_case_id=TestCaseID(id=found.test_id),
+        name=found.name,
+        input=found.input,
+        expected_output=found.expected_output,
+        model_output=found.model_output,
+        test_type_names=found.test_type_names
     )

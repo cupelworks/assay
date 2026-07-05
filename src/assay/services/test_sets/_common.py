@@ -88,3 +88,36 @@ async def _check_tests_not_in_test_set_or_409(
             detail=f"Tests with ID '{[str(_id) for _id in found]}' "
                    f"already linked to test set with ID '{test_set_id}'"
         )
+
+
+async def _find_test_set_entry_or_404(
+        test_set_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        session: AsyncSession
+):
+    """Fetch a test set entry by ID, scoped to its parent test set, raising 404 if not found.
+
+    Args:
+        test_set_id: UUID of the test set the entry must belong to.
+        entry_id: UUID of the entry to look up.
+        session: Active async database session.
+
+    Returns:
+        The matching TestSetEntryModel instance.
+
+    Raises:
+        HTTPException: 404 if no entry with the given ID exists in that test set.
+    """
+    found = await session.scalar(
+        select(TestSetEntryModel)
+        .where(TestSetEntryModel.test_set_id == test_set_id)
+        .where(TestSetEntryModel.id == entry_id))
+
+    if found is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test entry with ID '{entry_id}' not found "
+                   f"in test set with ID '{test_set_id}'"
+        )
+
+    return found

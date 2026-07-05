@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from assay.models import TestSetEntryModel
-from assay.services import get_test_sets_linked_tests
+from assay.services import get_test_set_linked_test_by_entry_id, get_test_sets_linked_tests
 
 _PATCH_FIND_TEST_SET = "assay.services.test_sets.get_test_sets_entries._find_test_set_or_404"
 
@@ -110,3 +110,69 @@ def test_empty_test_set():
     assert response.total == 0
     assert response.offset == 3
     assert response.limit == 50
+
+
+# --- get_test_set_linked_test_by_entry_id() ---
+def test_test_set_not_found_by_entry_id():
+    test_set_id = uuid.uuid4()
+    
+    session = AsyncMock()
+    session.scalar.return_value = None
+    
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(get_test_set_linked_test_by_entry_id(test_set_id, uuid.uuid4(), session))
+
+    assert session.scalar.call_count == 1
+    assert e.value.status_code == 404
+    assert ("Test set with ID '" + str(test_set_id)) in str(e.value.detail)
+
+
+def test_entry_not_found_in_test_set():
+    test_set_id = uuid.uuid4()
+    entry_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.return_value = None
+
+    with patch(_PATCH_FIND_TEST_SET), pytest.raises(HTTPException) as e:
+        asyncio.run(get_test_set_linked_test_by_entry_id(test_set_id, entry_id, session))
+
+    assert e.value.status_code == 404
+    assert (f"Test entry with ID '{entry_id}' not found "
+            f"in test set with ID '{test_set_id}'") in str(e.value.detail)
+
+
+def test_returns_correct_entry():
+    test_set_id = uuid.uuid4()
+    test_case_id = uuid.uuid4()
+    entry_id = uuid.uuid4()
+
+    found_name = "Name"
+    found_input = "Input"
+    found_expected_output = None
+    found_model_output = "Model Output"
+    found_test_type_names = ["Exact Match", "ROUGE"]
+
+    session = AsyncMock()
+    session.scalar.return_value = TestSetEntryModel(
+        id=entry_id,
+        test_set_id=test_set_id,
+        test_id=test_case_id,
+        name=found_name,
+        input=found_input,
+        expected_output=found_expected_output,
+        model_output=found_model_output,
+        test_type_names=found_test_type_names,
+    )
+
+    with patch(_PATCH_FIND_TEST_SET):
+        response = asyncio.run(get_test_set_linked_test_by_entry_id(test_set_id, entry_id, session))
+
+    assert response.id == entry_id
+    assert response.test_case_id.id == test_case_id
+    assert response.name == found_name
+    assert response.input == found_input
+    assert response.expected_output is None
+    assert response.model_output == found_model_output
+    assert response.test_type_names == found_test_type_names
+
