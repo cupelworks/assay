@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), and the test set layer (create, list, get) are implemented. LLM-as-judge evaluators, test plans, test runs, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run) are implemented. LLM-as-judge evaluators, test plans, test runs, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -47,7 +47,7 @@ src/assay/
 ├── api/                 # HTTP routes — one file per domain
 │   ├── datasets.py      # Dataset endpoints
 │   ├── test.py          # Test case endpoints
-│   ├── test_sets.py     # Test set endpoints
+│   ├── test_sets.py     # Test set and test set entry endpoints
 │   ├── stats.py         # Statistical test endpoints
 │   └── meta.py          # Health check
 ├── schemas/             # Pydantic models — API validation and serialization
@@ -55,7 +55,8 @@ src/assay/
 │   ├── _common.py       # Shared base models (Pagination)
 │   ├── datasets.py      # Dataset and row schemas
 │   ├── test_sets.py     # Test set schemas (TestSetMetadata, PaginatedTestSetMetadataResponse, etc.)
-│   ├── tests.py         # Test case schemas (CreateTestCaseRequest, PaginatedTestCases, etc.)
+│   ├── test_set_entries.py  # Test set entry schemas (TestSetEntryDetails, PaginatedTestSetEntriesDetails, etc.)
+│   ├── tests.py         # Test case schemas (CreateTestCaseRequest, ModifyTestCaseRequest, etc.)
 │   └── stats.py         # ZTestRequest, ZTestResult
 ├── services/            # Business logic — one file per operation
 │   ├── datasets/
@@ -70,9 +71,12 @@ src/assay/
 │   │   ├── delete_full_dataset.py
 │   │   └── delete_dataset_rows.py
 │   ├── test_sets/
-│   │   ├── _common.py                  # Shared helpers (_find_test_set_or_404, _check_unique_test_set_name_or_409)
+│   │   ├── _common.py                  # Shared helpers (_find_test_set_or_404, _find_test_set_entry_in_specific_test_set_or_404, _check_test_set_entry_has_no_runs_or_409, etc.)
 │   │   ├── create_test_set.py
-│   │   └── get_test_sets_metadata.py   # Paginated listing and single fetch by ID
+│   │   ├── get_test_sets_metadata.py   # Paginated listing and single fetch by ID
+│   │   ├── add_tests_to_test_set.py    # Snapshot tests into a set as entries
+│   │   ├── get_test_sets_entries.py    # Paginated listing and single fetch of entries
+│   │   └── update_entry.py             # Partial update of an entry, until it has been run
 │   ├── tests/
 │   │   ├── _common.py                  # Shared helpers (_find_all_tests_or_404, _find_test_by_id_or_404, _validate_test_type_name)
 │   │   ├── create_new_test.py          # Manual creation and bulk creation from dataset
@@ -129,6 +133,10 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/test-sets` | List all test sets (paginated) |
 | `GET` | `/test-sets/{test_set_id}` | Retrieve metadata for a single test set |
 | `POST` | `/test-sets` | Create a new test set (name must be unique) |
+| `GET` | `/test-sets/{test_set_id}/entries` | List all entries (snapshotted tests) in a test set (paginated) |
+| `GET` | `/test-sets/{test_set_id}/entries/{entry_id}` | Retrieve a single entry by ID |
+| `POST` | `/test-sets/{test_set_id}/entries` | Snapshot one or more tests into a test set as entries |
+| `PATCH` | `/test-sets/{test_set_id}/entries/{entry_id}` | Partially update an entry — only allowed until it has been run at least once (409 otherwise) |
 
 ### Statistical tests
 | Method | Path | Description |
@@ -206,6 +214,6 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 ## TODOs
 
 - `services/datasets/replace_dataset_content.py` — Consider what happens when a dataset row has a relationship with executed tests (cascading deletes or constraint violations on full replacement).
-- Test set entries — adding/removing tests from a set, and retrieving the snapshotted entries within a set.
+- Test set entries — removing entries from a set is not yet implemented (add, list, get, and update all are).
 - Test plans and test runs — domain models are defined in `models/test.py` but service and API layers are not yet implemented.
 - LLM-as-judge evaluators and the broader statistics engine are stubbed.
