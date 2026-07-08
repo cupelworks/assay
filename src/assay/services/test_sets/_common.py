@@ -151,3 +151,36 @@ async def _check_test_set_entry_has_no_runs_or_409(
             detail=f"Test entry with ID '{entry_id}' can't be updated"
                    f" because it has runs"
         )
+
+
+async def _check_test_set_entries_have_no_runs_or_409(
+        test_set_id: uuid.UUID,
+        session: AsyncSession,
+) -> None:
+    """Raise 409 if any entry in the test set has already been executed.
+
+    A test set can't be deleted while one of its entries has runs, since
+    deleting it would take the run's frozen record of what it executed
+    against down with it.
+
+    Args:
+        test_set_id: UUID of the test set to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 409 if a TestRunModel references any entry belonging
+            to this test set.
+    """
+    has_runs = await session.scalar(
+        select(TestRunModel.id)
+        .join(TestSetEntryModel, TestRunModel.test_set_entry_id == TestSetEntryModel.id)
+        .where(TestSetEntryModel.test_set_id == test_set_id)
+        .limit(1)
+    )
+
+    if has_runs is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Test set with ID '{test_set_id}' can't be deleted "
+                   f"because one or more of its entries have runs",
+        )

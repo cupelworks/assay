@@ -19,6 +19,7 @@ from assay.schemas import (
 from assay.services import (
     add_tests_to_test_set_by_test_id,
     create_new_test_set,
+    delete_test_set_by_id,
     get_all_test_sets_metadata,
     get_test_set_linked_test_by_entry_id,
     get_test_set_metadata_by_id,
@@ -29,6 +30,72 @@ from assay.services import (
 router = APIRouter(tags=["test set / test set entry"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.delete(
+    path="/test-sets/{test_set_id}",
+    responses={
+        200: {
+            "description": (
+                "The test set and every entry it contained were deleted. The "
+                "response body is an empty object. The live tests those entries "
+                "were snapshotted from are left untouched."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {}
+                }
+            },
+        },
+        404: {
+            "description": "No test set exists with the given ID. Nothing is deleted.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test set with ID '<test_set_id>' not found"
+                    }
+                }
+            },
+        },
+        409: {
+            "description": (
+                "At least one entry in the test set has already been executed, i.e. "
+                "it has one or more runs. Executed entries are frozen so that each "
+                "run's record of what it evaluated against stays accurate, so the "
+                "test set cannot be deleted while any of them exist. Nothing is "
+                "deleted."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test set with ID '<test_set_id>' can't be deleted "
+                                  "because one or more of its entries have runs"
+                    }
+                }
+            },
+        },
+    },
+)
+async def delete_a_test_set(
+        test_set_id: uuid.UUID,
+        session: SessionDep,
+) -> dict: # pragma: no cover
+    """Delete a test set and every entry snapshotted into it.
+
+    Deleting a test set cascades to all of its entries in a single operation, so
+    the set and its snapshots are removed together. The live tests those entries
+    were originally snapshotted from are **not** affected — only the set and its
+    entries are deleted.
+
+    The delete is permitted only while none of the entries have been run. Once an
+    entry has at least one run it is frozen — so that the run's record of what it
+    executed against stays accurate — and the entire request is rejected with a
+    409 without removing anything.
+
+    On success the response is an empty object.
+    """
+    await delete_test_set_by_id(test_set_id, session)
+    return {}
 
 
 @router.patch(

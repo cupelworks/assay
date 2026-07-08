@@ -276,7 +276,12 @@ class TestSetModel(Base):
         DateTime, default=lambda: datetime.now().astimezone()
     )
 
-    entries: Mapped[list["TestSetEntryModel"]] = relationship(back_populates="test_set")
+    # passive_deletes lets the database's ON DELETE CASCADE remove the entries,
+    # instead of the ORM trying to null out their (NOT NULL) test_set_id first.
+    entries: Mapped[list["TestSetEntryModel"]] = relationship(
+        back_populates="test_set",
+        passive_deletes=True,
+    )
     plan_entries: Mapped[list["TestPlanEntryModel"]] = relationship(back_populates="test_set")
 
 
@@ -310,7 +315,7 @@ class TestSetEntryModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     test_set_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("test_sets.id"), nullable=False, index=True
+        ForeignKey("test_sets.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # Traceability FK — points back to the live test this snapshot was taken from.
     # Never used to sync or refresh snapshot data.
