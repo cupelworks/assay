@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import select
 
-from assay.models import TestSetEntryModel, TestSetModel
+from assay.models import TestRunModel, TestSetEntryModel, TestSetModel
 from assay.schemas import TestSetName
 
 
@@ -90,7 +90,7 @@ async def _check_tests_not_in_test_set_or_409(
         )
 
 
-async def _find_test_set_entry_or_404(
+async def _find_test_set_entry_in_specific_test_set_or_404(
         test_set_id: uuid.UUID,
         entry_id: uuid.UUID,
         session: AsyncSession
@@ -121,3 +121,33 @@ async def _find_test_set_entry_or_404(
         )
 
     return found
+
+
+async def _check_test_set_entry_has_no_runs_or_409(
+        entry_id: uuid.UUID,
+        session: AsyncSession
+) -> None:
+    """Raise 409 if the entry has already been executed at least once.
+
+    Once a run references a test set entry, the entry must stay frozen so the
+    run's record of what it executed against remains accurate.
+
+    Args:
+        entry_id: UUID of the test set entry to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 409 if a TestRunModel already references this entry.
+    """
+    has_runs = await session.scalar(
+        select(TestRunModel.id)
+        .where(TestRunModel.test_set_entry_id == entry_id)
+        .limit(1)
+    )
+
+    if has_runs is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Test entry with ID '{entry_id}' can't be updated"
+                   f" because it has runs"
+        )

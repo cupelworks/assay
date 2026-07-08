@@ -5,7 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestSetEntryModel
 from assay.schemas import PaginatedTestSetEntriesDetails, TestCaseID, TestSetEntryDetails
-from assay.services.test_sets._common import _find_test_set_entry_or_404, _find_test_set_or_404
+from assay.services.test_sets._common import (
+    _find_test_set_entry_in_specific_test_set_or_404,
+    _find_test_set_or_404,
+)
 
 
 async def get_test_sets_linked_tests(
@@ -87,7 +90,7 @@ async def get_test_set_linked_test_by_entry_id(
         HTTPException 404: The test set does not exist, or no entry with that ID exists in it.
     """
     await _find_test_set_or_404(test_set_id, session)
-    found = await _find_test_set_entry_or_404(test_set_id, entry_id, session)
+    found = await _find_test_set_entry_in_specific_test_set_or_404(test_set_id, entry_id, session)
 
     return TestSetEntryDetails(
         id=found.id,

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
 from assay.schemas import (
+    ModifyTestCaseRequest,
     PaginatedTestSetEntriesDetails,
     PaginatedTestSetMetadataResponse,
     TestCaseID,
@@ -22,11 +23,111 @@ from assay.services import (
     get_test_set_linked_test_by_entry_id,
     get_test_set_metadata_by_id,
     get_test_sets_linked_tests,
+    modify_entry_by_id,
 )
 
-router = APIRouter(tags=["test set"])
+router = APIRouter(tags=["test set / test set entry"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.patch(
+    path="/test-sets/{test_set_id}/entries/{entry_id}",
+    responses={
+        200: {
+            "description": "The full updated test set entry.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                        "test_case_id": {
+                            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                        },
+                        "name": "Refund request - happy path",
+                        "input": "I'd like a refund for order #4471.",
+                        "expected_output": "Sure, I've processed a refund for "
+                                            "order #4471.",
+                        "model_output": "Your refund for order #4471 has been "
+                                         "issued.",
+                        "test_type_names": ["semantic_similarity", "toxicity"],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": (
+                "No test set exists with the given ID, or no entry with the given "
+                "ID exists within that test set."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_set_not_found": {
+                            "summary": "Test set not found",
+                            "value": {
+                                "detail": "Test set with ID '<test_set_id>' not found"
+                            },
+                        },
+                        "entry_not_found": {
+                            "summary": "Entry not found in this test set",
+                            "value": {
+                                "detail": "Test entry with ID '<entry_id>' not found "
+                                          "in test set with ID '<test_set_id>'"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        409: {
+            "description": (
+                "The entry has already been executed at least once and is frozen. "
+                "No fields are updated."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test entry with ID '<entry_id>' can't be updated"
+                                  " because it has runs"
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "One or more test type names are not in the catalogue.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Unknown test types: {'Invalid Type'}"
+                    }
+                }
+            },
+        },
+    },
+    response_model=TestSetEntryDetails,
+)
+async def update_a_test_set_entry(
+        test_set_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        request: ModifyTestCaseRequest,
+        session: SessionDep,
+) -> TestSetEntryDetails: # pragma: no cover
+    """Partially update a test set entry, as long as it has never been executed.
+
+    Entries are editable only until their first run — once a run references the
+    entry, it is frozen and a 409 is returned, so the run's record of what it
+    executed against stays accurate. Note that an edited entry no longer reflects
+    the originating test's state at snapshot time; `test_case_id` keeps pointing
+    at the live test regardless.
+
+    Only fields explicitly set in the request body are written — omitted fields are
+    left unchanged. For `test_type_names` specifically, omitting it leaves the
+    snapshot list untouched, while `[]` clears it. Each provided name must exist in
+    the test types catalogue — a 422 is returned if any name is unrecognized.
+
+    Returns the full updated entry, so no follow-up GET is needed.
+    """
+    return await modify_entry_by_id(test_set_id, entry_id, request, session)
 
 
 @router.get(

@@ -8,6 +8,7 @@ from assay.services.test_sets.get_test_sets_metadata import (
     get_all_test_sets_metadata,
     get_test_set_metadata_by_id,
 )
+from assay.services.test_sets.update_entry import modify_entry_by_id
 
 __all__ = [
     "add_tests_to_test_set_by_test_id",
@@ -16,4 +17,5 @@ __all__ = [
     "get_test_set_metadata_by_id",
     "get_test_sets_linked_tests",
     "get_test_set_linked_test_by_entry_id",
+    "modify_entry_by_id",
 ]
