@@ -17,7 +17,7 @@ async def add_tests_to_test_set_by_test_id(
         request: list[TestCaseID],
         session: AsyncSession,
 ) -> list[TestSetEntryID]:
-    """Snapshot the given tests into a test set, creating one immutable entry per test.
+    """Snapshot the given tests into a test set, creating one entry per test.
 
     Runs three guards before writing:
     1. The test set must exist (404 otherwise).
@@ -26,8 +26,10 @@ async def add_tests_to_test_set_by_test_id(
 
     Each snapshot copies name, input, expected_output, model_output, and test_type_names
     from the live test at the moment of this call. Subsequent edits to the originating
-    test have no effect on the entry. Duplicate test IDs in the request are silently
-    deduplicated by the SQL IN clause — each test produces exactly one entry.
+    test have no effect on the entry, though the entry itself can still be edited
+    directly until it has been run at least once, after which it freezes. Duplicate
+    test IDs in the request are silently deduplicated by the SQL IN clause — each test
+    produces exactly one entry.
 
     Args:
         test_set_id: UUID of the test set to add entries to.

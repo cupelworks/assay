@@ -34,11 +34,13 @@ if TYPE_CHECKING:
 #      A named, ordered collection of tests. When a test is added to a test set,
 #      a snapshot (TestSetEntryModel) is created at that exact moment — copying
 #      input, expected_output, and test_type_names from the live TestModel. From
-#      that point on, the snapshot is immutable: changes to the live test do NOT
-#      propagate into the set. This mirrors the behavior of test management
-#      tools like Jira/Zephyr, where a test set represents a stable, auditable
-#      baseline. The live TestModel remains editable and can be snapshotted again
-#      into the same or different test sets at any time.
+#      that point on, changes to the live test do NOT propagate into the set —
+#      this mirrors the behavior of test management tools like Jira/Zephyr, where
+#      a test set represents a stable, auditable baseline. The snapshot itself
+#      can still be edited directly (PATCH) up until it has been run at least
+#      once, at which point it freezes so run history stays reproducible. The
+#      live TestModel remains editable and can be snapshotted again into the
+#      same or different test sets at any time.
 #
 #      Test type names (not UUIDs) are stored in the snapshot as a JSON list of
 #      strings. This keeps the snapshot self-contained and human-readable, and
@@ -62,8 +64,10 @@ if TYPE_CHECKING:
 #
 #   - SET-BASED: test_set_entry_id is set, test_id is None.
 #     The run is part of a test set (or plan) execution. Input and configuration
-#     are read from the frozen TestSetEntryModel snapshot, guaranteeing
-#     reproducibility regardless of subsequent edits to the live test.
+#     are read from the TestSetEntryModel snapshot, guaranteeing reproducibility
+#     regardless of subsequent edits to the live test. Once a run references an
+#     entry, the entry itself also freezes (see TestSetEntryModel), so the run's
+#     record of what it executed against stays accurate too.
 #
 #   Invariant enforced at the service layer:
 #     exactly one of (test_id, test_set_entry_id) must be set — never both,
@@ -162,9 +166,12 @@ class TestModel(Base):
     coverage reporting, but the test owns its own data and changes to the
     source dataset row are never propagated here.
 
-    When added to a TestSetModel, a frozen snapshot (TestSetEntryModel) is
-    created from the test's current state. The live TestModel continues to
-    be editable and can be snapshotted multiple times into different sets.
+    When added to a TestSetModel, a snapshot (TestSetEntryModel) is created
+    from the test's current state. That snapshot never re-syncs from this
+    live test again, though it remains directly editable in its own right
+    until it has been run at least once (see TestSetEntryModel). The live
+    TestModel continues to be editable and can be snapshotted multiple times
+    into different sets.
 
     Test types are assigned via TestTypeAssignmentModel, a junction table that
     references TestTypesModel by name rather than UUID. This makes the
@@ -248,12 +255,14 @@ class TestTypeAssignmentModel(Base):
 
 class TestSetModel(Base):
     """
-    A named, stable collection of frozen test snapshots.
+    A named, stable collection of test snapshots.
 
     A test set is the organizational unit between individual tests and test
     plans. When a test is added to a set, its current state is copied into a
-    TestSetEntryModel. From that point on the snapshot is immutable — the set
-    always represents the same baseline regardless of how the live tests evolve.
+    TestSetEntryModel. That snapshot never re-syncs from the live test again —
+    the set always represents the baseline it was given, regardless of how the
+    live tests evolve — but each entry can still be edited directly until it
+    has been run at least once, after which it freezes (see TestSetEntryModel).
 
     Test sets can be included in one or more TestPlanModels via
     TestPlanEntryModel junction records.
@@ -273,11 +282,16 @@ class TestSetModel(Base):
 
 class TestSetEntryModel(Base):
     """
-    An immutable snapshot of a TestModel at the moment it was added to a TestSetModel.
+    A snapshot of a TestModel at the moment it was added to a TestSetModel.
 
-    This is the frozen record that test set executions run against. It captures
-    input, expected_output, and test_type_names exactly as they were at snapshot
-    time. Subsequent edits to the originating TestModel have no effect here.
+    This is the record that test set executions run against. It captures input,
+    expected_output, and test_type_names exactly as they were at snapshot time.
+    Subsequent edits to the originating TestModel never propagate here.
+
+    The entry itself is directly editable (PATCH) until it has been referenced
+    by at least one TestRunModel — at that point it freezes and further edits
+    are rejected with a 409, so a run's record of what it executed against
+    always stays accurate.
 
     Test type names (not UUIDs) are stored as a JSON list of strings. This keeps
     the snapshot self-contained and human-readable, and consistent with the
@@ -304,7 +318,8 @@ class TestSetEntryModel(Base):
         ForeignKey("tests.id"), nullable=False
     )
 
-    # Immutable snapshot fields — copied from TestModel at inclusion time.
+    # Snapshot fields — copied from TestModel at inclusion time, and directly
+    # editable thereafter until the entry has been run (see class docstring).
     name: Mapped[str] = mapped_column(Text, nullable=False)
     input: Mapped[str] = mapped_column(Text)
     expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -331,8 +346,9 @@ class TestPlanModel(Base):
 
     A test plan operates at the test set level, not the individual test level.
     Executing a plan fans out into one TestRunModel per TestSetEntryModel
-    across all included test sets, preserving the frozen snapshot guarantee
-    throughout the entire campaign.
+    across all included test sets. Executing an entry also freezes it (see
+    TestSetEntryModel), preserving the reproducibility guarantee throughout
+    the entire campaign.
     """
 
     __tablename__ = "test_plans"
@@ -382,9 +398,10 @@ class TestRunModel(Base):
 
     SET-BASED (test_set_entry_id set, test_id None):
         The run is part of a test set or plan execution. Input and
-        configuration are read from the frozen TestSetEntryModel snapshot,
+        configuration are read from the TestSetEntryModel snapshot,
         guaranteeing that the run is always reproducible regardless of
-        subsequent edits to the live test.
+        subsequent edits to the live test. Once a run exists, the entry
+        itself also rejects further direct edits (see TestSetEntryModel).
 
     Invariant (enforced at the service layer):
         Exactly one of (test_id, test_set_entry_id) must be non-null.

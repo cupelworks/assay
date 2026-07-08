@@ -188,10 +188,11 @@ async def get_single_test_set_entry(
 ) -> TestSetEntryDetails: # pragma: no cover
     """Retrieve a single entry from a test set by its ID.
 
-    Returns the entry's frozen snapshot data (`name`, `input`, `expected_output`,
+    Returns the entry's snapshot data (`name`, `input`, `expected_output`,
     `model_output`, `test_type_names`) as it was at the moment the test was added to
-    the set, along with `test_case_id`, which traces the entry back to the live test
-    it was created from.
+    the set — or as it was last edited via `PATCH`, if it has been edited and has no
+    runs yet — along with `test_case_id`, which traces the entry back to the live
+    test it was created from.
     """
     return await get_test_set_linked_test_by_entry_id(test_set_id, entry_id, session)
 
@@ -269,11 +270,13 @@ async def get_all_test_set_entries(
 ) -> PaginatedTestSetEntriesDetails: # pragma: no cover
     """List all entries (snapshotted tests) belonging to a test set, paginated.
 
-    Each entry is an immutable snapshot captured at the moment a test was added to
-    the set via `POST /test-sets/{test_set_id}/entries` — `input`, `expected_output`,
+    Each entry is a snapshot captured at the moment a test was added to the set via
+    `POST /test-sets/{test_set_id}/entries` — `input`, `expected_output`,
     `model_output`, and `test_type_names` reflect the test's state at that time, not
-    its current live state. `test_case_id` traces the entry back to the live test it
-    was created from.
+    its current live state, and never re-sync from it. The entry itself can still be
+    edited directly via `PATCH /test-sets/{test_set_id}/entries/{entry_id}` until it
+    has been run at least once, after which it freezes. `test_case_id` traces the
+    entry back to the live test it was created from.
 
     Results are ordered by `name`, with `id` as a tiebreaker, so pagination is stable
     across pages even when multiple entries share the same name.
@@ -346,12 +349,14 @@ async def add_tests_to_test_set(
         request: list[TestCaseID],
         session: SessionDep,
 ) -> list[TestSetEntryID]: # pragma: no cover
-    """Snapshot one or more tests into a test set, freezing their current state.
+    """Snapshot one or more tests into a test set.
 
-    Each test in the request body is copied into an immutable entry that captures
-    `name`, `input`, `expected_output`, `model_output`, and `test_type_names` at
-    the moment this endpoint is called. Subsequent edits to the originating test
-    have no effect on the snapshot.
+    Each test in the request body is copied into an entry that captures `name`,
+    `input`, `expected_output`, `model_output`, and `test_type_names` at the
+    moment this endpoint is called. Subsequent edits to the originating test have
+    no effect on the entry — but the entry itself can still be edited directly via
+    `PATCH /test-sets/{test_set_id}/entries/{entry_id}` until it has been run at
+    least once, after which it freezes.
 
     Three checks run before any data is written:
     - The test set must exist (404 if not).
