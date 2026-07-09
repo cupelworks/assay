@@ -79,7 +79,7 @@ def test_test_set_entry_has_runs():
         )
 
     assert e.value.status_code == 409
-    assert f"Test entry with ID '{entry_id}' can't be updated" in str(e.value.detail)
+    assert f"Test entry with ID '{entry_id}' can't be modified" in str(e.value.detail)
     assert session.scalar.call_count == 3
 
 

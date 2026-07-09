@@ -341,7 +341,8 @@ class TestSetEntryModel(Base):
     test: Mapped["TestModel"] = relationship(back_populates="set_entries")
     runs: Mapped[list["TestRunModel"]] = relationship(
         back_populates="test_set_entry",
-        foreign_keys="TestRunModel.test_set_entry_id"
+        foreign_keys="TestRunModel.test_set_entry_id",
+        passive_deletes=True,
     )
 
 

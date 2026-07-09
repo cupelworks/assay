@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import select
 
 from assay.models import TestRunModel, TestSetEntryModel, TestSetModel
-from assay.schemas import TestSetName
+from assay.schemas import TestSetEntryID, TestSetName
 
 
 async def _check_unique_test_set_name_or_409(
@@ -123,6 +123,52 @@ async def _find_test_set_entry_in_specific_test_set_or_404(
     return found
 
 
+async def _find_test_set_entries_in_specific_test_set_or_404(
+        test_set_id: uuid.UUID,
+        entries: list[TestSetEntryID],
+        session: AsyncSession,
+):
+    """Fetch multiple test set entries by ID, scoped to their parent test set.
+
+    Raises 404 if any requested ID does not resolve to an entry in this test
+    set — either because no entry with that ID exists at all, or because it
+    belongs to a different test set. Duplicate IDs in the request are
+    silently deduplicated.
+
+    Args:
+        test_set_id: UUID of the test set the entries must belong to.
+        entries: IDs of the entries to look up.
+        session: Active async database session.
+
+    Returns:
+        The matching TestSetEntryModel instances.
+
+    Raises:
+        HTTPException: 404 if one or more entry IDs don't resolve to an
+            entry in this test set.
+    """
+    entries_ids = [entry.id for entry in entries]
+
+    finding = (await session.scalars(
+        select(TestSetEntryModel)
+        .where(TestSetEntryModel.test_set_id == test_set_id)
+        .where(TestSetEntryModel.id.in_(entries_ids))
+    )).all()
+
+    found_ids = [found.id for found in finding]
+
+    difference = set(entries_ids) - set(found_ids)
+
+    if difference:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test entries with ID '{[str(_id) for _id in difference]}' "
+                   f"not linked to test set with ID '{test_set_id}'"
+        )
+
+    return finding
+
+
 async def _check_test_set_entry_has_no_runs_or_409(
         entry_id: uuid.UUID,
         session: AsyncSession
@@ -148,7 +194,7 @@ async def _check_test_set_entry_has_no_runs_or_409(
     if has_runs is not None:
         raise HTTPException(
             status_code=409,
-            detail=f"Test entry with ID '{entry_id}' can't be updated"
+            detail=f"Test entry with ID '{entry_id}' can't be modified"
                    f" because it has runs"
         )
 
@@ -182,5 +228,40 @@ async def _check_test_set_entries_have_no_runs_or_409(
         raise HTTPException(
             status_code=409,
             detail=f"Test set with ID '{test_set_id}' can't be deleted "
-                   f"because one or more of its entries have runs",
+                   f"because one or more of its entries have runs"
+        )
+
+
+async def _check_given_test_set_entries_have_no_runs_or_409(
+        entries: list[TestSetEntryID],
+        session: AsyncSession,
+) -> None:
+    """Raise 409 if any of the given entries has already been executed.
+
+    Scoped only to the entries passed in, not the whole test set they
+    belong to — a run on some other entry in the same set is not a reason
+    to block these ones. The detail message lists the IDs of the entries
+    that have runs, so the caller knows exactly which ones to remove from
+    the request.
+
+    Args:
+        entries: The test set entries to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 409 listing the entry IDs that already have runs.
+    """
+    ids_only = [entry.id for entry in entries]
+
+    has_runs = (await session.scalars(
+        select(TestRunModel.test_set_entry_id)
+        .where(TestRunModel.test_set_entry_id.in_(ids_only))
+    )).all()
+
+    if has_runs:
+        raise HTTPException(
+            status_code=409,
+            detail=f"The Test Set Entries with ID "
+                   f"{[str(_id) for _id in has_runs]} have runs, "
+                   f"therefore they can't be deleted"
         )

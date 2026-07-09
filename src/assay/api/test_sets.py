@@ -20,6 +20,7 @@ from assay.services import (
     add_tests_to_test_set_by_test_id,
     create_new_test_set,
     delete_test_set_by_id,
+    delete_test_set_entries_by_id,
     get_all_test_sets_metadata,
     get_test_set_linked_test_by_entry_id,
     get_test_set_metadata_by_id,
@@ -30,6 +31,94 @@ from assay.services import (
 router = APIRouter(tags=["test set / test set entry"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.delete(
+    path="/test-sets/{test_set_id}/entries",
+    responses={
+        200: {
+            "description": (
+                "All requested entries were deleted in a single operation. The "
+                "response body is an empty object. The test set itself, its "
+                "remaining entries, and the live tests those entries were "
+                "snapshotted from are all left untouched."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {}
+                }
+            },
+        },
+        404: {
+            "description": (
+                "No test set exists with the given ID, or one or more requested "
+                "entry IDs do not resolve to an entry within that test set — "
+                "either because no entry with that ID exists at all, or because "
+                "it belongs to a different test set. Nothing is deleted, even if "
+                "some of the requested entries were valid."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_set_not_found": {
+                            "summary": "Test set not found",
+                            "value": {
+                                "detail": "Test set with ID '<test_set_id>' not found"
+                            },
+                        },
+                        "entries_not_found": {
+                            "summary": "One or more entries not found in this test set",
+                            "value": {
+                                "detail": "Test entries with ID '[<entry_id>, ...]' "
+                                          "not linked to test set with ID "
+                                          "'<test_set_id>'"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        409: {
+            "description": (
+                "One or more of the requested entries have already been executed "
+                "at least once, i.e. they have one or more runs. Executed entries "
+                "are frozen so that each run's record of what it evaluated against "
+                "stays accurate, so none of the requested entries can be deleted "
+                "while any of them still has a run referencing it. Nothing is "
+                "deleted, even if some of the requested entries have no runs."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "The Test Set Entries with ID '[<entry_id>, ...]' "
+                                  "have runs, therefore they can't be deleted"
+                    }
+                }
+            },
+        },
+    },
+)
+async def delete_specific_test_set_entries(
+        test_set_id: uuid.UUID,
+        request: list[TestSetEntryID],
+        session: SessionDep,
+) -> dict: # pragma: no cover
+    """Delete one or more entries from a test set in a single bulk operation.
+
+    Only the requested entries are removed — the test set itself, any of its
+    entries not included in the request, and the live tests those entries
+    were originally snapshotted from are all **not** affected.
+
+    Every requested entry must exist within this test set, and none of them
+    may have ever been run. If any requested entry is missing, or belongs to
+    a different test set, or has at least one run, the entire request is
+    rejected (404 or 409, respectively) and **nothing is deleted** — this is
+    all-or-nothing, not a partial/best-effort delete.
+
+    On success the response is an empty object.
+    """
+    await delete_test_set_entries_by_id(test_set_id, request, session)
+    return {}
 
 
 @router.delete(
@@ -154,7 +243,7 @@ async def delete_a_test_set(
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Test entry with ID '<entry_id>' can't be updated"
+                        "detail": "Test entry with ID '<entry_id>' can't be modified"
                                   " because it has runs"
                     }
                 }
