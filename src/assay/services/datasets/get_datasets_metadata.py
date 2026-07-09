@@ -24,7 +24,7 @@ async def get_datasets_metadata(
         A paginated response with dataset metadata, total count, offset, and limit.
     """
 
-    total = await session.scalar(select(func.count(DatasetModel.id)).select_from(DatasetModel))
+    total = await session.scalar(select(func.count(DatasetModel.id))) or 0
     datasets = await session.scalars(select(DatasetModel)
                                      .offset(offset).limit(limit))
     

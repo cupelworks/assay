@@ -33,7 +33,7 @@ async def get_dataset_rows_by_id(
     _ = await _get_dataset_or_404(dataset_id, session)
 
     total = await session.scalar(select(func.count(DatasetRowModel.dataset_id))
-                                 .where(DatasetRowModel.dataset_id == dataset_id))
+                                 .where(DatasetRowModel.dataset_id == dataset_id)) or 0
     rows = await session.scalars(select(DatasetRowModel)
                                  .where(DatasetRowModel.dataset_id == dataset_id)
                                  .offset(offset).limit(limit))

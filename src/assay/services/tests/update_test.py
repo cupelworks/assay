@@ -2,9 +2,56 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import TestTypeAssignmentModel
+from assay.models import TestModel, TestSetEntryModel, TestTypeAssignmentModel
 from assay.schemas import CreateTestCaseResponse, ModifyTestCaseRequest
 from assay.services.tests._common import _find_test_by_id_or_404, _validate_test_type_name
+
+
+def _apply_scalar_updates(
+        found: TestModel | TestSetEntryModel,
+        request: ModifyTestCaseRequest
+) -> None:
+    """Write each explicitly-set scalar field from the request onto the test case.
+
+    Omitted fields (None) are left unchanged.
+
+    Args:
+        found: The test case being updated.
+        request: Partial update payload.
+    """
+    if request.name is not None:
+        found.name = request.name
+    if request.input is not None:
+        found.input = request.input
+    if request.expected_output is not None:
+        found.expected_output = request.expected_output
+    if request.model_output is not None:
+        found.model_output = request.model_output
+
+
+async def _apply_test_type_names_update(
+        found: TestModel,
+        request: ModifyTestCaseRequest,
+        session: AsyncSession,
+) -> None:
+    """Validate and rebuild the test case's test type assignments, if requested.
+
+    None means "don't touch assignments"; [] means "remove all".
+
+    Args:
+        found: The test case being updated.
+        request: Partial update payload.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 422 if any provided test type name is not in the catalogue.
+    """
+    if request.test_type_names is not None:
+        await _validate_test_type_name(session, request.test_type_names)
+        found.test_type_assignments = [
+            TestTypeAssignmentModel(test_id=found.id, test_type_name=name)
+            for name in request.test_type_names
+        ]
 
 
 async def modify_test_by_id(
@@ -33,22 +80,8 @@ async def modify_test_by_id(
     """
     found = await _find_test_by_id_or_404(test_case_id, session)
 
-    if request.name is not None:
-        found.name = request.name
-    if request.input is not None:
-        found.input = request.input
-    if request.expected_output is not None:
-        found.expected_output = request.expected_output
-    if request.model_output is not None:
-        found.model_output = request.model_output
-
-    # None means "don't touch assignments"; [] means "remove all"
-    if request.test_type_names is not None:
-        await _validate_test_type_name(session, request.test_type_names)
-        found.test_type_assignments = [
-            TestTypeAssignmentModel(test_id=found.id, test_type_name=name)
-            for name in request.test_type_names
-        ]
+    _apply_scalar_updates(found, request)
+    await _apply_test_type_names_update(found, request, session)
 
     await session.commit()
 

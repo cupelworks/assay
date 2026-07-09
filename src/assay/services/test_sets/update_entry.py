@@ -1,0 +1,69 @@
+import uuid
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from assay.schemas import ModifyTestCaseRequest, TestCaseID, TestSetEntryDetails
+from assay.services.test_sets._common import (
+    _check_test_set_entry_has_no_runs_or_409,
+    _find_test_set_entry_in_specific_test_set_or_404,
+    _find_test_set_or_404,
+)
+from assay.services.tests._common import _validate_test_type_name
+from assay.services.tests.update_test import _apply_scalar_updates
+
+
+async def modify_entry_by_id(
+        test_set_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        request: ModifyTestCaseRequest,
+        session: AsyncSession
+) -> TestSetEntryDetails:
+    """Partially update a test set entry and return the full updated record.
+
+    Entries are editable only until they are first executed — once a run
+    references the entry, it is frozen and a 409 is returned, so the run's
+    record of what it executed against stays accurate. Note that editing an
+    entry means it no longer reflects the originating test's state at
+    snapshot time; test_case_id keeps pointing at the live test regardless.
+
+    Only fields explicitly set in the request are written — omitted fields (None)
+    are left unchanged. For test_type_names specifically: None leaves the snapshot
+    list untouched, while [] clears it.
+
+    Args:
+        test_set_id: UUID of the test set the entry belongs to.
+        entry_id: UUID of the entry to update.
+        request: Partial update payload — any combination of name, input,
+            expected_output, model_output, and test_type_names.
+        session: Active async database session.
+
+    Returns:
+        The full updated entry, so the caller does not need a follow-up GET.
+
+    Raises:
+        HTTPException: 404 if the test set does not exist, or no entry with that
+            ID exists in it.
+        HTTPException: 409 if the entry has already been executed at least once.
+        HTTPException: 422 if any provided test type name is not in the catalogue.
+    """
+    await _find_test_set_or_404(test_set_id, session)
+    found = await _find_test_set_entry_in_specific_test_set_or_404(test_set_id, entry_id, session)
+    await _check_test_set_entry_has_no_runs_or_409(entry_id, session)
+
+    _apply_scalar_updates(found, request)
+
+    if request.test_type_names is not None:
+        await _validate_test_type_name(session, request.test_type_names)
+        found.test_type_names = request.test_type_names
+
+    await session.commit()
+
+    return TestSetEntryDetails(
+        id=found.id,
+        test_case_id=TestCaseID(id=found.test_id),
+        name=found.name,
+        input=found.input,
+        expected_output=found.expected_output,
+        model_output=found.model_output,
+        test_type_names=found.test_type_names,
+    )

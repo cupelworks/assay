@@ -2,8 +2,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from assay.models import Pagination
-from assay.schemas import DataSetID
+from assay.schemas import DataSetID, Pagination
 
 
 class CreateTestCaseRequest(BaseModel):

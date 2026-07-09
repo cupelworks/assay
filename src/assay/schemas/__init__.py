@@ -1,3 +1,4 @@
+from assay.schemas._common import Pagination
 from assay.schemas.datasets import (
     DataRowInfo,
     DataSetDeletedData,
@@ -14,9 +15,15 @@ from assay.schemas.datasets import (
     DataSetRowUpdatedData,
     PaginatedDataSetResponse,
     PaginatedDataSetRowResponse,
-    Pagination,
 )
 from assay.schemas.stats import ZTestRequest, ZTestResult
+from assay.schemas.test_sets import (
+    PaginatedTestSetMetadataResponse,
+    TestSetCreationResponse,
+    TestSetID,
+    TestSetMetadata,
+    TestSetName,
+)
 from assay.schemas.tests import (
     CreateTestCaseFromDatasetRequest,
     CreateTestCaseFromDatasetResponse,
@@ -27,14 +34,20 @@ from assay.schemas.tests import (
     TestCaseID,
 )
 
+# isort: split
+# test_set_entries imports CreateTestCaseRequest from assay.schemas — must load after tests
+from assay.schemas.test_set_entries import (
+    PaginatedTestSetEntriesDetails,
+    TestSetEntryDetails,
+    TestSetEntryID,
+)
+
 __all__ = [
     "ZTestRequest",
     "ZTestResult",
     "CreateTestCaseRequest",
     "CreateTestCaseResponse",
     "PaginatedTestCases",
-    "TestCaseID",
-    "CreateTestCaseRequest",
     "CreateTestCaseResponse",
     "CreateTestCaseFromDatasetRequest",
     "CreateTestCaseFromDatasetResponse",
@@ -54,6 +67,14 @@ __all__ = [
     "ModifyTestCaseRequest",
     "PaginatedDataSetResponse",
     "PaginatedDataSetRowResponse",
+    "PaginatedTestSetEntriesDetails",
+    "PaginatedTestSetMetadataResponse",
     "Pagination",
     "TestCaseID",
+    "TestSetEntryDetails",
+    "TestSetEntryID",
+    "TestSetID",
+    "TestSetMetadata",
+    "TestSetName",
+    "TestSetCreationResponse",
 ]
