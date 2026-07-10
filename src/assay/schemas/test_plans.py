@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from assay.schemas import Pagination
+
 
 class TestPlanName(BaseModel):
     name: str = Field(
@@ -24,6 +26,10 @@ class TestPlanMetadata(TestPlanID, TestPlanName):
         ...,
         description="The creation date of the test plan.",
     )
+
+
+class PaginatedTestPlanMetadataResponse(Pagination):
+    items: list[TestPlanMetadata]
 
 
 class TestPlanCreationResponse(TestPlanID, TestPlanName):

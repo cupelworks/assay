@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,3 +31,33 @@ async def _check_unique_test_plan_name_or_409(
             status_code=409,
             detail=f"Test plan with name '{request.name}' already exists"
         )
+
+
+async def _find_test_plan_by_id_or_404(
+        test_plan_id: uuid.UUID,
+        session: AsyncSession,
+):
+    """Fetch a test plan by ID, raising 404 if it does not exist.
+
+    Args:
+        test_plan_id: The UUID of the test plan to look up.
+        session: Active async database session.
+
+    Returns:
+        The matching TestPlanModel instance.
+
+    Raises:
+        HTTPException: 404 if no test plan with the given ID exists.
+    """
+    found = await session.scalar(
+        select(TestPlanModel)
+        .where(TestPlanModel.id == test_plan_id)
+    )
+
+    if found is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test plan with ID '{test_plan_id}' not found"
+        )
+
+    return found

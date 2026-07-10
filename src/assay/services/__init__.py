@@ -11,7 +11,11 @@ from assay.services.datasets import (
     upload_new_rows_in_existing_dataset,
 )
 from assay.services.stats import run_z_test
-from assay.services.test_plans import create_new_test_plan
+from assay.services.test_plans import (
+    create_new_test_plan,
+    get_all_test_plans_metadata,
+    get_test_plan_metadata_by_id,
+)
 from assay.services.test_sets import (
     add_tests_to_test_set_by_test_id,
     create_new_test_set,
@@ -42,6 +46,8 @@ __all__ = [
     "delete_test_set_by_id",
     "delete_test_set_entries_by_id",
     "get_all_created_tests",
+    "get_all_test_plans_metadata",
+    "get_test_plan_metadata_by_id",
     "get_datasets_metadata",
     "get_dataset_metadata_by_id",
     "get_dataset_rows_by_id",
