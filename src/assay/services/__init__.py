@@ -11,6 +11,7 @@ from assay.services.datasets import (
     upload_new_rows_in_existing_dataset,
 )
 from assay.services.stats import run_z_test
+from assay.services.test_plans import create_new_test_plan
 from assay.services.test_sets import (
     add_tests_to_test_set_by_test_id,
     create_new_test_set,
@@ -35,6 +36,7 @@ __all__ = [
     "add_tests_to_test_set_by_test_id",
     "create_new_test",
     "create_new_test_from_dataset",
+    "create_new_test_plan",
     "create_new_test_set",
     "delete_test_by_id",
     "delete_test_set_by_id",
