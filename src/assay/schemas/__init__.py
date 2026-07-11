@@ -31,6 +31,7 @@ from assay.schemas.test_plans import (
     TestPlanName,
 )
 from assay.schemas.test_sets import (
+    ModifyTestSetMetadataRequest,
     PaginatedTestSetMetadataResponse,
     TestSetCreationResponse,
     TestSetID,
@@ -79,6 +80,7 @@ __all__ = [
     "DataSetMetadata",
     "ModifyTestCaseRequest",
     "ModifyTestPlanRequest",
+    "ModifyTestSetMetadataRequest",
     "PaginatedDataSetResponse",
     "PaginatedDataSetRowResponse",
     "PaginatedTestPlanEntriesDetails",

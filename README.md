@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Test plans are partially implemented (create, list, get, rename, and list the test sets included in a plan); adding/removing test sets from a plan, deleting a plan, and executing it are not yet built. LLM-as-judge evaluators, test runs, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, rename, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Test plans are partially implemented (create, list, get, rename, and list the test sets included in a plan); adding/removing test sets from a plan, deleting a plan, and executing it are not yet built. LLM-as-judge evaluators, test runs, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -80,6 +80,7 @@ src/assay/
 │   │   ├── add_tests_to_test_set.py    # Snapshot tests into a set as entries
 │   │   ├── get_test_sets_entries.py    # Paginated listing and single fetch of entries
 │   │   ├── update_entry.py             # Partial update of an entry, until it has been run
+│   │   ├── update_test_set.py          # Rename, with a self-name no-op guard around the uniqueness check
 │   │   └── delete_test_set.py          # Delete a whole set (cascades to entries), or bulk-delete specific entries — both blocked while any target entry has runs
 │   ├── test_plans/
 │   │   ├── _common.py                  # Shared helpers (_check_unique_test_plan_name_or_409, _find_test_plan_by_id_or_404)
@@ -143,6 +144,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/test-sets` | List all test sets (paginated) |
 | `GET` | `/test-sets/{test_set_id}` | Retrieve metadata for a single test set |
 | `POST` | `/test-sets` | Create a new test set (name must be unique) |
+| `PATCH` | `/test-sets/{test_set_id}` | Rename a test set — resubmitting its current, unchanged name is a no-op, not a 409 |
 | `DELETE` | `/test-sets/{test_set_id}` | Delete a test set and all of its entries — blocked with a 409 if any entry has runs |
 | `GET` | `/test-sets/{test_set_id}/entries` | List all entries (snapshotted tests) in a test set (paginated) |
 | `GET` | `/test-sets/{test_set_id}/entries/{entry_id}` | Retrieve a single entry by ID |
