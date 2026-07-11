@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
 from assay.schemas import (
+    PaginatedTestPlanEntriesDetails,
     PaginatedTestPlanMetadataResponse,
     TestPlanCreationResponse,
     TestPlanMetadata,
@@ -13,6 +14,7 @@ from assay.schemas import (
 )
 from assay.services import (
     create_new_test_plan,
+    get_all_test_plan_entries_metadata,
     get_all_test_plans_metadata,
     get_test_plan_metadata_by_id,
 )
@@ -20,6 +22,79 @@ from assay.services import (
 router = APIRouter(tags=["test plan"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.get(
+    path="/test-plans/{test_plan_id}/entries",
+    responses={
+        200: {
+            "description": "A paginated list of the test sets included in the test "
+                            "plan, ordered by the test set's `name` (with its `id` "
+                            "as a tiebreaker for test sets sharing a name).",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "total": 2,
+                        "offset": 0,
+                        "limit": 100,
+                        "items": [
+                            {
+                                "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                                "test_set": {
+                                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                                    "name": "Regression suite",
+                                    "created_at": "2026-07-03T15:43:09.032480",
+                                },
+                            },
+                            {
+                                "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+                                "test_set": {
+                                    "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+                                    "name": "Smoke tests",
+                                    "created_at": "2026-07-03T16:00:00.000000",
+                                },
+                            },
+                        ],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "No test plan exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test plan with ID '<test_plan_id>' not found"
+                    }
+                }
+            },
+        },
+    },
+    response_model=PaginatedTestPlanEntriesDetails,
+)
+async def get_all_test_sets_metadata_in_a_test_plan(
+        test_plan_id: uuid.UUID,
+        session: SessionDep,
+        offset: int = Query(default=0, description="Number of records to skip for pagination."),
+        limit: int = Query(default=100, description="Maximum number of records to "
+                                                    "return for pagination."),
+) -> PaginatedTestPlanEntriesDetails: # pragma: no cover
+    """List the test sets included in a test plan, paginated.
+
+    Each item is an entry linking the test plan to one of its test sets: `id` is
+    the entry's own identifier (the plan-to-set link, not the test set's), and
+    `test_set` embeds that test set's `id`, `name`, and `created_at`. Use the
+    embedded `test_set.id` to fetch the snapshotted tests inside that set via
+    `GET /test-sets/{test_set_id}/entries`.
+
+    Results are ordered by the linked test set's `name`, with its `id` as a
+    tiebreaker, so pagination is stable across pages even when multiple test sets
+    share the same name.
+
+    Use `offset` and `limit` to page through results. The response includes `total`
+    so the client can calculate the number of pages.
+    """
+    return await get_all_test_plan_entries_metadata(test_plan_id, session, offset, limit)
 
 
 @router.get(

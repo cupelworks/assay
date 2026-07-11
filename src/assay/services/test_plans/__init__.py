@@ -1,4 +1,7 @@
 from assay.services.test_plans.create_test_plan import create_new_test_plan
+from assay.services.test_plans.get_test_plan_entries_metadata import (
+    get_all_test_plan_entries_metadata,
+)
 from assay.services.test_plans.get_test_plans_metadata import (
     get_all_test_plans_metadata,
     get_test_plan_metadata_by_id,
@@ -6,6 +9,7 @@ from assay.services.test_plans.get_test_plans_metadata import (
 
 __all__ = [
     "create_new_test_plan",
+    "get_all_test_plan_entries_metadata",
     "get_all_test_plans_metadata",
     "get_test_plan_metadata_by_id",
 ]

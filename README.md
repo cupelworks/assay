@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs. LLM-as-judge evaluators, test plans, test runs, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Test plans are partially implemented (create, list, get, and list the test sets included in a plan); adding/removing test sets from a plan, updating or deleting a plan, and executing it are not yet built. LLM-as-judge evaluators, test runs, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -48,6 +48,7 @@ src/assay/
 │   ├── datasets.py      # Dataset endpoints
 │   ├── test.py          # Test case endpoints
 │   ├── test_sets.py     # Test set and test set entry endpoints
+│   ├── test_plan.py     # Test plan endpoints
 │   ├── stats.py         # Statistical test endpoints
 │   └── meta.py          # Health check
 ├── schemas/             # Pydantic models — API validation and serialization
@@ -56,6 +57,8 @@ src/assay/
 │   ├── datasets.py      # Dataset and row schemas
 │   ├── test_sets.py     # Test set schemas (TestSetMetadata, PaginatedTestSetMetadataResponse, etc.)
 │   ├── test_set_entries.py  # Test set entry schemas (TestSetEntryDetails, PaginatedTestSetEntriesDetails, etc.)
+│   ├── test_plans.py    # Test plan schemas (TestPlanMetadata, PaginatedTestPlanMetadataResponse, etc.)
+│   ├── test_plan_entries.py  # Test plan entry schemas (TestPlanEntryDetails, PaginatedTestPlanEntriesDetails)
 │   ├── tests.py         # Test case schemas (CreateTestCaseRequest, ModifyTestCaseRequest, etc.)
 │   └── stats.py         # ZTestRequest, ZTestResult
 ├── services/            # Business logic — one file per operation
@@ -77,7 +80,12 @@ src/assay/
 │   │   ├── add_tests_to_test_set.py    # Snapshot tests into a set as entries
 │   │   ├── get_test_sets_entries.py    # Paginated listing and single fetch of entries
 │   │   ├── update_entry.py             # Partial update of an entry, until it has been run
-│   │   └── delete_test_set.py          # Delete a set and cascade to its entries, until any has runs
+│   │   └── delete_test_set.py          # Delete a whole set (cascades to entries), or bulk-delete specific entries — both blocked while any target entry has runs
+│   ├── test_plans/
+│   │   ├── _common.py                  # Shared helpers (_check_unique_test_plan_name_or_409, _find_test_plan_by_id_or_404)
+│   │   ├── create_test_plan.py
+│   │   ├── get_test_plans_metadata.py         # Paginated listing and single fetch by ID
+│   │   └── get_test_plan_entries_metadata.py  # Paginated listing of the test sets included in a plan
 │   ├── tests/
 │   │   ├── _common.py                  # Shared helpers (_find_all_tests_or_404, _find_test_by_id_or_404, _validate_test_type_name)
 │   │   ├── create_new_test.py          # Manual creation and bulk creation from dataset
@@ -91,7 +99,7 @@ src/assay/
     ├── datasets.py      # DatasetModel, DatasetRowModel
     ├── stats.py         # StatisticalVerificationModel
     └── test.py          # TestModel, TestSetModel, TestSetEntryModel, TestPlanModel,
-                         # TestRunModel, and related junction tables
+                         # TestPlanEntryModel, TestRunModel, and related junction tables
 alembic/                 # Alembic migration environment
 alembic.ini              # Alembic configuration (URL is read from ASSAY_DATABASE_URL at runtime)
 tests/                   # Pytest suite mirroring src/assay/services/
@@ -139,6 +147,15 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/test-sets/{test_set_id}/entries/{entry_id}` | Retrieve a single entry by ID |
 | `POST` | `/test-sets/{test_set_id}/entries` | Snapshot one or more tests into a test set as entries |
 | `PATCH` | `/test-sets/{test_set_id}/entries/{entry_id}` | Partially update an entry — only allowed until it has been run at least once (409 otherwise) |
+| `DELETE` | `/test-sets/{test_set_id}/entries` | Bulk-delete one or more entries by ID — all-or-nothing, blocked with a 409 if any target entry has runs |
+
+### Test plans
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/test-plans` | List all test plans (paginated) |
+| `GET` | `/test-plans/{test_plan_id}` | Retrieve metadata for a single test plan |
+| `POST` | `/test-plans` | Create a new test plan (name must be unique) |
+| `GET` | `/test-plans/{test_plan_id}/entries` | List the test sets included in a test plan (paginated); use each item's `test_set.id` with `GET /test-sets/{test_set_id}/entries` to fetch that set's snapshotted tests |
 
 ### Statistical tests
 | Method | Path | Description |
@@ -218,6 +235,6 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 ## TODOs
 
 - `services/datasets/replace_dataset_content.py` — Consider what happens when a dataset row has a relationship with executed tests (cascading deletes or constraint violations on full replacement).
-- Test set entries — removing a single entry from a set without deleting the whole set is not yet implemented (add, list, get, update, and deleting the entire set all are).
-- Test plans and test runs — domain models are defined in `models/test.py` but service and API layers are not yet implemented.
+- Test plans — adding/removing test sets from a plan (`TestPlanEntryModel`), renaming, deleting a plan, and executing it are not yet implemented. Create, list, get, and listing a plan's test sets are.
+- Test runs — the `TestRunModel` domain model exists (and is already referenced by the "has runs" guards on test and test set entry deletion), but there is no service or API layer to create or execute a run yet.
 - LLM-as-judge evaluators and the broader statistics engine are stubbed.
