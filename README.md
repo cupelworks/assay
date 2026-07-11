@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Test plans are partially implemented (create, list, get, and list the test sets included in a plan); adding/removing test sets from a plan, updating or deleting a plan, and executing it are not yet built. LLM-as-judge evaluators, test runs, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Test plans are partially implemented (create, list, get, rename, and list the test sets included in a plan); adding/removing test sets from a plan, deleting a plan, and executing it are not yet built. LLM-as-judge evaluators, test runs, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -85,7 +85,8 @@ src/assay/
 │   │   ├── _common.py                  # Shared helpers (_check_unique_test_plan_name_or_409, _find_test_plan_by_id_or_404)
 │   │   ├── create_test_plan.py
 │   │   ├── get_test_plans_metadata.py         # Paginated listing and single fetch by ID
-│   │   └── get_test_plan_entries_metadata.py  # Paginated listing of the test sets included in a plan
+│   │   ├── get_test_plan_entries_metadata.py  # Paginated listing of the test sets included in a plan
+│   │   └── update_test_plan.py                # Rename, with a self-name no-op guard around the uniqueness check
 │   ├── tests/
 │   │   ├── _common.py                  # Shared helpers (_find_all_tests_or_404, _find_test_by_id_or_404, _validate_test_type_name)
 │   │   ├── create_new_test.py          # Manual creation and bulk creation from dataset
@@ -155,6 +156,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/test-plans` | List all test plans (paginated) |
 | `GET` | `/test-plans/{test_plan_id}` | Retrieve metadata for a single test plan |
 | `POST` | `/test-plans` | Create a new test plan (name must be unique) |
+| `PATCH` | `/test-plans/{test_plan_id}` | Rename a test plan — resubmitting its current, unchanged name is a no-op, not a 409 |
 | `GET` | `/test-plans/{test_plan_id}/entries` | List the test sets included in a test plan (paginated); use each item's `test_set.id` with `GET /test-sets/{test_set_id}/entries` to fetch that set's snapshotted tests |
 
 ### Statistical tests
@@ -235,6 +237,6 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 ## TODOs
 
 - `services/datasets/replace_dataset_content.py` — Consider what happens when a dataset row has a relationship with executed tests (cascading deletes or constraint violations on full replacement).
-- Test plans — adding/removing test sets from a plan (`TestPlanEntryModel`), renaming, deleting a plan, and executing it are not yet implemented. Create, list, get, and listing a plan's test sets are.
+- Test plans — adding/removing test sets from a plan (`TestPlanEntryModel`), deleting a plan, and executing it are not yet implemented. Create, list, get, rename, and listing a plan's test sets are.
 - Test runs — the `TestRunModel` domain model exists (and is already referenced by the "has runs" guards on test and test set entry deletion), but there is no service or API layer to create or execute a run yet.
 - LLM-as-judge evaluators and the broader statistics engine are stubbed.

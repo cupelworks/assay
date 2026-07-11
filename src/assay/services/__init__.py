@@ -16,6 +16,7 @@ from assay.services.test_plans import (
     get_all_test_plan_entries_metadata,
     get_all_test_plans_metadata,
     get_test_plan_metadata_by_id,
+    update_test_plan_by_id,
 )
 from assay.services.test_sets import (
     add_tests_to_test_set_by_test_id,
@@ -68,4 +69,5 @@ __all__ = [
     "modify_test_by_id",
     "replace_dataset_content_by_dataset_id",
     "modify_entry_by_id",
+    "update_test_plan_by_id",
 ]

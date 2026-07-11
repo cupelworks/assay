@@ -23,6 +23,7 @@ from assay.schemas.test_plan_entries import (
     TestPlanEntryID,
 )
 from assay.schemas.test_plans import (
+    ModifyTestPlanRequest,
     PaginatedTestPlanMetadataResponse,
     TestPlanCreationResponse,
     TestPlanID,
@@ -77,6 +78,7 @@ __all__ = [
     "DataSetRowUpdatedData",
     "DataSetMetadata",
     "ModifyTestCaseRequest",
+    "ModifyTestPlanRequest",
     "PaginatedDataSetResponse",
     "PaginatedDataSetRowResponse",
     "PaginatedTestPlanEntriesDetails",

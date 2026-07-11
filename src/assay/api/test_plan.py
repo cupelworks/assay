@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
 from assay.schemas import (
+    ModifyTestPlanRequest,
     PaginatedTestPlanEntriesDetails,
     PaginatedTestPlanMetadataResponse,
     TestPlanCreationResponse,
@@ -17,11 +18,95 @@ from assay.services import (
     get_all_test_plan_entries_metadata,
     get_all_test_plans_metadata,
     get_test_plan_metadata_by_id,
+    update_test_plan_by_id,
 )
 
 router = APIRouter(tags=["test plan"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.patch(
+    path="/test-plans/{test_plan_id}",
+    responses={
+        200: {
+            "description": "Test plan renamed successfully. Returns the full "
+                            "updated test plan.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                        "name": "Renamed regression plan",
+                        "created_at": "2026-07-03T15:43:09.032480",
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "No test plan exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test plan with ID '<test_plan_id>' not found"
+                    }
+                }
+            },
+        },
+        409: {
+            "description": "Another test plan already has the requested name. "
+                            "Re-submitting the plan's own current, unchanged name "
+                            "is not an error and does not trigger this check.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test plan with name 'My test plan' already exists"
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "Validation error — an unknown field was sent in the "
+                            "request body, or `name` was omitted.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "type": "extra_forbidden",
+                                "loc": ["body", "id"],
+                                "msg": "Extra inputs are not permitted",
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+    },
+    response_model=TestPlanMetadata,
+)
+async def update_a_test_plan_metadata(
+        test_plan_id: uuid.UUID,
+        request: ModifyTestPlanRequest,
+        session: SessionDep,
+) -> TestPlanMetadata: # pragma: no cover
+    """Rename a test plan by ID.
+
+    `name` is required in the body, but accepts `null` to explicitly leave the
+    name unchanged — this endpoint currently only supports renaming, so a `null`
+    name is a no-op that still returns the plan's current metadata. Unknown body
+    fields are rejected with a 422 — the schema uses `extra="forbid"` to prevent
+    silently ignoring misplaced fields such as `id`.
+
+    Test plan names must be unique. Submitting the plan's own current name is
+    always allowed (it's treated as no change); submitting a name already used by
+    a *different* test plan returns a 409.
+
+    Returns the full updated test plan so the client does not need a follow-up
+    GET to refresh.
+
+    Returns a 404 if no test plan with the given ID exists.
+    """
+    return await update_test_plan_by_id(test_plan_id, request, session)
 
 
 @router.get(

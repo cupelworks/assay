@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from assay.schemas import Pagination
 
@@ -25,6 +25,15 @@ class TestPlanMetadata(TestPlanID, TestPlanName):
     created_at: datetime = Field(
         ...,
         description="The creation date of the test plan.",
+    )
+    
+
+class ModifyTestPlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(
+        ...,
+        description="The name of the test plan",
+        min_length=1,
     )
 
 
