@@ -10,10 +10,13 @@ from assay.schemas import (
     PaginatedTestPlanEntriesDetails,
     PaginatedTestPlanMetadataResponse,
     TestPlanCreationResponse,
+    TestPlanEntryID,
     TestPlanMetadata,
     TestPlanName,
+    TestSetID,
 )
 from assay.services import (
+    add_test_sets_to_test_plan_by_id,
     create_new_test_plan,
     get_all_test_plan_entries_metadata,
     get_all_test_plans_metadata,
@@ -24,6 +27,89 @@ from assay.services import (
 router = APIRouter(tags=["test plan"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.post(
+    path="/test-plans/{test_plan_id}/entries",
+    responses={
+        200: {
+            "description": "Test sets linked. Returns one entry ID per test set added.",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {"id": "c3d4e5f6-a7b8-9012-cdef-123456789012"},
+                        {"id": "d4e5f6a7-b8c9-0123-defa-234567890123"},
+                    ]
+                }
+            },
+        },
+        404: {
+            "description": (
+                "The test plan does not exist, or one or more test set IDs in "
+                "the request body were not found. No entries are created."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_plan_not_found": {
+                            "summary": "Test plan not found",
+                            "value": {
+                                "detail": "Test plan with ID '<test_plan_id>' not found"
+                            },
+                        },
+                        "test_sets_not_found": {
+                            "summary": "One or more test set IDs not found",
+                            "value": {
+                                "detail": "Test sets with IDs ['<id1>', '<id2>'] not found"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        409: {
+            "description": (
+                "One or more test sets are already linked to this test plan. "
+                "No entries are created."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": (
+                            "Test sets with ID ['<id1>'] already linked to test plan"
+                            " with ID '<test_plan_id>'"
+                        )
+                    }
+                }
+            },
+        },
+    },
+    response_model=list[TestPlanEntryID],
+)
+async def add_test_sets_to_a_test_plan(
+        test_plan_id: uuid.UUID,
+        request: list[TestSetID],
+        session: SessionDep,
+) -> list[TestPlanEntryID]: # pragma: no cover
+    """Link one or more test sets to a test plan.
+
+    Each test set in the request body becomes an entry linking it to this plan.
+    The link only stores the test set's ID — it is not a snapshot, so any later
+    changes to the test set (renaming it, adding or removing its entries) are
+    reflected automatically whenever the plan's test sets are listed via
+    `GET /test-plans/{test_plan_id}/entries`.
+
+    Three checks run before any data is written:
+    - The test plan must exist (404 if not).
+    - All test set IDs in the request body must exist (404 if any are missing).
+    - None of the test sets may already be linked to this plan (409 if any overlap).
+
+    Duplicate IDs in the request body are silently deduplicated — each test set
+    produces exactly one entry regardless of repetition.
+    """
+    return await add_test_sets_to_test_plan_by_id(
+        test_plan_id, request, session
+    )
 
 
 @router.patch(

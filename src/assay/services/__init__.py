@@ -12,6 +12,7 @@ from assay.services.datasets import (
 )
 from assay.services.stats import run_z_test
 from assay.services.test_plans import (
+    add_test_sets_to_test_plan_by_id,
     create_new_test_plan,
     get_all_test_plan_entries_metadata,
     get_all_test_plans_metadata,
@@ -40,6 +41,7 @@ from assay.services.tests import (
 )
 
 __all__ = [
+    "add_test_sets_to_test_plan_by_id",
     "add_tests_to_test_set_by_test_id",
     "create_new_test",
     "create_new_test_from_dataset",

@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, rename, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Test plans are partially implemented (create, list, get, rename, and list the test sets included in a plan); adding/removing test sets from a plan, deleting a plan, and executing it are not yet built. LLM-as-judge evaluators, test runs, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, rename, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Test plans are partially implemented (create, list, get, rename, list the test sets included in a plan, and link test sets to a plan); removing a test set from a plan, deleting a plan, and executing it are not yet built. LLM-as-judge evaluators, test runs, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -74,7 +74,7 @@ src/assay/
 │   │   ├── delete_full_dataset.py
 │   │   └── delete_dataset_rows.py
 │   ├── test_sets/
-│   │   ├── _common.py                  # Shared helpers (_find_test_set_or_404, _find_test_set_entry_in_specific_test_set_or_404, _check_test_set_entry_has_no_runs_or_409, _check_test_set_entries_have_no_runs_or_409, etc.)
+│   │   ├── _common.py                  # Shared helpers (_find_test_set_or_404, _find_test_sets_or_404, _find_test_set_entry_in_specific_test_set_or_404, _check_test_set_entry_has_no_runs_or_409, _check_test_set_entries_have_no_runs_or_409, etc.)
 │   │   ├── create_test_set.py
 │   │   ├── get_test_sets_metadata.py   # Paginated listing and single fetch by ID
 │   │   ├── add_tests_to_test_set.py    # Snapshot tests into a set as entries
@@ -83,11 +83,12 @@ src/assay/
 │   │   ├── update_test_set.py          # Rename, with a self-name no-op guard around the uniqueness check
 │   │   └── delete_test_set.py          # Delete a whole set (cascades to entries), or bulk-delete specific entries — both blocked while any target entry has runs
 │   ├── test_plans/
-│   │   ├── _common.py                  # Shared helpers (_check_unique_test_plan_name_or_409, _find_test_plan_by_id_or_404)
+│   │   ├── _common.py                  # Shared helpers (_check_unique_test_plan_name_or_409, _find_test_plan_by_id_or_404, _check_test_set_not_in_test_plan_or_409)
 │   │   ├── create_test_plan.py
 │   │   ├── get_test_plans_metadata.py         # Paginated listing and single fetch by ID
 │   │   ├── get_test_plan_entries_metadata.py  # Paginated listing of the test sets included in a plan
-│   │   └── update_test_plan.py                # Rename, with a self-name no-op guard around the uniqueness check
+│   │   ├── update_test_plan.py                # Rename, with a self-name no-op guard around the uniqueness check
+│   │   └── add_test_sets_to_test_plan.py      # Link one or more test sets to a plan, deduplicated via the existence-check query
 │   ├── tests/
 │   │   ├── _common.py                  # Shared helpers (_find_all_tests_or_404, _find_test_by_id_or_404, _validate_test_type_name)
 │   │   ├── create_new_test.py          # Manual creation and bulk creation from dataset
@@ -160,6 +161,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `POST` | `/test-plans` | Create a new test plan (name must be unique) |
 | `PATCH` | `/test-plans/{test_plan_id}` | Rename a test plan — resubmitting its current, unchanged name is a no-op, not a 409 |
 | `GET` | `/test-plans/{test_plan_id}/entries` | List the test sets included in a test plan (paginated); use each item's `test_set.id` with `GET /test-sets/{test_set_id}/entries` to fetch that set's snapshotted tests |
+| `POST` | `/test-plans/{test_plan_id}/entries` | Link one or more test sets to a test plan — blocked with a 409 if any is already linked to this plan |
 
 ### Statistical tests
 | Method | Path | Description |
@@ -239,6 +241,6 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 ## TODOs
 
 - `services/datasets/replace_dataset_content.py` — Consider what happens when a dataset row has a relationship with executed tests (cascading deletes or constraint violations on full replacement).
-- Test plans — adding/removing test sets from a plan (`TestPlanEntryModel`), deleting a plan, and executing it are not yet implemented. Create, list, get, rename, and listing a plan's test sets are.
+- Test plans — removing a test set from a plan (`TestPlanEntryModel`), deleting a plan, and executing it are not yet implemented. Create, list, get, rename, listing a plan's test sets, and linking test sets to a plan are.
 - Test runs — the `TestRunModel` domain model exists (and is already referenced by the "has runs" guards on test and test set entry deletion), but there is no service or API layer to create or execute a run yet.
 - LLM-as-judge evaluators and the broader statistics engine are stubbed.
