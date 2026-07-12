@@ -94,3 +94,44 @@ async def _check_test_set_not_in_test_plan_or_409(
             detail=f"Test sets with ID '{[str(_id) for _id in found]}' "
                    f"already linked to test plan with ID '{test_plan_id}'",
         )
+
+
+async def _find_test_plan_entries_or_404(
+        test_plan_id: uuid.UUID,
+        test_sets_ids: list[uuid.UUID],
+        session: AsyncSession,
+):
+    """Fetch TestPlanEntryModel rows for the given test sets, scoped to this plan.
+
+    Raises 404 if any requested test set ID does not resolve to a link in
+    this plan — either because it isn't linked to any plan, or because it's
+    linked to a different plan.
+
+    Args:
+        test_plan_id: UUID of the test plan the test sets must be linked to.
+        test_sets_ids: IDs of the test sets to look up.
+        session: Active async database session.
+
+    Returns:
+        The matching TestPlanEntryModel instances.
+
+    Raises:
+        HTTPException: 404 if one or more test set IDs aren't linked to this plan.
+    """
+    found = (await session.scalars(
+        select(TestPlanEntryModel)
+        .where(TestPlanEntryModel.test_plan_id == test_plan_id)
+        .where(TestPlanEntryModel.test_set_id.in_(test_sets_ids))
+    )).all()
+
+    found_ids = {entry.test_set_id for entry in found}
+    difference = set(test_sets_ids) - found_ids
+
+    if difference:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test sets with ID '{[str(_id) for _id in difference]}' "
+                   f"not linked to test plan with ID '{test_plan_id}'"
+        )
+
+    return found

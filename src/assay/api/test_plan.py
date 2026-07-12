@@ -21,12 +21,109 @@ from assay.services import (
     get_all_test_plan_entries_metadata,
     get_all_test_plans_metadata,
     get_test_plan_metadata_by_id,
+    remove_test_sets_from_test_plan_by_id,
     update_test_plan_by_id,
 )
 
 router = APIRouter(tags=["test plan"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.delete(
+    path="/test-plans/{test_plan_id}/entries",
+    responses={
+        200: {
+            "description": (
+                "All requested test sets were unlinked from the test plan in a "
+                "single operation. The response body is an empty object. The "
+                "test plan itself, the test sets that were unlinked, and any "
+                "TestRunModel rows already produced by executing this plan are "
+                "all left untouched — unlinking never deletes or invalidates "
+                "past run history, since each run's reproducibility comes from "
+                "its own frozen snapshot, not from this link."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {}
+                }
+            },
+        },
+        404: {
+            "description": (
+                "No test plan exists with the given ID, or one or more requested "
+                "test set IDs do not exist at all, or one or more requested test "
+                "set IDs exist but are not currently linked to this test plan. "
+                "Nothing is unlinked, even if some of the requested test sets "
+                "were valid — this is all-or-nothing, not a partial/best-effort "
+                "removal."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_plan_not_found": {
+                            "summary": "Test plan not found",
+                            "value": {
+                                "detail": "Test plan with ID '<test_plan_id>' not found"
+                            },
+                        },
+                        "test_sets_not_found": {
+                            "summary": "One or more test set IDs don't exist at all",
+                            "value": {
+                                "detail": "Test sets with IDs ['<id1>', '<id2>'] not found"
+                            },
+                        },
+                        "test_sets_not_linked": {
+                            "summary": (
+                                "One or more test set IDs exist but aren't linked "
+                                "to this test plan"
+                            ),
+                            "value": {
+                                "detail": "Test sets with ID '[\'<id1>\']' not linked "
+                                          "to test plan with ID '<test_plan_id>'"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+)
+async def remove_test_sets_from_a_test_plan(
+        test_plan_id: uuid.UUID,
+        request: list[TestSetID],
+        session: SessionDep,
+) -> dict: # pragma: no cover
+    """Unlink one or more test sets from a test plan in a single bulk operation.
+
+    Only the link between the test plan and each requested test set is
+    removed — the test plan itself, the test sets, their own entries, and any
+    other test plans they're also linked to are all **not** affected.
+
+    Every requested test set must exist, and must currently be linked to this
+    specific test plan. If any requested test set is missing entirely, or
+    exists but isn't linked to this plan, the entire request is rejected with
+    a 404 and **nothing is unlinked** — this is all-or-nothing, not a
+    partial/best-effort removal.
+
+    Unlinking is always allowed, with no exceptions based on execution
+    history: a test set that has already been run as part of this plan (i.e.
+    one or more TestRunModel rows exist for it via this plan) can still be
+    unlinked freely. This is intentional, not an oversight — nothing about a
+    past run depends on the link surviving. Each run's reproducibility comes
+    from the frozen test set entry it executed against, which is unaffected
+    by removing this link. This also means "run this plan live" always
+    reflects the plan's *current* linked test sets, not a historical snapshot
+    — removing a test set here immediately excludes it from future live
+    executions, without touching any run already recorded under a past one.
+
+    Duplicate test set IDs in the request body are harmless and treated as a
+    single removal per unique ID.
+
+    On success the response is an empty object.
+    """
+    await remove_test_sets_from_test_plan_by_id(test_plan_id, request, session)
+    return {}
 
 
 @router.post(
