@@ -46,32 +46,49 @@ if TYPE_CHECKING:
 #      strings. This keeps the snapshot self-contained and human-readable, and
 #      consistent with the name-based FK used in TestTypeAssignmentModel.
 #
+#      A test set can also be executed directly, independent of any plan — each
+#      trigger event is grouped under a TestSetExecutionModel, either a live
+#      fan-out over the set's current entries or a replay of a prior
+#      execution's exact entries.
+#
 #   3. TEST PLAN (TestPlanModel + TestPlanEntryModel)
 #      A named collection of test sets to be executed together as a campaign.
 #      A test plan references test sets (not individual tests), so the unit of
-#      organization is always the set. Executing a test plan fans out into one
-#      TestRunModel per TestSetEntryModel across all its sets.
+#      organization is always the set. Each trigger event is grouped under a
+#      TestPlanExecutionModel (live fan-out or replay, same shape as test set
+#      execution) and fans out into one TestRunModel per TestSetEntryModel
+#      across all included test sets.
 #
 # ──────────────────────────────────────────────────────────────────────────────
 # EXECUTION LIFECYCLE
 # ──────────────────────────────────────────────────────────────────────────────
 #
-#   A TestRunModel represents a single evaluation attempt. There are two modes:
+#   A TestRunModel represents a single evaluation attempt. There are three modes:
 #
-#   - STANDALONE: test_id is set, test_set_entry_id is None.
+#   - STANDALONE: test_id is set, everything else null.
 #     The user runs a live test directly, outside any set or plan. The run
 #     reads input/expected_output from the live TestModel at execution time.
+#     Has no live/replay pair — nothing about a standalone run is ever frozen.
 #
-#   - SET-BASED: test_set_entry_id is set, test_id is None.
-#     The run is part of a test set (or plan) execution. Input and configuration
-#     are read from the TestSetEntryModel snapshot, guaranteeing reproducibility
-#     regardless of subsequent edits to the live test. Once a run references an
-#     entry, the entry itself also freezes (see TestSetEntryModel), so the run's
-#     record of what it executed against stays accurate too.
+#   - TEST-SET-TRIGGERED: test_set_entry_id + test_set_execution_id are set.
+#     The run belongs to a standalone test set execution (TestSetExecutionModel),
+#     grouped by trigger event. Input and configuration are read from the
+#     TestSetEntryModel snapshot, guaranteeing reproducibility regardless of
+#     subsequent edits to the live test. Once a run references an entry, the
+#     entry itself also freezes (see TestSetEntryModel), so the run's record of
+#     what it executed against stays accurate too.
 #
-#   Invariant enforced at the service layer:
-#     exactly one of (test_id, test_set_entry_id) must be set — never both,
-#     never neither.
+#   - TEST-PLAN-TRIGGERED: test_set_entry_id + test_plan_id + test_plan_execution_id
+#     are set. Same reproducibility guarantee as test-set-triggered, but the run
+#     was produced by executing a test plan that has this entry's test set linked
+#     to it (TestPlanExecutionModel), rather than by executing the test set
+#     directly.
+#
+#   Invariant enforced at the service layer: exactly one of the three column
+#   patterns above holds per run. test_set_execution_id and test_plan_execution_id
+#   are never both set on the same run — a run is triggered by exactly one path,
+#   even though the same TestSetEntryModel can accumulate runs from both paths
+#   over its lifetime, across different trigger events.
 #
 # ──────────────────────────────────────────────────────────────────────────────
 # TRACEABILITY CHAIN
@@ -86,6 +103,11 @@ if TYPE_CHECKING:
 #   From a live TestModel you can navigate:
 #     test.set_entries → entry.runs → run.statistical_verifications
 #   to retrieve the full execution history across all sets and plans.
+#
+#   TestRunModel is also grouped by trigger event, via exactly one of:
+#     - TestSetExecutionModel (standalone test set execution)
+#     - TestPlanExecutionModel (execution via a plan that links the set)
+#   Navigate the other way with test_set_execution.runs / test_plan_execution.runs.
 #
 # ──────────────────────────────────────────────────────────────────────────────
 # DATASET COVERAGE
@@ -264,6 +286,11 @@ class TestSetModel(Base):
     live tests evolve — but each entry can still be edited directly until it
     has been run at least once, after which it freezes (see TestSetEntryModel).
 
+    A test set can be executed directly, independent of any plan — each
+    trigger is grouped under a TestSetExecutionModel, which can be a live
+    fan-out over the set's current entries or a replay of a prior
+    execution's exact entries.
+
     Test sets can be included in one or more TestPlanModels via
     TestPlanEntryModel junction records.
     """
@@ -283,6 +310,40 @@ class TestSetModel(Base):
         passive_deletes=True,
     )
     plan_entries: Mapped[list["TestPlanEntryModel"]] = relationship(back_populates="test_set")
+
+
+class TestSetExecutionModel(Base):
+    """
+    A single execution of a TestSetModel — groups the TestRunModel rows
+    produced by one run of the set.
+
+    An execution is either:
+
+    LIVE (replayed_execution_id is None):
+        Fans out over the set's current entries at execution time.
+
+    REPLAY (replayed_execution_id set):
+        Re-runs the exact entry set of the referenced prior execution,
+        preserving the reproducibility guarantee even if the set's
+        entries have since changed.
+    """
+
+    __tablename__ = "test_set_executions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    test_set_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("test_sets.id"), nullable=False, index=True
+    )
+    replayed_execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("test_set_executions.id"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now().astimezone()
+    )
+
+    test_set: Mapped["TestSetModel"] = relationship()
+    replayed_execution: Mapped["TestSetExecutionModel | None"] = relationship(remote_side=[id])
+    runs: Mapped[list["TestRunModel"]] = relationship(back_populates="test_set_execution")
 
 
 class TestSetEntryModel(Base):
@@ -307,8 +368,8 @@ class TestSetEntryModel(Base):
     snapshot back to the current live test — but it is never used to pull or
     sync live data into this record.
 
-    Runs produced by set-based or plan-based executions reference this model,
-    not the live TestModel, ensuring full reproducibility.
+    Runs produced by test-set-triggered or test-plan-triggered executions
+    reference this model, not the live TestModel, ensuring full reproducibility.
     """
 
     __tablename__ = "test_set_entries"
@@ -351,10 +412,12 @@ class TestPlanModel(Base):
     A named campaign — a collection of test sets to be executed together.
 
     A test plan operates at the test set level, not the individual test level.
-    Executing a plan fans out into one TestRunModel per TestSetEntryModel
-    across all included test sets. Executing an entry also freezes it (see
-    TestSetEntryModel), preserving the reproducibility guarantee throughout
-    the entire campaign.
+    Each trigger event is grouped under a TestPlanExecutionModel — either a
+    live fan-out over the plan's currently linked test sets, or a replay of
+    a prior execution's exact entries — and fans out into one TestRunModel
+    per TestSetEntryModel across all included test sets. Executing an entry
+    also freezes it (see TestSetEntryModel), preserving the reproducibility
+    guarantee throughout the entire campaign.
     """
 
     __tablename__ = "test_plans"
@@ -368,6 +431,46 @@ class TestPlanModel(Base):
     entries: Mapped[list["TestPlanEntryModel"]] = relationship(back_populates="test_plan")
 
 
+class TestPlanExecutionModel(Base):
+    """
+    A single execution of a TestPlanModel — groups the TestRunModel rows
+    produced by one campaign run.
+
+    An execution is either:
+
+    LIVE (replayed_execution_id is None):
+        Fans out over the plan's current entries at execution time.
+
+    REPLAY (replayed_execution_id set):
+        Re-runs the exact entry set of the referenced prior execution,
+        preserving the reproducibility guarantee even if the plan's
+        test sets have since changed.
+    """
+
+    __tablename__ = "test_plan_executions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    test_plan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("test_plans.id"), nullable=False, index=True
+    )
+    # Null for a live execution. Set for a replay — points at the
+    # execution whose entry set this one re-ran.
+    replayed_execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("test_plan_executions.id"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now().astimezone()
+    )
+
+    test_plan: Mapped["TestPlanModel"] = relationship()
+    # Python-side lookup of replayed_execution_id: the ORM object for the
+    # prior execution this one replayed (None for a live execution).
+    # remote_side=[id] is required because this FK is self-referential —
+    # it tells SQLAlchemy that `id` identifies the *other* row, not this one.
+    replayed_execution: Mapped["TestPlanExecutionModel | None"] = relationship(remote_side=[id])
+    runs: Mapped[list["TestRunModel"]] = relationship(back_populates="test_plan_execution")
+
+
 class TestPlanEntryModel(Base):
     """
     Junction record linking a TestPlanModel to one of its TestSetModels.
@@ -375,6 +478,13 @@ class TestPlanEntryModel(Base):
     A test plan can include multiple test sets, and the same test set can
     appear in multiple plans. This join table models that many-to-many
     relationship.
+
+    Unlike TestSetEntryModel, this link deliberately never freezes — a
+    plan's set of linked test sets can keep changing at any time, even
+    after the plan has been executed. A live execution always fans out
+    over whatever test sets are linked right now; past executions stay
+    intact regardless, since they're anchored to frozen TestSetEntryModel
+    rows via TestPlanExecutionModel, not to this junction table.
     """
 
     __tablename__ = "test_plan_entries"
@@ -395,23 +505,38 @@ class TestRunModel(Base):
     """
     A single evaluation attempt for a test — the atomic unit of execution.
 
-    A run can be initiated in two modes:
+    A run can be initiated in three modes:
 
-    STANDALONE (test_id set, test_set_entry_id None):
+    STANDALONE (test_id set, everything else null):
         The user runs a live TestModel directly, outside any set or plan.
         Input and configuration are read from the live test at execution time.
-        Use this for quick, ad-hoc evaluation during test authoring.
+        Use this for quick, ad-hoc evaluation during test authoring. Has no
+        live/replay pair, unlike the other two modes.
 
-    SET-BASED (test_set_entry_id set, test_id None):
-        The run is part of a test set or plan execution. Input and
+    TEST-SET-TRIGGERED (test_set_entry_id + test_set_execution_id set):
+        The run is part of a standalone test set execution. Input and
         configuration are read from the TestSetEntryModel snapshot,
         guaranteeing that the run is always reproducible regardless of
         subsequent edits to the live test. Once a run exists, the entry
         itself also rejects further direct edits (see TestSetEntryModel).
 
+    TEST-PLAN-TRIGGERED (test_set_entry_id + test_plan_id + test_plan_execution_id set):
+        Same reproducibility guarantee as test-set-triggered, but the run was
+        produced by executing a test plan that has this entry's test set
+        linked to it, rather than by executing the test set directly.
+
     Invariant (enforced at the service layer):
-        Exactly one of (test_id, test_set_entry_id) must be non-null.
-        Having both set or both null is an invalid state.
+        Exactly one of these three column patterns holds per run:
+          - test_id set; test_set_entry_id, test_set_execution_id,
+            test_plan_id, test_plan_execution_id all null.
+          - test_set_entry_id + test_set_execution_id set; test_id and the
+            test_plan_* columns null.
+          - test_set_entry_id + test_plan_id + test_plan_execution_id set;
+            test_id and test_set_execution_id null.
+        test_set_execution_id and test_plan_execution_id are never both set
+        on the same run — a run is triggered by exactly one path, even though
+        the same TestSetEntryModel can accumulate runs from both paths over
+        its lifetime, across different trigger events.
 
     Results (scores, error) are written back to this record on completion.
     Statistical verifications produced post-run are linked via the
@@ -422,13 +547,28 @@ class TestRunModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
 
-    # Standalone mode — mutually exclusive with test_set_entry_id.
+    # Standalone mode — mutually exclusive with all four columns below.
     test_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("tests.id"), nullable=True, index=True
     )
-    # Set-based mode — mutually exclusive with test_id.
+    # Set in both TEST-SET-TRIGGERED and TEST-PLAN-TRIGGERED modes — mutually
+    # exclusive with test_id. Which of the two modes also depends on whether
+    # test_set_execution_id or the test_plan_* pair below is set.
     test_set_entry_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_set_entries.id"), nullable=True, index=True
+    )
+    # Test-set-triggered mode — mutually exclusive with the test_plan_* pair below.
+    test_set_execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("test_set_executions.id"), nullable=True, index=True
+    )
+    # Test-plan-triggered mode — mutually exclusive with test_set_execution_id.
+    # test_plan_id is a convenience denormalization: a plan spans multiple test
+    # sets, so unlike test_set_id it can't be derived from test_set_entry_id alone.
+    test_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("test_plans.id"), nullable=True, index=True
+    )
+    test_plan_execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("test_plan_executions.id"), nullable=True, index=True
     )
 
     test: Mapped["TestModel | None"] = relationship(
@@ -438,6 +578,13 @@ class TestRunModel(Base):
     test_set_entry: Mapped["TestSetEntryModel | None"] = relationship(
         back_populates="runs",
         foreign_keys=[test_set_entry_id]
+    )
+    test_set_execution: Mapped["TestSetExecutionModel | None"] = relationship(
+        back_populates="runs"
+    )
+    test_plan: Mapped["TestPlanModel | None"] = relationship()
+    test_plan_execution: Mapped["TestPlanExecutionModel | None"] = relationship(
+        back_populates="runs"
     )
 
     status: Mapped[TestStatus] = mapped_column(

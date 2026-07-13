@@ -1,6 +1,0 @@
-2. Storage
-When you add persistence, don't reach for a cloud-specific store (DynamoDB, Firestore). Use:
-	•	PostgreSQL via asyncpg or SQLAlchemy — runs anywhere
-	•	Or abstract behind a RunRepository interface so the backing store is swappable
-3. Structured logging — not vendor-specific sinks
-Write JSON logs to stdout. Every major cloud (CloudWatch, Stackdriver, Datadog, Loki) ingests stdout JSON. Don't use cloud-specific logging SDKs.

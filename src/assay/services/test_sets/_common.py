@@ -57,6 +57,43 @@ async def _find_test_set_or_404(test_set_id: uuid.UUID, session: AsyncSession):
     return found
 
 
+async def _find_test_sets_or_404(
+        test_set_ids: list[uuid.UUID],
+        session: AsyncSession,
+) -> list[uuid.UUID]:
+    """Fetch the given test set IDs, raising 404 if any of them does not exist.
+
+    The query's `IN (...)` clause naturally deduplicates: each existing ID is
+    returned exactly once no matter how many times it appears in `test_set_ids`,
+    so callers can use the returned list to build downstream records without a
+    separate deduplication step.
+
+    Args:
+        test_set_ids: The test set IDs to look up.
+        session: Active async database session.
+
+    Returns:
+        The subset of `test_set_ids` that exist, with duplicates collapsed.
+
+    Raises:
+        HTTPException: 404 listing the IDs that don't exist.
+    """
+    found_ids = (await session.scalars(
+        select(TestSetModel.id)
+        .where(TestSetModel.id.in_(test_set_ids))
+    )).all()
+
+    difference = set(test_set_ids) - set(found_ids)
+
+    if difference:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test sets with IDs {[str(_id) for _id in difference]} not found"
+        )
+
+    return list(found_ids)
+
+
 async def _check_tests_not_in_test_set_or_409(
         test_set_id: uuid.UUID,
         test_ids: list[uuid.UUID],

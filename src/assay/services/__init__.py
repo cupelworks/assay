@@ -11,6 +11,15 @@ from assay.services.datasets import (
     upload_new_rows_in_existing_dataset,
 )
 from assay.services.stats import run_z_test
+from assay.services.test_plans import (
+    add_test_sets_to_test_plan_by_id,
+    create_new_test_plan,
+    get_all_test_plan_entries_metadata,
+    get_all_test_plans_metadata,
+    get_test_plan_metadata_by_id,
+    remove_test_sets_from_test_plan_by_id,
+    update_test_plan_by_id,
+)
 from assay.services.test_sets import (
     add_tests_to_test_set_by_test_id,
     create_new_test_set,
@@ -21,6 +30,7 @@ from assay.services.test_sets import (
     get_test_set_metadata_by_id,
     get_test_sets_linked_tests,
     modify_entry_by_id,
+    update_test_set_metadata_by_id,
 )
 from assay.services.tests import (
     create_new_test,
@@ -32,14 +42,19 @@ from assay.services.tests import (
 )
 
 __all__ = [
+    "add_test_sets_to_test_plan_by_id",
     "add_tests_to_test_set_by_test_id",
     "create_new_test",
     "create_new_test_from_dataset",
+    "create_new_test_plan",
     "create_new_test_set",
     "delete_test_by_id",
     "delete_test_set_by_id",
     "delete_test_set_entries_by_id",
     "get_all_created_tests",
+    "get_all_test_plan_entries_metadata",
+    "get_all_test_plans_metadata",
+    "get_test_plan_metadata_by_id",
     "get_datasets_metadata",
     "get_dataset_metadata_by_id",
     "get_dataset_rows_by_id",
@@ -58,4 +73,7 @@ __all__ = [
     "modify_test_by_id",
     "replace_dataset_content_by_dataset_id",
     "modify_entry_by_id",
+    "remove_test_sets_from_test_plan_by_id",
+    "update_test_plan_by_id",
+    "update_test_set_metadata_by_id",
 ]

@@ -17,7 +17,21 @@ from assay.schemas.datasets import (
     PaginatedDataSetRowResponse,
 )
 from assay.schemas.stats import ZTestRequest, ZTestResult
+from assay.schemas.test_plan_entries import (
+    PaginatedTestPlanEntriesDetails,
+    TestPlanEntryDetails,
+    TestPlanEntryID,
+)
+from assay.schemas.test_plans import (
+    ModifyTestPlanRequest,
+    PaginatedTestPlanMetadataResponse,
+    TestPlanCreationResponse,
+    TestPlanID,
+    TestPlanMetadata,
+    TestPlanName,
+)
 from assay.schemas.test_sets import (
+    ModifyTestSetMetadataRequest,
     PaginatedTestSetMetadataResponse,
     TestSetCreationResponse,
     TestSetID,
@@ -65,12 +79,22 @@ __all__ = [
     "DataSetRowUpdatedData",
     "DataSetMetadata",
     "ModifyTestCaseRequest",
+    "ModifyTestPlanRequest",
+    "ModifyTestSetMetadataRequest",
     "PaginatedDataSetResponse",
     "PaginatedDataSetRowResponse",
+    "PaginatedTestPlanEntriesDetails",
+    "PaginatedTestPlanMetadataResponse",
     "PaginatedTestSetEntriesDetails",
     "PaginatedTestSetMetadataResponse",
     "Pagination",
     "TestCaseID",
+    "TestPlanCreationResponse",
+    "TestPlanEntryDetails",
+    "TestPlanEntryID",
+    "TestPlanID",
+    "TestPlanMetadata",
+    "TestPlanName",
     "TestSetEntryDetails",
     "TestSetEntryID",
     "TestSetID",

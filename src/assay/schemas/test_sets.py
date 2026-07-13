@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from assay.schemas import Pagination
 
@@ -32,5 +32,14 @@ class PaginatedTestSetMetadataResponse(Pagination):
     items: list[TestSetMetadata]
 
 
+class ModifyTestSetMetadataRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(
+        ...,
+        description="The name of the test set",
+        min_length=1,
+    )
+    
+    
 class TestSetCreationResponse(TestSetID, TestSetName):
     pass
