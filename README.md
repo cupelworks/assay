@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, rename, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Test plans are mostly implemented (create, list, get, rename, list the test sets included in a plan, link test sets to a plan, and unlink test sets from a plan — unlinking is always allowed, even if the test set already has runs recorded via this plan); deleting a plan and executing it are not yet built. The schema-level groundwork for grouping runs by execution — live fan-out vs. replaying a specific past execution, for both test plans and standalone test sets — is in place, but nothing yet creates a run: LLM-as-judge evaluators, test execution itself, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, rename, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set, or unlink individual entries from the set without deleting them) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Unlinking entries has no such guard — it's the operation for detaching a run-having entry from a set's membership without touching its frozen content or execution history. Test plans are mostly implemented (create, list, get, rename, list the test sets included in a plan, link test sets to a plan, and unlink test sets from a plan — unlinking is always allowed, even if the test set already has runs recorded via this plan); deleting a plan and executing it are not yet built. The schema-level groundwork for grouping runs by execution — live fan-out vs. replaying a specific past execution, for both test plans and standalone test sets — is in place, but nothing yet creates a run: LLM-as-judge evaluators, test execution itself, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -96,7 +96,7 @@ src/assay/
 │   │   ├── get_test_sets_entries.py    # Paginated listing and single fetch of entries
 │   │   ├── update_entry.py             # Partial update of an entry, until it has been run
 │   │   ├── update_test_set.py          # Rename, with a self-name no-op guard around the uniqueness check
-│   │   └── delete_test_set.py          # Delete a whole set (cascades to entries), or bulk-delete specific entries — both blocked while any target entry has runs
+│   │   └── delete_test_set.py          # Delete a whole set (cascades to entries), bulk-delete specific entries (blocked while any target entry has runs), or unlink specific entries (no runs guard — that's the point)
 │   ├── test_plans/
 │   │   ├── _common.py                  # Shared helpers (_check_unique_test_plan_name_or_409, _find_test_plan_by_id_or_404, _check_test_set_not_in_test_plan_or_409, _find_test_plan_entries_or_404)
 │   │   ├── create_test_plan.py
@@ -169,6 +169,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `POST` | `/test-sets/{test_set_id}/entries` | Snapshot one or more tests into a test set as entries |
 | `PATCH` | `/test-sets/{test_set_id}/entries/{entry_id}` | Partially update an entry — only allowed until it has been run at least once (409 otherwise) |
 | `DELETE` | `/test-sets/{test_set_id}/entries` | Bulk-delete one or more entries by ID — all-or-nothing, blocked with a 409 if any target entry has runs |
+| `PATCH` | `/test-sets/{test_set_id}/entries` | Bulk-unlink one or more entries by ID (clears `test_set_id`, entry row and any runs left untouched) — all-or-nothing, no runs guard, unlike the sibling `DELETE` |
 
 ### Test plans
 | Method | Path | Description |
@@ -200,6 +201,8 @@ See [Configuration](#configuration) for how to set this via `.env`.
 SQLite foreign key enforcement is enabled automatically on every connection via a `PRAGMA foreign_keys=ON` hook in `db.py`. This is required for `ON DELETE CASCADE` to work in SQLite.
 
 Deleting a test set relies on this: its entries cascade-delete at the database level (`test_set_entries.test_set_id` has `ON DELETE CASCADE`, and the ORM relationship uses `passive_deletes=True` so it lets the database do it rather than nulling the FK itself). The `test_runs.test_set_entry_id` FK has no cascade, so if an entry still has a run, the database refuses the delete outright — a backstop behind the service-layer 409 check.
+
+`test_set_entries.test_set_id` is nullable, which is what makes unlinking possible: unlinking sets it to `NULL` directly rather than deleting the row, detaching the entry from the set while leaving the row (and any runs pointing at it) in place.
 
 ### Migrations
 
