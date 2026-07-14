@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import TestPlanEntryModel, TestPlanModel
+from assay.models import TestPlanEntryModel, TestPlanExecutionModel, TestPlanModel
 from assay.schemas import TestPlanName
 
 
@@ -135,3 +135,35 @@ async def _find_test_plan_entries_or_404(
         )
 
     return found
+
+
+async def _check_test_plan_has_no_runs_or_409(
+        test_plan_id: uuid.UUID,
+        session: AsyncSession,
+) -> None:
+    """Raise 409 if the test plan has ever been executed.
+
+    Checks for the existence of a TestPlanExecutionModel rather than joining
+    through to TestRunModel — an execution row always exists before any run
+    attributed to it does, so this is the more direct "was this plan ever
+    triggered" check.
+
+    Args:
+        test_plan_id: UUID of the test plan to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 409 if any TestPlanExecutionModel references this plan.
+    """
+    found = await session.scalar(
+        select(TestPlanExecutionModel.id)
+        .where(TestPlanExecutionModel.test_plan_id == test_plan_id)
+        .limit(1)
+    )
+
+    if found:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Test plan with ID '{test_plan_id}' has at least one run"
+                   f", therefore it cannot be deleted"
+        )
