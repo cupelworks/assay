@@ -21,6 +21,9 @@ async def delete_dataset_by_id(
         HTTPException 404: No dataset exists with the given ID.
     """
     dataset = await _get_dataset_or_404(request.id, session)
+    # No guard needed against tests created from this dataset's rows: TestModel's
+    # dataset_row_id FK has ondelete="SET NULL", so any referencing test just
+    # loses its traceability pointer instead of blocking this cascade delete.
     await session.delete(dataset)
     await session.commit()
 

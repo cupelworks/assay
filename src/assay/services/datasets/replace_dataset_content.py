@@ -26,7 +26,9 @@ async def replace_dataset_content_by_dataset_id(
 
     dataset = await _get_dataset_or_404(request.id, session)
 
-    # TODO: Consider what happens when a dataset row will have a relationship with executed tests
+    # No guard needed against tests created from the old rows here: TestModel's
+    # dataset_row_id FK has ondelete="SET NULL", so any referencing test just
+    # loses its traceability pointer instead of blocking this delete.
     await session.execute(
         delete(DatasetRowModel)
         .where(DatasetRowModel.dataset_id == dataset.id)
