@@ -27,12 +27,89 @@ from assay.services import (
     get_test_set_metadata_by_id,
     get_test_sets_linked_tests,
     modify_entry_by_id,
+    unlink_test_set_entries_by_id,
     update_test_set_metadata_by_id,
 )
 
 router = APIRouter(tags=["test set / test set entry"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.patch(
+    path="/test-sets/{test_set_id}/entries",
+    responses={
+        200: {
+            "description": (
+                "All requested entries were unlinked from the test set in a single "
+                "operation. The response body is an empty object. Each entry's row, "
+                "its snapshot content (`input`, `expected_output`, `model_output`, "
+                "etc.), and any runs recorded against it are all left untouched — "
+                "only its membership in this test set is removed. The test set "
+                "itself and its remaining entries are also unaffected."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {}
+                }
+            },
+        },
+        404: {
+            "description": (
+                "No test set exists with the given ID, or one or more requested "
+                "entry IDs do not resolve to an entry within that test set — "
+                "either because no entry with that ID exists at all, or because "
+                "it belongs to a different test set. Nothing is unlinked, even if "
+                "some of the requested entries were valid."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_set_not_found": {
+                            "summary": "Test set not found",
+                            "value": {
+                                "detail": "Test set with ID '<test_set_id>' not found"
+                            },
+                        },
+                        "entries_not_found": {
+                            "summary": "One or more entries not found in this test set",
+                            "value": {
+                                "detail": "Test entries with ID '[<entry_id>, ...]' "
+                                          "not linked to test set with ID "
+                                          "'<test_set_id>'"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+)
+async def unlink_test_set_entry_from_a_test_set(
+        test_set_id: uuid.UUID,
+        request: list[TestSetEntryID],
+        session: SessionDep,
+) -> dict: # pragma: no cover
+    """Unlink one or more entries from a test set without deleting them.
+
+    Unlike `DELETE /test-sets/{test_set_id}/entries`, this is not a destructive
+    operation and carries no runs-based guard: an entry that has already been run
+    can still be unlinked, because unlinking never touches the entry's frozen
+    content or the runs recorded against it — it only clears the entry's
+    membership in this test set. Use this endpoint when you want to remove a
+    run-having entry from a set without losing its execution history; use `DELETE`
+    when you want the entry itself gone, which is only permitted while it has no
+    runs.
+
+    Every requested entry must exist within this test set. If any requested entry
+    is missing, or belongs to a different test set, the entire request is
+    rejected (404) and **nothing is unlinked** — this is all-or-nothing, not a
+    partial/best-effort operation.
+
+    On success the response is an empty object.
+    """
+    await unlink_test_set_entries_by_id(test_set_id, request, session)
+    return {}
 
 
 @router.patch(
