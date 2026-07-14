@@ -441,7 +441,10 @@ class TestPlanModel(Base):
         DateTime, default=lambda: datetime.now().astimezone()
     )
 
-    entries: Mapped[list["TestPlanEntryModel"]] = relationship(back_populates="test_plan")
+    entries: Mapped[list["TestPlanEntryModel"]] = relationship(
+        back_populates="test_plan",
+        passive_deletes=True,
+    )
 
 
 class TestPlanExecutionModel(Base):
@@ -504,7 +507,7 @@ class TestPlanEntryModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     test_plan_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("test_plans.id"), nullable=False, index=True
+        ForeignKey("test_plans.id", ondelete="CASCADE"), nullable=False, index=True
     )
     test_set_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("test_sets.id"), nullable=False, index=True

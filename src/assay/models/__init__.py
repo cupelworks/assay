@@ -6,6 +6,7 @@ from assay.models.stats import StatisticalVerificationModel
 from assay.models.test import (
     TestModel,
     TestPlanEntryModel,
+    TestPlanExecutionModel,
     TestPlanModel,
     TestRunModel,
     TestSetEntryModel,
@@ -24,6 +25,7 @@ __all__ = [
     "StatisticalVerificationModel",
     "TestModel",
     "TestPlanEntryModel",
+    "TestPlanExecutionModel",
     "TestPlanModel",
     "TestRunModel",
     "TestSetEntryModel",
