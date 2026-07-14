@@ -376,7 +376,7 @@ class TestSetEntryModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     test_set_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("test_sets.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("test_sets.id", ondelete="CASCADE"), nullable=True, index=True
     )
     # Traceability FK — points back to the live test this snapshot was taken from.
     # Never used to sync or refresh snapshot data.
