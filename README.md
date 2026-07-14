@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, rename, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set, or unlink individual entries from the set without deleting them) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Unlinking entries has no such guard — it's the operation for detaching a run-having entry from a set's membership without touching its frozen content or execution history. Test plans are mostly implemented (create, list, get, rename, list the test sets included in a plan, link test sets to a plan, and unlink test sets from a plan — unlinking is always allowed, even if the test set already has runs recorded via this plan); deleting a plan and executing it are not yet built. The schema-level groundwork for grouping runs by execution — live fan-out vs. replaying a specific past execution, for both test plans and standalone test sets — is in place, but nothing yet creates a run: LLM-as-judge evaluators, test execution itself, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, rename, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set, or unlink individual entries from the set without deleting them) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Unlinking entries has no such guard — it's the operation for detaching a run-having entry from a set's membership without touching its frozen content or execution history. Test plans are mostly implemented (create, list, get, rename, delete, list the test sets included in a plan, link test sets to a plan, and unlink test sets from a plan — unlinking is always allowed, even if the test set already has runs recorded via this plan). Deleting a plan cascades to its own links to test sets (never blocked, mirroring the unlink behavior), but is permanently blocked once the plan has ever been executed, so a run's audit trail can never lose track of which campaign produced it. Executing a plan is not yet built. The schema-level groundwork for grouping runs by execution — live fan-out vs. replaying a specific past execution, for both test plans and standalone test sets — is in place, but nothing yet creates a run: LLM-as-judge evaluators, test execution itself, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -98,13 +98,14 @@ src/assay/
 │   │   ├── update_test_set.py          # Rename, with a self-name no-op guard around the uniqueness check
 │   │   └── delete_test_set.py          # Delete a whole set (cascades to entries), bulk-delete specific entries (blocked while any target entry has runs), or unlink specific entries (no runs guard — that's the point)
 │   ├── test_plans/
-│   │   ├── _common.py                  # Shared helpers (_check_unique_test_plan_name_or_409, _find_test_plan_by_id_or_404, _check_test_set_not_in_test_plan_or_409, _find_test_plan_entries_or_404)
+│   │   ├── _common.py                  # Shared helpers (_check_unique_test_plan_name_or_409, _find_test_plan_by_id_or_404, _check_test_set_not_in_test_plan_or_409, _find_test_plan_entries_or_404, _check_test_plan_has_no_runs_or_409)
 │   │   ├── create_test_plan.py
 │   │   ├── get_test_plans_metadata.py         # Paginated listing and single fetch by ID
 │   │   ├── get_test_plan_entries_metadata.py  # Paginated listing of the test sets included in a plan
 │   │   ├── update_test_plan.py                # Rename, with a self-name no-op guard around the uniqueness check
 │   │   ├── add_test_sets_to_test_plan.py      # Link one or more test sets to a plan, deduplicated via the existence-check query
-│   │   └── remove_test_set_from_test_plan.py  # Unlink one or more test sets from a plan — all-or-nothing; unconditional even if the test set already has runs via this plan
+│   │   ├── remove_test_set_from_test_plan.py  # Unlink one or more test sets from a plan — all-or-nothing; unconditional even if the test set already has runs via this plan
+│   │   └── delete_test_plan.py                # Delete a plan (cascades to its own links to test sets) — permanently blocked once it has ever been executed
 │   ├── tests/
 │   │   ├── _common.py                  # Shared helpers (_find_all_tests_or_404, _find_test_by_id_or_404, _validate_test_type_name)
 │   │   ├── create_new_test.py          # Manual creation and bulk creation from dataset
@@ -178,6 +179,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/test-plans/{test_plan_id}` | Retrieve metadata for a single test plan |
 | `POST` | `/test-plans` | Create a new test plan (name must be unique) |
 | `PATCH` | `/test-plans/{test_plan_id}` | Rename a test plan — resubmitting its current, unchanged name is a no-op, not a 409 |
+| `DELETE` | `/test-plans/{test_plan_id}` | Delete a test plan and its links to test sets — permanently blocked with a 409 once the plan has ever been executed |
 | `GET` | `/test-plans/{test_plan_id}/entries` | List the test sets included in a test plan (paginated); use each item's `test_set.id` with `GET /test-sets/{test_set_id}/entries` to fetch that set's snapshotted tests |
 | `POST` | `/test-plans/{test_plan_id}/entries` | Link one or more test sets to a test plan — blocked with a 409 if any is already linked to this plan |
 | `DELETE` | `/test-plans/{test_plan_id}/entries` | Unlink one or more test sets from a test plan — all-or-nothing (404 if any requested test set isn't linked to this plan); always allowed even if the test set already has runs recorded via this plan |
@@ -205,6 +207,8 @@ Deleting a test set relies on this: its entries cascade-delete at the database l
 Deleting or replacing dataset rows relies on a different FK action: `tests.dataset_row_id` has `ON DELETE SET NULL`. A test copies its own `input`/`expected_output`/`model_output` at creation time and never reads through this FK again, so there's nothing to protect by blocking the delete — deleting the source row (via `DELETE /datasets`, `DELETE /datasets/rows`, or a `PUT /datasets/rows` replace) just clears the test's traceability pointer instead.
 
 `test_set_entries.test_set_id` is nullable, which is what makes unlinking possible: unlinking sets it to `NULL` directly rather than deleting the row, detaching the entry from the set while leaving the row (and any runs pointing at it) in place.
+
+Deleting a test plan relies on the same cascade mechanism as test sets, applied to a different table: `test_plan_entries.test_plan_id` has `ON DELETE CASCADE`, and `TestPlanModel.entries` uses `passive_deletes=True` so the database removes the plan's links rather than the ORM trying to null out their (`NOT NULL`) `test_plan_id` first. `test_plan_executions.test_plan_id`, by contrast, has no `ondelete` at all (default `RESTRICT`) — deliberately, since a plan that's ever been executed is blocked from deletion by a service-layer 409 before the delete is ever attempted; the FK is a backstop behind that guard, the same relationship the existing `test_runs.test_set_entry_id` restrict has to the entry-deletion 409 check.
 
 ### Migrations
 
@@ -263,6 +267,6 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 
 ## TODOs
 
-- Test plans — deleting a plan and executing it are not yet implemented. Create, list, get, rename, listing a plan's test sets, linking test sets to a plan, and unlinking test sets from a plan are.
+- Test plans — executing a plan is not yet implemented. Create, list, get, rename, delete, listing a plan's test sets, linking test sets to a plan, and unlinking test sets from a plan are.
 - Test runs — the `TestRunModel` domain model exists, including attribution FKs for which test, test set entry, test set execution, or test plan execution produced it, and is already referenced by the "has runs" guards on test and test set entry deletion. `TestPlanExecutionModel` and `TestSetExecutionModel` (grouping runs by trigger event — live fan-out vs. replaying a specific past execution) exist too. None of this is wired to a service or API layer yet — nothing anywhere creates a `TestRunModel` row.
 - LLM-as-judge evaluators and the broader statistics engine are stubbed.
