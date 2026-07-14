@@ -122,6 +122,13 @@ if TYPE_CHECKING:
 #   input no longer matches the source dataset row), it should be implemented as
 #   a separate service-layer check, not enforced at the ORM level.
 #
+#   dataset_row_id has ondelete="SET NULL": deleting a DatasetRowModel (directly,
+#   via a full dataset replace, or via dataset deletion) clears the pointer on any
+#   referencing TestModel rather than blocking the delete or cascading. This does
+#   not weaken coverage tracking — a deleted row can no longer be "covered" or
+#   "uncovered" either way, since coverage is only ever asked of rows that still
+#   exist.
+#
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -184,9 +191,12 @@ class TestModel(Base):
     TestModel is the primary unit of work for the user. It holds the test
     inputs and configuration and can be freely edited at any time. It is
     intentionally decoupled from its origin: if a test was imported from a
-    DatasetRowModel, the dataset_row_id is preserved for traceability and
-    coverage reporting, but the test owns its own data and changes to the
-    source dataset row are never propagated here.
+    DatasetRowModel, the dataset_row_id traces back to it for coverage
+    reporting, but the test owns its own data and changes to the source
+    dataset row are never propagated here. The pointer isn't permanent,
+    though — deleting the source row clears it (ondelete="SET NULL") rather
+    than blocking the delete, since nothing about the test's own data
+    depends on the row still existing.
 
     When added to a TestSetModel, a snapshot (TestSetEntryModel) is created
     from the test's current state. That snapshot never re-syncs from this
@@ -212,9 +222,12 @@ class TestModel(Base):
 
     # Traceability FK — points to the DatasetRowModel this test was imported
     # from, if any. Never used to sync data; only for coverage calculations.
-    # None if the test was created manually.
+    # None if the test was created manually. ondelete="SET NULL": the test
+    # already owns a copy of its own input/expected_output/model_output, so
+    # deleting the source row has nothing to protect — the pointer is simply
+    # cleared instead of blocking the delete.
     dataset_row_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("dataset_rows.id"), nullable=True
+        ForeignKey("dataset_rows.id", ondelete="SET NULL"), nullable=True
     )
     dataset_row: Mapped["DatasetRowModel | None"] = relationship()
 
@@ -376,7 +389,7 @@ class TestSetEntryModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     test_set_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("test_sets.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("test_sets.id", ondelete="CASCADE"), nullable=True, index=True
     )
     # Traceability FK — points back to the live test this snapshot was taken from.
     # Never used to sync or refresh snapshot data.
@@ -428,7 +441,10 @@ class TestPlanModel(Base):
         DateTime, default=lambda: datetime.now().astimezone()
     )
 
-    entries: Mapped[list["TestPlanEntryModel"]] = relationship(back_populates="test_plan")
+    entries: Mapped[list["TestPlanEntryModel"]] = relationship(
+        back_populates="test_plan",
+        passive_deletes=True,
+    )
 
 
 class TestPlanExecutionModel(Base):
@@ -491,7 +507,7 @@ class TestPlanEntryModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     test_plan_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("test_plans.id"), nullable=False, index=True
+        ForeignKey("test_plans.id", ondelete="CASCADE"), nullable=False, index=True
     )
     test_set_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("test_sets.id"), nullable=False, index=True

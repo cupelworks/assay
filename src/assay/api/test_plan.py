@@ -18,6 +18,7 @@ from assay.schemas import (
 from assay.services import (
     add_test_sets_to_test_plan_by_id,
     create_new_test_plan,
+    delete_test_plan_by_id,
     get_all_test_plan_entries_metadata,
     get_all_test_plans_metadata,
     get_test_plan_metadata_by_id,
@@ -28,6 +29,88 @@ from assay.services import (
 router = APIRouter(tags=["test plan"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.delete(
+    path="/test-plans/{test_plan_id}",
+    responses={
+        200: {
+            "description": (
+                "The test plan and all of its links to test sets were deleted. "
+                "The response body is an empty object. The test sets themselves, "
+                "their entries, and any other test plans they're also linked to "
+                "are all left completely untouched — only this plan and its own "
+                "links are removed."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {}
+                }
+            },
+        },
+        404: {
+            "description": "No test plan exists with the given ID. Nothing is deleted.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test plan with ID '<test_plan_id>' not found"
+                    }
+                }
+            },
+        },
+        409: {
+            "description": (
+                "The test plan has been executed at least once, i.e. it has one "
+                "or more runs recorded against it. Once a plan has run history, "
+                "deleting it is refused permanently — with no way to unfreeze it "
+                "later — because doing so would destroy the audit trail's ability "
+                "to say which campaign a given run belonged to. Nothing is deleted."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test plan with ID '<test_plan_id>' has at least "
+                                  "one run, therefore it cannot be deleted"
+                    }
+                }
+            },
+        },
+    },
+)
+async def delete_test_plan(
+        test_plan_id: uuid.UUID,
+        session: SessionDep,
+) -> dict: # pragma: no cover
+    """Delete a test plan, along with its links to test sets.
+
+    Deleting a plan cascades to every `TestPlanEntryModel` link it owns — the
+    join records connecting it to its test sets — in a single operation. The
+    test sets themselves, their own entries, and any *other* plans those same
+    test sets are also linked to are **not** affected in any way; only this
+    plan and its own links disappear.
+
+    The delete is permitted only while the plan has never been executed. The
+    moment a `TestPlanExecutionModel` exists for this plan — i.e. it has been
+    run at least once, live or replayed — the entire request is rejected with
+    a 409 and nothing is removed. This is a permanent freeze, not a temporary
+    guard: there is no way to "clear" a plan's run history to unlock deletion
+    afterward. This mirrors why `DELETE /test-sets/{test_set_id}` is blocked
+    once any of its entries has a run — losing the plan would silently break
+    the ability to say which named campaign produced a given past run, which
+    is the entire reason a run can be attributed to a test plan in the first
+    place.
+
+    This is unrelated to a plan's *links* to test sets, which never freeze
+    regardless of run history — see `DELETE /test-plans/{test_plan_id}/entries`,
+    which stays unlink-able at any time. The distinction is what's being
+    protected: a run's own audit trail (this plan's identity) versus the
+    link between a plan and a test set (which carries no content and nothing
+    depends on it surviving).
+
+    On success the response is an empty object.
+    """
+    await delete_test_plan_by_id(test_plan_id, session)
+    return {}
 
 
 @router.delete(

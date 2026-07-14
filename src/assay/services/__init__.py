@@ -14,6 +14,7 @@ from assay.services.stats import run_z_test
 from assay.services.test_plans import (
     add_test_sets_to_test_plan_by_id,
     create_new_test_plan,
+    delete_test_plan_by_id,
     get_all_test_plan_entries_metadata,
     get_all_test_plans_metadata,
     get_test_plan_metadata_by_id,
@@ -30,6 +31,7 @@ from assay.services.test_sets import (
     get_test_set_metadata_by_id,
     get_test_sets_linked_tests,
     modify_entry_by_id,
+    unlink_test_set_entries_by_id,
     update_test_set_metadata_by_id,
 )
 from assay.services.tests import (
@@ -49,6 +51,7 @@ __all__ = [
     "create_new_test_plan",
     "create_new_test_set",
     "delete_test_by_id",
+    "delete_test_plan_by_id",
     "delete_test_set_by_id",
     "delete_test_set_entries_by_id",
     "get_all_created_tests",
@@ -74,6 +77,7 @@ __all__ = [
     "replace_dataset_content_by_dataset_id",
     "modify_entry_by_id",
     "remove_test_sets_from_test_plan_by_id",
+    "unlink_test_set_entries_by_id",
     "update_test_plan_by_id",
     "update_test_set_metadata_by_id",
 ]

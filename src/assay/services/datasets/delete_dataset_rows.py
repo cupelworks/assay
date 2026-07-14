@@ -25,7 +25,10 @@ async def delete_dataset_rows_by_ids(
     rows_model = await _get_rows_or_404(request.row_ids, session)
 
     result = _build_deleted_rows_info(rows_model)
-    
+
+    # No guard needed against tests created from these rows: TestModel's
+    # dataset_row_id FK has ondelete="SET NULL", so any referencing test just
+    # loses its traceability pointer instead of blocking this delete.
     await session.execute(delete(DatasetRowModel).where(DatasetRowModel.id.in_(request.row_ids)))
     await session.commit()
 
