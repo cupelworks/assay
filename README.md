@@ -140,11 +140,11 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/datasets/{dataset_id}/rows` | List rows in a dataset (paginated) |
 | `POST` | `/datasets/path` | Create a dataset from a local `.jsonl` file |
 | `POST` | `/datasets/rows` | Append rows to an existing dataset |
-| `PUT` | `/datasets/rows` | Replace all rows in a dataset |
+| `PUT` | `/datasets/rows` | Replace all rows in a dataset — tests created from the replaced rows are unaffected, only their traceability pointer is cleared |
 | `PATCH` | `/datasets/name` | Rename a dataset |
 | `PATCH` | `/datasets/rows` | Update existing rows by ID |
-| `DELETE` | `/datasets` | Delete a dataset and all its rows |
-| `DELETE` | `/datasets/rows` | Delete specific rows by ID |
+| `DELETE` | `/datasets` | Delete a dataset and all its rows — tests created from those rows are unaffected, only their traceability pointer is cleared |
+| `DELETE` | `/datasets/rows` | Delete specific rows by ID — same traceability-clearing behavior as above |
 
 ### Test cases
 | Method | Path | Description |
@@ -201,6 +201,8 @@ See [Configuration](#configuration) for how to set this via `.env`.
 SQLite foreign key enforcement is enabled automatically on every connection via a `PRAGMA foreign_keys=ON` hook in `db.py`. This is required for `ON DELETE CASCADE` to work in SQLite.
 
 Deleting a test set relies on this: its entries cascade-delete at the database level (`test_set_entries.test_set_id` has `ON DELETE CASCADE`, and the ORM relationship uses `passive_deletes=True` so it lets the database do it rather than nulling the FK itself). The `test_runs.test_set_entry_id` FK has no cascade, so if an entry still has a run, the database refuses the delete outright — a backstop behind the service-layer 409 check.
+
+Deleting or replacing dataset rows relies on a different FK action: `tests.dataset_row_id` has `ON DELETE SET NULL`. A test copies its own `input`/`expected_output`/`model_output` at creation time and never reads through this FK again, so there's nothing to protect by blocking the delete — deleting the source row (via `DELETE /datasets`, `DELETE /datasets/rows`, or a `PUT /datasets/rows` replace) just clears the test's traceability pointer instead.
 
 `test_set_entries.test_set_id` is nullable, which is what makes unlinking possible: unlinking sets it to `NULL` directly rather than deleting the row, detaching the entry from the set while leaving the row (and any runs pointing at it) in place.
 
@@ -261,7 +263,6 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 
 ## TODOs
 
-- `services/datasets/replace_dataset_content.py` — Consider what happens when a dataset row has a relationship with executed tests (cascading deletes or constraint violations on full replacement).
 - Test plans — deleting a plan and executing it are not yet implemented. Create, list, get, rename, listing a plan's test sets, linking test sets to a plan, and unlinking test sets from a plan are.
 - Test runs — the `TestRunModel` domain model exists, including attribution FKs for which test, test set entry, test set execution, or test plan execution produced it, and is already referenced by the "has runs" guards on test and test set entry deletion. `TestPlanExecutionModel` and `TestSetExecutionModel` (grouping runs by trigger event — live fan-out vs. replaying a specific past execution) exist too. None of this is wired to a service or API layer yet — nothing anywhere creates a `TestRunModel` row.
 - LLM-as-judge evaluators and the broader statistics engine are stubbed.
