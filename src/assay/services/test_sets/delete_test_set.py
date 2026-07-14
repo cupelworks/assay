@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestSetEntryModel
@@ -84,4 +84,42 @@ async def delete_test_set_entries_by_id(
             TestSetEntryModel.id.in_([entry.id for entry in found])
         )
     )
+    await session.commit()
+
+
+async def unlink_test_set_entries_by_id(
+        test_set_id: uuid.UUID,
+        request: list[TestSetEntryID],
+        session: AsyncSession,
+) -> None:
+    """Detach one or more entries from a test set without deleting them.
+
+    Runs two guards before unlinking: the test set must exist (404), and
+    every requested entry must exist within that test set (404, listing any
+    that don't). Unlike delete, there is no no-runs guard here — unlinking
+    exists precisely to remove entries that already have runs from a set's
+    membership, since those entries can't go through
+    `delete_test_set_entries_by_id`. The entry row itself, and the frozen
+    content any of its runs point at, are left untouched; only
+    `test_set_id` is cleared, applied as a single bulk UPDATE rather than
+    one write per entry.
+
+    Args:
+        test_set_id: UUID of the test set the entries belong to.
+        request: IDs of the entries to unlink.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 404 if the test set does not exist, or one or more
+            requested entries don't exist in it.
+    """
+    await _find_test_set_or_404(test_set_id, session)
+    found = await _find_test_set_entries_in_specific_test_set_or_404(test_set_id, request, session)
+
+    await session.execute(
+        update(TestSetEntryModel)
+        .where(TestSetEntryModel.id.in_([entry.id for entry in found]))
+        .values(test_set_id=None)
+    )
+
     await session.commit()
