@@ -4,7 +4,7 @@ Evaluation toolkit for GenAI-powered applications. Helps testers measure model b
 
 ## Status
 
-Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, rename, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set, or unlink individual entries from the set without deleting them) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Unlinking entries has no such guard — it's the operation for detaching a run-having entry from a set's membership without touching its frozen content or execution history. Test plans are mostly implemented (create, list, get, rename, delete, list the test sets included in a plan, link test sets to a plan, and unlink test sets from a plan — unlinking is always allowed, even if the test set already has runs recorded via this plan). Deleting a plan cascades to its own links to test sets (never blocked, mirroring the unlink behavior), but is permanently blocked once the plan has ever been executed, so a run's audit trail can never lose track of which campaign produced it. Executing a plan is not yet built. The schema-level groundwork for grouping runs by execution — live fan-out vs. replaying a specific past execution, for both test plans and standalone test sets — is in place, but nothing yet creates a run: LLM-as-judge evaluators, test execution itself, and the broader statistics engine are not yet built.
+Active development. Dataset CRUD operations, the z-test, test case management (create, list, get, update, delete), the test set layer (create, list, get, rename, delete), and test set entries (snapshot tests into a set, list, get, update — until the entry has been run, delete individual entries or the whole set, or unlink individual entries from the set without deleting them) are implemented. Deleting a test set cascades to its entries, but only while none of them have runs; bulk-deleting individual entries enforces the same guard and is all-or-nothing. Unlinking entries has no such guard — it's the operation for detaching a run-having entry from a set's membership without touching its frozen content or execution history. Test plans are mostly implemented (create, list, get, rename, delete, list the test sets included in a plan, link test sets to a plan, and unlink test sets from a plan — unlinking is always allowed, even if the test set already has runs recorded via this plan). Deleting a plan cascades to its own links to test sets (never blocked, mirroring the unlink behavior), but is permanently blocked once the plan has ever been executed, so a run's audit trail can never lose track of which campaign produced it. Executing a plan is not yet built. The schema-level groundwork for grouping runs by execution — live fan-out vs. replaying a specific past execution, for both test plans and standalone test sets — is in place. Standalone runs can now be created (`POST /runs/standalone/{test_id}`) — exactly one `TestRunModel` row per call, in `Pending` status, blocked with a 409 if the test has no test types assigned — but nothing yet promotes a pending run to `Running`/`Completed`/`Failed`: the actual execution/scoring mechanism, test-set- and test-plan-triggered execution, LLM-as-judge evaluators, and the broader statistics engine are not yet built.
 
 ## Stack
 
@@ -64,6 +64,7 @@ src/assay/
 │   ├── test.py          # Test case endpoints
 │   ├── test_sets.py     # Test set and test set entry endpoints
 │   ├── test_plan.py     # Test plan endpoints
+│   ├── run.py           # Standalone run creation
 │   ├── stats.py         # Statistical test endpoints
 │   └── meta.py          # Health check
 ├── schemas/             # Pydantic models — API validation and serialization
@@ -75,6 +76,7 @@ src/assay/
 │   ├── test_plans.py    # Test plan schemas (TestPlanMetadata, PaginatedTestPlanMetadataResponse, etc.)
 │   ├── test_plan_entries.py  # Test plan entry schemas (TestPlanEntryDetails, PaginatedTestPlanEntriesDetails)
 │   ├── tests.py         # Test case schemas (CreateTestCaseRequest, ModifyTestCaseRequest, etc.)
+│   ├── runs.py          # Run schemas (RunID, RunStatus, RunCreationDate, StandaloneRunCreationMetadata)
 │   └── stats.py         # ZTestRequest, ZTestResult
 ├── services/            # Business logic — one file per operation
 │   ├── datasets/
@@ -112,6 +114,8 @@ src/assay/
 │   │   ├── get_tests.py                # Paginated listing and single fetch by ID
 │   │   ├── update_test.py              # Partial update with field-level null semantics
 │   │   └── delete_test.py              # Bulk delete with referential integrity checks
+│   ├── runs/
+│   │   └── create_new_run.py           # Create a standalone pending run — one row regardless of test type count, blocked (409) if none are assigned
 │   └── stats.py         # run_z_test
 └── models/              # SQLAlchemy ORM models — database table definitions
     ├── __init__.py
@@ -183,6 +187,11 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/test-plans/{test_plan_id}/entries` | List the test sets included in a test plan (paginated); use each item's `test_set.id` with `GET /test-sets/{test_set_id}/entries` to fetch that set's snapshotted tests |
 | `POST` | `/test-plans/{test_plan_id}/entries` | Link one or more test sets to a test plan — blocked with a 409 if any is already linked to this plan |
 | `DELETE` | `/test-plans/{test_plan_id}/entries` | Unlink one or more test sets from a test plan — all-or-nothing (404 if any requested test set isn't linked to this plan); always allowed even if the test set already has runs recorded via this plan |
+
+### Runs
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/runs/standalone/{test_id}` | Create a standalone, pending run for a live test — enqueue-only, does not execute anything. Blocked with a 409 if the test has no test types assigned |
 
 ### Statistical tests
 | Method | Path | Description |
@@ -268,5 +277,5 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 ## TODOs
 
 - Test plans — executing a plan is not yet implemented. Create, list, get, rename, delete, listing a plan's test sets, linking test sets to a plan, and unlinking test sets from a plan are.
-- Test runs — the `TestRunModel` domain model exists, including attribution FKs for which test, test set entry, test set execution, or test plan execution produced it, and is already referenced by the "has runs" guards on test and test set entry deletion. `TestPlanExecutionModel` and `TestSetExecutionModel` (grouping runs by trigger event — live fan-out vs. replaying a specific past execution) exist too. None of this is wired to a service or API layer yet — nothing anywhere creates a `TestRunModel` row.
+- Test runs — standalone run *creation* exists (`POST /runs/standalone/{test_id}`), but nothing promotes a `pending` run to `running`/`completed`/`failed`: there's no worker or background mechanism yet that actually calls a model, scores it, and writes back `scores`/`error`/`executed_at`. Test-set-triggered and test-plan-triggered execution (fanning out over a set's or plan's entries) aren't built at all — `TestPlanExecutionModel` and `TestSetExecutionModel` (grouping runs by trigger event — live fan-out vs. replaying a specific past execution) exist as schema only, with no service or API layer wired up.
 - LLM-as-judge evaluators and the broader statistics engine are stubbed.
