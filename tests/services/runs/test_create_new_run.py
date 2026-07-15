@@ -23,7 +23,7 @@ def test_standalone_test_not_found():
     session.add.assert_not_called()
     session.commit.assert_not_called()
     assert e.value.status_code == 404
-    assert f"Tests with ids {[str(test_id)]} not found"
+    assert f"Tests with ids {[str(test_id)]} not found" in str(e.value.detail)
     
 
 def test_standalone_empty_test_type_assignment():
