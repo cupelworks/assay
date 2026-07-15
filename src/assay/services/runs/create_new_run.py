@@ -12,8 +12,15 @@ from assay.schemas import (
     TestCaseID,
     TestSetID,
     TestSetLiveRunCreationMetadata,
+    TestSetReplayedExecutionCreationMetadata,
+    TestSetReplayedExecutionID,
 )
-from assay.services.runs._common import _find_test_set_entries_ids_or_409
+from assay.services.runs._common import (
+    _check_test_set_execution_id_linked_to_specific_test_set_id_or_404,
+    _check_test_set_execution_or_404,
+    _find_test_set_entries_ids_or_409,
+    _find_test_set_execution_id_entries_or_409,
+)
 from assay.services.test_sets._common import _find_test_set_or_404
 from assay.services.tests._common import _find_all_tests_with_details_or_404
 
@@ -139,4 +146,83 @@ async def create_new_live_test_set_run(
         test_set_id=TestSetID(id=test_set_id),
         run_count=len(entries_ids),
     )
-    
+
+
+async def create_new_replay_test_set_run(
+        test_set_id: uuid.UUID,
+        test_set_execution_id: uuid.UUID,
+        session: AsyncSession,
+) -> TestSetReplayedExecutionCreationMetadata:
+    """Replay a past test set execution, creating one pending run per original entry.
+
+    Runs three guards before creating anything: the test set must exist
+    (404), the referenced execution must exist (404), and it must belong to
+    this test set (404) — prevents replaying execution X of test set A
+    through test set B's endpoint. The entry lookup itself (409 if the
+    execution has zero runs) is handled by
+    _find_test_set_execution_id_entries_or_409.
+
+    "Replay" means the fan-out targets the exact same test_set_entry_ids the
+    original execution ran, regardless of the set's current membership —
+    entries removed or added to the set since have no effect. This is the
+    counterpart to create_new_live_test_set_run, which always fans out over
+    current membership instead.
+
+    Creates one TestSetExecutionModel row (with replayed_execution_id set to
+    the execution being replayed, marking this one as a replay rather than a
+    live run) and one TestRunModel per original entry, each pointing at the
+    new execution — test_set_entry_id and test_set_execution_id set,
+    status=pending. Enqueue-only: nothing here calls a model or writes back
+    results.
+
+    Args:
+        test_set_id: UUID of the test set the execution must belong to.
+        test_set_execution_id: UUID of the past execution to replay.
+        session: Active async database session.
+
+    Returns:
+        Metadata for the newly created execution: its ID, creation
+        timestamp, the test set it targeted, the number of runs created,
+        and the ID of the execution it replayed.
+
+    Raises:
+        HTTPException: 404 if the test set or execution doesn't exist, or
+            the execution isn't linked to this test set.
+        HTTPException: 409 if the execution has zero runs to replay.
+    """
+    await _find_test_set_or_404(test_set_id, session)
+    await _check_test_set_execution_or_404(test_set_execution_id, session)
+    await _check_test_set_execution_id_linked_to_specific_test_set_id_or_404(
+        test_set_id, test_set_execution_id, session
+    )
+    found_entries = await _find_test_set_execution_id_entries_or_409(test_set_execution_id, session)
+
+    test_set_execution_model = TestSetExecutionModel(
+        id=uuid.uuid4(),
+        test_set_id=test_set_id,
+        replayed_execution_id=test_set_execution_id,
+        created_at=datetime.now().astimezone(),
+    )
+
+    test_runs = [
+        TestRunModel(
+            id=uuid.uuid4(),
+            status=TestStatus.pending,
+            created_at=datetime.now().astimezone(),
+            test_set_entry_id=test_set_entry_id,
+            test_set_execution_id=test_set_execution_model.id,
+        )
+        for test_set_entry_id in found_entries
+    ]
+
+    session.add(test_set_execution_model)
+    session.add_all(test_runs)
+    await session.commit()
+
+    return TestSetReplayedExecutionCreationMetadata(
+        id=test_set_execution_model.id,
+        created_at=test_set_execution_model.created_at,
+        test_set_id=TestSetID(id=test_set_id),
+        run_count=len(found_entries),
+        replayed_execution_id=TestSetReplayedExecutionID(id=test_set_execution_id),
+    )

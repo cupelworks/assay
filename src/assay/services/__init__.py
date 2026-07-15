@@ -10,7 +10,11 @@ from assay.services.datasets import (
     upload_dataset_via_path,
     upload_new_rows_in_existing_dataset,
 )
-from assay.services.runs import create_new_live_test_set_run, create_new_standalone_run
+from assay.services.runs import (
+    create_new_live_test_set_run,
+    create_new_replay_test_set_run,
+    create_new_standalone_run,
+)
 from assay.services.stats import run_z_test
 from assay.services.test_plans import (
     add_test_sets_to_test_plan_by_id,
@@ -48,6 +52,7 @@ __all__ = [
     "add_test_sets_to_test_plan_by_id",
     "add_tests_to_test_set_by_test_id",
     "create_new_live_test_set_run",
+    "create_new_replay_test_set_run",
     "create_new_standalone_run",
     "create_new_test",
     "create_new_test_from_dataset",
