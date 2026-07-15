@@ -49,8 +49,19 @@ from assay.schemas.tests import (
 )
 
 # isort: split
+# runs imports TestCaseID and TestSetID from assay.schemas — must load after tests and test_sets
 # test_set_entries imports CreateTestCaseRequest from assay.schemas — must load after tests
-from assay.schemas.runs import RunCreationDate, RunID, RunStatus, StandaloneRunCreationMetadata
+from assay.schemas.runs import (
+    RunCreationDate,
+    RunID,
+    RunStatus,
+    StandaloneRunCreationMetadata,
+    TestSetExecutionCreationDate,
+    TestSetExecutionID,
+    TestSetLiveRunCreationMetadata,
+    TestSetReplayedExecutionCreationMetadata,
+    TestSetReplayedExecutionID,
+)
 from assay.schemas.test_set_entries import (
     PaginatedTestSetEntriesDetails,
     TestSetEntryDetails,
@@ -102,8 +113,13 @@ __all__ = [
     "TestPlanName",
     "TestSetEntryDetails",
     "TestSetEntryID",
+    "TestSetExecutionCreationDate",
+    "TestSetExecutionID",
     "TestSetID",
+    "TestSetLiveRunCreationMetadata",
     "TestSetMetadata",
     "TestSetName",
     "TestSetCreationResponse",
+    "TestSetReplayedExecutionCreationMetadata",
+    "TestSetReplayedExecutionID",
 ]
