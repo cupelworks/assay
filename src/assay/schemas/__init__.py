@@ -50,6 +50,7 @@ from assay.schemas.tests import (
 
 # isort: split
 # test_set_entries imports CreateTestCaseRequest from assay.schemas — must load after tests
+from assay.schemas.runs import RunCreationDate, RunID, RunStatus, StandaloneRunCreationMetadata
 from assay.schemas.test_set_entries import (
     PaginatedTestSetEntriesDetails,
     TestSetEntryDetails,
@@ -88,6 +89,10 @@ __all__ = [
     "PaginatedTestSetEntriesDetails",
     "PaginatedTestSetMetadataResponse",
     "Pagination",
+    "RunID",
+    "RunCreationDate",
+    "RunStatus",
+    "StandaloneRunCreationMetadata",
     "TestCaseID",
     "TestPlanCreationResponse",
     "TestPlanEntryDetails",
