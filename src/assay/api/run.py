@@ -7,10 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from assay.db import get_session
 from assay.schemas import (
     StandaloneRunCreationMetadata,
+    TestPlanLiveRunCreationMetadata,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
 )
 from assay.services import (
+    create_new_live_test_plan_run,
     create_new_live_test_set_run,
     create_new_replay_test_set_run,
     create_new_standalone_run,
@@ -67,8 +69,8 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "No test types assigned to Test with id "
-                                  "<test_id>"
+                        "detail": "No test types assigned to Tests with ids "
+                                  "['<test_id>']"
                     }
                 }
             },
@@ -143,18 +145,36 @@ async def run_standalone_test(
         },
         409: {
             "description": (
-                "The test set has no entries. A live execution with nothing to "
-                "fan out over would create a test set execution record with "
-                "zero runs — indistinguishable from a successful no-op — so "
-                "it's rejected upfront instead. Add at least one test to the "
-                "set (`POST /test-sets/{test_set_id}/entries`) before "
-                "triggering a live run. Nothing is created."
+                "One of two things: the test set has no entries, or at least "
+                "one entry in the test set has no test types assigned. A live "
+                "execution with nothing to fan out over would create a test "
+                "set execution record with zero runs — indistinguishable from "
+                "a successful no-op — so an empty test set is rejected "
+                "upfront. An entry with no test types assigned would produce "
+                "a run that sits pending forever with no way to ever score "
+                "it, so that's rejected upfront too. Add at least one test to "
+                "the set (`POST /test-sets/{test_set_id}/entries`) or assign "
+                "at least one test type to the offending entries before "
+                "triggering a live run. Nothing is created in either case. "
+                "The two response examples below show each distinct failure."
             ),
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "No Test Set Entries found in Test set with "
-                                  "ID '<test_set_id>'"
+                    "examples": {
+                        "no_entries": {
+                            "summary": "Test set has no entries",
+                            "value": {
+                                "detail": "No Test Set Entries found in Test set with "
+                                          "ID '<test_set_id>'"
+                            },
+                        },
+                        "entries_missing_test_types": {
+                            "summary": "One or more entries have no test types assigned",
+                            "value": {
+                                "detail": "No test types assigned to Test Set Entries "
+                                          "with ids ['<test_set_entry_id>']"
+                            },
+                        },
                     }
                 }
             },
@@ -177,12 +197,15 @@ async def run_live_test_set_entries(
     execution used regardless of the set's current membership, for
     apples-to-apples comparison against a fixed benchmark.
 
-    Two guards run before anything is created:
+    Three guards run before anything is created:
     - The test set must exist (404).
     - The test set must have at least one entry (409) — otherwise this call
       would create an execution record with zero runs, which is
       indistinguishable from success to the caller and almost certainly not
       what was intended.
+    - Every entry in the test set must have at least one test type assigned
+      (409) — otherwise the run created for that entry would sit pending
+      forever with no way to ever produce a score.
 
     Creates one test set execution record (the trigger-event grouping every
     run this call produces) and one pending run per entry, all sharing that
@@ -327,3 +350,133 @@ async def replay_previous_test_set_execution(
     replayed.
     """
     return await create_new_replay_test_set_run(test_set_id, test_set_execution_id, session)
+
+
+@router.post(
+    path="/runs/test-plans/{test_plan_id}",
+    responses={
+        201: {
+            "description": (
+                "A live execution was triggered: one pending run was created "
+                "per entry across every test set currently linked to the "
+                "plan, all grouped under a single new test plan execution. "
+                "This endpoint only enqueues the runs — it does not call the "
+                "model, score anything, or write back results. Every created "
+                "run's `status` is `Pending`; a separate, later mechanism "
+                "promotes each one to `Running`, `Completed`, or `Failed` "
+                "once it actually executes."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "a2b3c4d5-e6f7-8901-ab23-456789abcdef",
+                        "created_at": "2026-07-17T09:21:44.512873",
+                        "test_plan_id": {
+                            "id": "7c1d2e3f-4a5b-6c7d-8e9f-0123456789ab"
+                        },
+                        "run_count": 5,
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "No test plan exists with the given ID. Nothing is created.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test plan with ID '<test_plan_id>' not found"
+                    }
+                }
+            },
+        },
+        409: {
+            "description": (
+                "One of three things: the test plan has no linked test sets; "
+                "one of its linked test sets has no entries; or at least one "
+                "entry across those test sets has no test types assigned. A "
+                "live execution with nothing to fan out over would create a "
+                "test plan execution record with zero runs — indistinguishable "
+                "from a successful no-op — so an empty plan or an empty linked "
+                "test set is rejected upfront. An entry with no test types "
+                "assigned would produce a run that sits pending forever with "
+                "no way to ever score it, so that's rejected upfront too. "
+                "Link at least one test set to the plan (`POST "
+                "/test-plans/{test_plan_id}/entries`), add at least one entry "
+                "to the offending test set(s) (`POST "
+                "/test-sets/{test_set_id}/entries`), or assign at least one "
+                "test type to the offending entries before triggering a live "
+                "run. Nothing is created in any case. The three response "
+                "examples below show each distinct failure."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "no_linked_test_sets": {
+                            "summary": "Test plan has no linked test sets",
+                            "value": {
+                                "detail": "Test plan with ID '<test_plan_id>' "
+                                          "has no linked test sets"
+                            },
+                        },
+                        "linked_test_set_has_no_entries": {
+                            "summary": "One or more linked test sets have no entries",
+                            "value": {
+                                "detail": "No Test Set Entries found in Test "
+                                          "sets with IDs ['<test_set_id>']"
+                            },
+                        },
+                        "entries_missing_test_types": {
+                            "summary": "One or more entries have no test types assigned",
+                            "value": {
+                                "detail": "No test types assigned to Test Set "
+                                          "Entries with ids "
+                                          "['<test_set_entry_id>']"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+    status_code=201,
+    response_model=TestPlanLiveRunCreationMetadata,
+)
+async def run_live_test_plan_entries(
+        test_plan_id: uuid.UUID,
+        session: SessionDep,
+) -> TestPlanLiveRunCreationMetadata: # pragma: no cover
+    """Trigger a live execution of a test plan, creating one pending run per
+    entry across all of its linked test sets.
+
+    "Live" means the fan-out is over whichever test sets are currently
+    linked to the plan, and whatever entries those sets currently contain
+    — not a fixed historical scope. Link or unlink test sets, or add or
+    remove entries, between calls and the next live run picks up whatever
+    the plan's scope currently resolves to. This is the plan-level
+    counterpart to triggering a live test set execution, one layer up: it
+    fans out across every linked test set's entries in a single execution
+    instead of a single set's own entries.
+
+    Four guards run before anything is created:
+    - The test plan must exist (404).
+    - The test plan must have at least one linked test set (409) —
+      otherwise this call would create an execution record with zero runs,
+      which is indistinguishable from success to the caller and almost
+      certainly not what was intended.
+    - Every linked test set must have at least one entry (409) — same
+      reasoning, one level down.
+    - Every entry across all linked test sets must have at least one test
+      type assigned (409) — otherwise the run created for that entry would
+      sit pending forever with no way to ever produce a score.
+
+    Creates one test plan execution record (the trigger-event grouping
+    every run this call produces) and one pending run per entry across all
+    linked test sets, all sharing that same execution. This endpoint only
+    creates those records — it does not execute anything itself.
+
+    Returns the new execution's ID, creation timestamp, the test plan it
+    targeted, and the number of runs created (equal to the number of
+    entries across all of the plan's linked test sets at the moment this
+    was triggered).
+    """
+    return await create_new_live_test_plan_run(test_plan_id, session)

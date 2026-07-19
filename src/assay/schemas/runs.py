@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from assay.models import TestStatus
-from assay.schemas import TestCaseID, TestSetID
+from assay.schemas import TestCaseID, TestPlanID, TestSetID
 
 
 class RunID(BaseModel):
@@ -98,5 +98,39 @@ class TestSetReplayedExecutionCreationMetadata(TestSetLiveRunCreationMetadata):
             'to the number of runs `replayed_execution_id` produced, since '
             'replay re-targets the exact same test set entries rather than '
             'fanning out fresh.'
+        ),
+    )
+
+
+class TestPlanExecutionID(BaseModel):
+    id: uuid.UUID = Field(
+        ...,
+        description=(
+            'Unique identifier of the test plan execution (`TestPlanExecutionModel.id`) '
+            '— the trigger-event record grouping every run produced by the same '
+            'live fan-out or replay.'
+        ),
+    )
+
+
+class TestPlanExecutionCreationDate(BaseModel):
+    created_at: datetime = Field(
+        ...,
+        description=(
+            'Timestamp when the test plan run was created '
+            '(when its entries got enqueued as `Pending`), not '
+            'when it started or finished executing.'
+        ),
+    )
+
+
+class TestPlanLiveRunCreationMetadata(TestPlanExecutionID, TestPlanExecutionCreationDate):
+    test_plan_id: TestPlanID
+    run_count: int = Field(
+        ...,
+        description=(
+            "Number of TestRunModel rows created by this execution — one per "
+            "entry across all of the plan's linked test sets at the moment "
+            "this live execution was triggered."
         ),
     )

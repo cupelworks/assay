@@ -1,26 +1,30 @@
 import uuid
 from datetime import datetime
 
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette import status
 
-from assay.models import TestRunModel, TestStatus
-from assay.models.test import TestSetExecutionModel
+from assay.models import TestPlanExecutionModel, TestRunModel, TestSetExecutionModel, TestStatus
 from assay.schemas import (
     StandaloneRunCreationMetadata,
     TestCaseID,
+    TestPlanID,
+    TestPlanLiveRunCreationMetadata,
     TestSetID,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
     TestSetReplayedExecutionID,
 )
 from assay.services.runs._common import (
+    _check_test_set_entries_have_test_types_or_409,
     _check_test_set_execution_id_linked_to_specific_test_set_id_or_404,
     _check_test_set_execution_or_404,
+    _check_tests_have_test_types_or_409,
+    _find_test_plan_entries_or_409,
     _find_test_set_entries_ids_or_409,
     _find_test_set_execution_id_entries_or_409,
+    _find_test_sets_entries_ids_or_409,
 )
+from assay.services.test_plans._common import _find_test_plan_by_id_or_404
 from assay.services.test_sets._common import _find_test_set_or_404
 from assay.services.tests._common import _find_all_tests_with_details_or_404
 
@@ -56,11 +60,7 @@ async def create_new_standalone_run(
     """
     found = (await _find_all_tests_with_details_or_404([test_id], session))[0]
     
-    if not found.test_type_assignments:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"No test types assigned to Test with id {test_id}",
-        )
+    _check_tests_have_test_types_or_409([found])
     
     test_run_model = TestRunModel(
         id=uuid.uuid4(),
@@ -86,10 +86,12 @@ async def create_new_live_test_set_run(
 ) -> TestSetLiveRunCreationMetadata:
     """Trigger a live execution of a test set, creating one pending run per entry.
 
-    Runs two guards before creating anything: the test set must exist (404),
-    and it must have at least one entry (409) — an empty test set would fan
-    out into zero runs, which would look identical to the caller as a
-    successful no-op.
+    Runs three guards before creating anything: the test set must exist
+    (404); it must have at least one entry (409) — an empty test set would
+    fan out into zero runs, which would look identical to the caller as a
+    successful no-op; and every entry must have at least one test type
+    assigned (409) — an entry with nothing to measure it against would
+    produce a run that sits pending forever with no way to ever score it.
 
     "Live" means the fan-out is over whatever entries the test set currently
     has, not a fixed historical scope — a later call to this same endpoint
@@ -114,10 +116,12 @@ async def create_new_live_test_set_run(
 
     Raises:
         HTTPException: 404 if no test set with the given ID exists.
-        HTTPException: 409 if the test set has no entries.
+        HTTPException: 409 if the test set has no entries, or if any entry
+            has no test types assigned.
     """
     await _find_test_set_or_404(test_set_id, session)
     entries_ids = await _find_test_set_entries_ids_or_409(test_set_id, session)
+    await _check_test_set_entries_have_test_types_or_409(entries_ids, session)
 
     test_set_execution_model = TestSetExecutionModel(
         id=uuid.uuid4(),
@@ -225,4 +229,85 @@ async def create_new_replay_test_set_run(
         test_set_id=TestSetID(id=test_set_id),
         run_count=len(found_entries),
         replayed_execution_id=TestSetReplayedExecutionID(id=test_set_execution_id),
+    )
+
+
+async def create_new_live_test_plan_run(
+        test_plan_id: uuid.UUID,
+        session: AsyncSession,
+) -> TestPlanLiveRunCreationMetadata:
+    """Trigger a live execution of a test plan, creating one pending run per
+    entry across all of its linked test sets.
+
+    Runs four guards before creating anything: the test plan must exist
+    (404); it must have at least one linked test set (409) — a plan with no
+    linked sets would fan out into zero runs, which would look identical to
+    the caller as a successful no-op; every linked test set must have at
+    least one entry (409) — same reasoning, one level down; and every entry
+    across all linked sets must have at least one test type assigned (409)
+    — an entry with nothing to measure it against would produce a run that
+    sits pending forever with no way to ever score it.
+
+    "Live" means the fan-out is over whichever test sets are currently
+    linked to the plan and whatever entries those sets currently contain,
+    not a fixed historical scope — a later call to this same endpoint picks
+    up any test sets linked/unlinked or entries added/removed since. This
+    is the plan-level counterpart to create_new_live_test_set_run, one
+    layer up: it fans out across every linked test set's entries in a
+    single execution, rather than a single set's own entries.
+
+    Creates one TestPlanExecutionModel row (the trigger-event record
+    grouping every run produced by this call, with replayed_execution_id
+    left unset since this is a live run, not a replay) and one TestRunModel
+    per entry across all linked test sets, each pointing at that same
+    execution — test_set_entry_id and test_plan_execution_id set,
+    status=pending. Enqueue-only: nothing here calls a model or writes back
+    results.
+
+    Args:
+        test_plan_id: UUID of the test plan to execute.
+        session: Active async database session.
+
+    Returns:
+        Metadata for the newly created execution: its ID, creation
+        timestamp, the test plan it targeted, and the number of runs
+        created.
+
+    Raises:
+        HTTPException: 404 if no test plan with the given ID exists.
+        HTTPException: 409 if the plan has no linked test sets, if any
+            linked test set has no entries, or if any entry has no test
+            types assigned.
+    """
+    await _find_test_plan_by_id_or_404(test_plan_id, session)
+    test_plan_entries_ids = await _find_test_plan_entries_or_409(test_plan_id, session)
+    test_sets_entries_ids = await _find_test_sets_entries_ids_or_409(test_plan_entries_ids, session)
+    await _check_test_set_entries_have_test_types_or_409(test_sets_entries_ids, session)
+    
+    test_plan_execution_model = TestPlanExecutionModel(
+        id=uuid.uuid4(),
+        test_plan_id=test_plan_id,
+        created_at=datetime.now().astimezone(),
+    )
+
+    test_runs = [
+        TestRunModel(
+            id=uuid.uuid4(),
+            status=TestStatus.pending,
+            created_at=datetime.now().astimezone(),
+            test_set_entry_id=test_set_entry_id,
+            test_plan_execution_id=test_plan_execution_model.id,
+        )
+        for test_set_entry_id in test_sets_entries_ids
+    ]
+    
+    session.add(test_plan_execution_model)
+    session.add_all(test_runs)
+    await session.commit()
+    
+    return TestPlanLiveRunCreationMetadata(
+        id=test_plan_execution_model.id,
+        created_at=test_plan_execution_model.created_at,
+        test_plan_id=TestPlanID(id=test_plan_id),
+        run_count=len(test_sets_entries_ids),
     )
