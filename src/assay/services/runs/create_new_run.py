@@ -9,17 +9,22 @@ from assay.schemas import (
     TestCaseID,
     TestPlanID,
     TestPlanLiveRunCreationMetadata,
+    TestPlanReplayedExecutionCreationMetadata,
+    TestPlanReplayedExecutionID,
     TestSetID,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
     TestSetReplayedExecutionID,
 )
 from assay.services.runs._common import (
+    _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404,
+    _check_test_plan_execution_or_404,
     _check_test_set_entries_have_test_types_or_409,
     _check_test_set_execution_id_linked_to_specific_test_set_id_or_404,
     _check_test_set_execution_or_404,
     _check_tests_have_test_types_or_409,
     _find_test_plan_entries_or_409,
+    _find_test_plan_execution_id_entries_or_409,
     _find_test_set_entries_ids_or_409,
     _find_test_set_execution_id_entries_or_409,
     _find_test_sets_entries_ids_or_409,
@@ -310,4 +315,90 @@ async def create_new_live_test_plan_run(
         created_at=test_plan_execution_model.created_at,
         test_plan_id=TestPlanID(id=test_plan_id),
         run_count=len(test_sets_entries_ids),
+    )
+
+
+async def create_new_replay_test_plan_run(
+        test_plan_id: uuid.UUID,
+        test_plan_execution_id: uuid.UUID,
+        session: AsyncSession,
+) -> TestPlanReplayedExecutionCreationMetadata:
+    """Replay a past test plan execution, creating one pending run per original entry.
+
+    Runs three guards before creating anything: the test plan must exist
+    (404), the referenced execution must exist (404), and it must belong to
+    this test plan (404) — prevents replaying execution X of test plan A
+    through test plan B's endpoint. The entry lookup itself (409 if the
+    execution has zero runs) is handled by
+    _find_test_plan_execution_id_entries_or_409. Deliberately no test-type
+    guard here (unlike create_new_live_test_plan_run) — every entry reached
+    this way already passed that check when its run was first created via
+    the live path, and stays frozen for as long as that run exists.
+
+    "Replay" means the fan-out targets the exact same test_set_entry_ids the
+    original execution ran, regardless of the plan's current linked test
+    sets — test sets linked or unlinked since have no effect. This is the
+    counterpart to create_new_live_test_plan_run, which always fans out over
+    the plan's current linked test sets instead.
+
+    Creates one TestPlanExecutionModel row (with replayed_execution_id set
+    to the execution being replayed, marking this one as a replay rather
+    than a live run) and one TestRunModel per original entry, each pointing
+    at the new execution — test_set_entry_id and test_plan_execution_id
+    set, status=pending. Enqueue-only: nothing here calls a model or writes
+    back results.
+
+    Args:
+        test_plan_id: UUID of the test plan the execution must belong to.
+        test_plan_execution_id: UUID of the past execution to replay.
+        session: Active async database session.
+
+    Returns:
+        Metadata for the newly created execution: its ID, creation
+        timestamp, the test plan it targeted, the number of runs created,
+        and the ID of the execution it replayed.
+
+    Raises:
+        HTTPException: 404 if the test plan or execution doesn't exist, or
+            the execution isn't linked to this test plan.
+        HTTPException: 409 if the execution has zero runs to replay.
+    """
+    await _find_test_plan_by_id_or_404(test_plan_id, session)
+    await _check_test_plan_execution_or_404(test_plan_execution_id, session)
+    await _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404(
+        test_plan_id, test_plan_execution_id, session
+    )
+
+    found_entries = await _find_test_plan_execution_id_entries_or_409(
+        test_plan_execution_id, session
+    )
+
+    test_plan_execution_model = TestPlanExecutionModel(
+        id=uuid.uuid4(),
+        test_plan_id=test_plan_id,
+        replayed_execution_id=test_plan_execution_id,
+        created_at=datetime.now().astimezone(),
+    )
+    
+    test_runs = [
+        TestRunModel(
+            id=uuid.uuid4(),
+            status=TestStatus.pending,
+            created_at=datetime.now().astimezone(),
+            test_set_entry_id=test_set_entry_id,
+            test_plan_execution_id=test_plan_execution_model.id,
+        )
+        for test_set_entry_id in found_entries
+    ]
+    
+    session.add(test_plan_execution_model)
+    session.add_all(test_runs)
+    await session.commit()
+    
+    return TestPlanReplayedExecutionCreationMetadata(
+        id=test_plan_execution_model.id,
+        created_at=test_plan_execution_model.created_at,
+        test_plan_id=TestPlanID(id=test_plan_id),
+        run_count=len(found_entries),
+        replayed_execution_id=TestPlanReplayedExecutionID(id=test_plan_execution_id),
     )

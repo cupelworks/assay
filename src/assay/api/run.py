@@ -8,12 +8,14 @@ from assay.db import get_session
 from assay.schemas import (
     StandaloneRunCreationMetadata,
     TestPlanLiveRunCreationMetadata,
+    TestPlanReplayedExecutionCreationMetadata,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
 )
 from assay.services import (
     create_new_live_test_plan_run,
     create_new_live_test_set_run,
+    create_new_replay_test_plan_run,
     create_new_replay_test_set_run,
     create_new_standalone_run,
 )
@@ -480,3 +482,136 @@ async def run_live_test_plan_entries(
     was triggered).
     """
     return await create_new_live_test_plan_run(test_plan_id, session)
+
+
+@router.post(
+    path="/runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}",
+    responses={
+        201: {
+            "description": (
+                "A replay was triggered: one pending run was created for every "
+                "entry the referenced past execution ran, all grouped under a "
+                "single new test plan execution. The entries targeted are the "
+                "exact same ones that execution used, regardless of what test "
+                "sets are currently linked to the plan — test sets linked or "
+                "unlinked since have no effect, and an entry whose test set "
+                "has since been unlinked from the plan is still included, "
+                "since its content stays frozen either way. This endpoint "
+                "only enqueues the runs — it does not call the model, score "
+                "anything, or write back results. Every created run's "
+                "`status` is `Pending`; a separate, later mechanism promotes "
+                "each one to `Running`, `Completed`, or `Failed` once it "
+                "actually executes."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0",
+                        "created_at": "2026-07-18T11:05:52.284917",
+                        "test_plan_id": {
+                            "id": "7c1d2e3f-4a5b-6c7d-8e9f-0123456789ab"
+                        },
+                        "run_count": 5,
+                        "replayed_execution_id": {
+                            "id": "a2b3c4d5-e6f7-8901-ab23-456789abcdef"
+                        },
+                    }
+                }
+            },
+        },
+        404: {
+            "description": (
+                "One of three things: no test plan exists with the given ID; "
+                "no test plan execution exists with the given ID; or the "
+                "execution exists but belongs to a different test plan than "
+                "the one in the path — replaying execution X of test plan A "
+                "through test plan B's URL is rejected rather than silently "
+                "allowed. Nothing is created in any case. The three response "
+                "examples below show each distinct failure."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_plan_not_found": {
+                            "summary": "Test plan does not exist",
+                            "value": {
+                                "detail": "Test plan with ID '<test_plan_id>' not found"
+                            },
+                        },
+                        "execution_not_found": {
+                            "summary": "Test plan execution does not exist",
+                            "value": {
+                                "detail": "Test plan execution with ID "
+                                          "'<test_plan_execution_id>' does not exist"
+                            },
+                        },
+                        "execution_not_linked_to_test_plan": {
+                            "summary": "Execution belongs to a different test plan",
+                            "value": {
+                                "detail": "Test plan execution with ID "
+                                          "'<test_plan_execution_id>' not linked to "
+                                          "test plan with ID '<test_plan_id>'"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        409: {
+            "description": (
+                "The referenced execution has zero runs to replay. Nothing "
+                "is created. This is expected to be unreachable through "
+                "normal use today — every execution that can currently exist "
+                "was itself created with at least one run — but is kept as a "
+                "guard against a future admin-only run-deletion feature "
+                "leaving an execution with zero runs behind for a later "
+                "replay to hit."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test plan execution with ID "
+                                  "'<test_plan_execution_id>' has no test set entries"
+                    }
+                }
+            },
+        },
+    },
+    status_code=201,
+    response_model=TestPlanReplayedExecutionCreationMetadata,
+)
+async def replay_previous_test_plan_execution(
+        test_plan_id: uuid.UUID,
+        test_plan_execution_id: uuid.UUID,
+        session: SessionDep,
+) -> TestPlanReplayedExecutionCreationMetadata: # pragma: no cover
+    """Replay a past test plan execution, creating one pending run per original entry.
+
+    "Replay" means the fan-out targets the exact same test set entries the
+    referenced execution ran, not whatever test sets are currently linked to
+    the plan. This is the counterpart to triggering a live execution, which
+    always fans out over the plan's current linked test sets instead —
+    replay exists for apples-to-apples comparison against a fixed
+    historical scope (e.g. "did the model regress against exactly what was
+    tested last time"), which a live re-run can't guarantee once the plan's
+    linked test sets have changed.
+
+    Four guards run before anything is created:
+    - The test plan must exist (404).
+    - The referenced test plan execution must exist (404).
+    - That execution must belong to this test plan (404) — prevents
+      replaying execution X of test plan A through test plan B's URL.
+    - The execution must have at least one run to replay (409).
+
+    Creates one new test plan execution record (with `replayed_execution_id`
+    set to the execution being replayed, marking it as a replay rather than
+    a live run) and one pending run per original test set entry,
+    all sharing that new execution. This endpoint only creates those records —
+    it does not execute anything itself.
+
+    Returns the new execution's ID, creation timestamp, the test plan it
+    targeted, the number of runs created (always equal to the number of
+    runs the replayed execution had), and the ID of the execution it
+    replayed.
+    """
+    return await create_new_replay_test_plan_run(test_plan_id, test_plan_execution_id, session)

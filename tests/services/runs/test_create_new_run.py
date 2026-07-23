@@ -11,11 +11,14 @@ from assay.models import (
     TestSetEntryModel,
     TestSetExecutionModel,
     TestSetModel,
+    TestStatus,
     TestTypeAssignmentModel,
 )
+from assay.schemas import TestPlanID, TestPlanReplayedExecutionID
 from assay.services import (
     create_new_live_test_plan_run,
     create_new_live_test_set_run,
+    create_new_replay_test_plan_run,
     create_new_replay_test_set_run,
     create_new_standalone_run,
 )
@@ -496,3 +499,146 @@ def test_new_live_test_plan_run_happy_path():
     assert response.created_at == test_plan_execution_model.created_at
     assert response.test_plan_id.id == test_plan_id
     assert response.run_count == len(available_entry_ids)
+
+
+# --- create_new_replay_test_plan_run() ---
+
+def test_new_replay_test_plan_test_plan_not_found():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+    
+    session = AsyncMock()
+    session.scalar.return_value = None
+    
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(create_new_replay_test_plan_run(
+            test_plan_id, test_plan_execution_id, session))
+
+    session.scalar.assert_called_once()
+    session.scalars.assert_not_called()
+    session.add.assert_not_called()
+    session.add_all.assert_not_called()
+    assert e.value.status_code == 404
+    assert f"Test plan with ID '{test_plan_id}' not found" in str(e.value.detail)
+    assert str(test_plan_execution_id) not in str(e.value.detail)
+
+
+def test_new_replay_test_plan_test_plan_execution_id_not_found():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        TestPlanModel(id=test_plan_id),
+        None
+    ]
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(create_new_replay_test_plan_run(
+            test_plan_id, test_plan_execution_id, session
+        ))
+
+    session.scalars.assert_not_called()
+    session.add.assert_not_called()
+    session.add_all.assert_not_called()
+    assert session.scalar.call_count == 2
+    assert e.value.status_code == 404
+    assert (f"Test plan execution with ID '{test_plan_execution_id}' does not exist"
+            in str(e.value.detail))
+    assert str(test_plan_id) not in str(e.value.detail)
+
+
+def test_new_replay_test_plan_test_plan_execution_id_not_linked_to_specific_test_plan_id():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        TestPlanModel(id=test_plan_id),
+        test_plan_execution_id,
+        None,
+    ]
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(create_new_replay_test_plan_run(
+            test_plan_id, test_plan_execution_id, session
+        ))
+
+    session.scalars.assert_not_called()
+    session.add.assert_not_called()
+    session.add_all.assert_not_called()
+    assert session.scalar.call_count == 3
+    assert e.value.status_code == 404
+    assert (f"Test plan execution with ID '{test_plan_execution_id}' not linked "
+            f"to test plan with ID '{test_plan_id}'") in str(e.value.detail)
+
+
+def test_new_replay_test_plan_execution_id_entries_not_found():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        TestPlanModel(id=test_plan_id),
+        test_plan_execution_id,
+        test_plan_execution_id,
+    ]
+
+    session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(create_new_replay_test_plan_run(
+            test_plan_id, test_plan_execution_id, session
+        ))
+
+    session.add.assert_not_called()
+    session.add_all.assert_not_called()
+    session.scalars.assert_called_once()
+    assert session.scalar.call_count == 3
+    assert e.value.status_code == 409
+    assert (f"Test plan execution with ID '{test_plan_execution_id}' has no test set entries"
+            in str(e.value.detail))
+    assert str(test_plan_id) not in str(e.value.detail)
+
+
+def test_new_replay_test_plan_happy_path():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        TestPlanModel(id=test_plan_id),
+        test_plan_execution_id,
+        test_plan_execution_id,
+    ]
+
+    test_plan_execution_entry_id = uuid.uuid4()
+    session.scalars.return_value = MagicMock(all=MagicMock(return_value=[
+        test_plan_execution_entry_id,
+    ]))
+
+    response = asyncio.run(create_new_replay_test_plan_run(
+        test_plan_id, test_plan_execution_id, session
+    ))
+
+    session.scalars.assert_called_once()
+    session.add.assert_called_once()
+    session.add_all.assert_called_once()
+    assert session.scalar.call_count == 3
+
+    test_plan_execution_model = session.add.call_args.args[0]
+    assert test_plan_execution_model.test_plan_id == test_plan_id
+    assert test_plan_execution_model.replayed_execution_id == test_plan_execution_id
+
+    test_run_models = session.add_all.call_args.args[0]
+    assert len(test_run_models) == 1
+
+    test_run_model = next(iter(test_run_models))
+    assert test_run_model.test_set_entry_id == test_plan_execution_entry_id
+    assert test_run_model.test_plan_execution_id == test_plan_execution_model.id
+    assert test_run_model.status == TestStatus.pending
+    assert response.id == test_plan_execution_model.id
+    assert response.created_at == test_plan_execution_model.created_at
+    assert response.test_plan_id == TestPlanID(id=test_plan_id)
+    assert response.run_count == len(test_run_models)
+    assert response.replayed_execution_id == TestPlanReplayedExecutionID(id=test_plan_execution_id)

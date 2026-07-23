@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from assay.models import (
     TestModel,
     TestPlanEntryModel,
+    TestPlanExecutionModel,
     TestRunModel,
     TestSetEntryModel,
     TestSetExecutionModel,
@@ -209,6 +210,38 @@ async def _check_test_set_execution_or_404(
             status_code=404,
             detail=f"Test set execution with ID '{test_set_execution_id}' does not exist"
         )
+    
+    
+async def _check_test_plan_execution_or_404(
+        test_plan_execution_id: uuid.UUID,
+        session: AsyncSession,
+):
+    """Raise 404 if no test plan execution with the given ID exists.
+
+    Unscoped — does not check which test plan the execution belongs to,
+    mirroring _check_test_set_execution_or_404 one layer up: keeping
+    "doesn't exist at all" as its own precise message, separate from
+    "exists, but not for this plan", is what lets a scoped variant built on
+    top of this one give each failure mode its own message instead of
+    collapsing them into one.
+
+    Args:
+        test_plan_execution_id: UUID of the test plan execution to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 404 if no test plan execution with this ID exists.
+    """
+    found = await session.scalar(
+        select(TestPlanExecutionModel.id)
+        .where(TestPlanExecutionModel.id == test_plan_execution_id)
+    )
+
+    if found is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test plan execution with ID '{test_plan_execution_id}' does not exist"
+        )
 
 
 async def _check_test_set_execution_id_linked_to_specific_test_set_id_or_404(
@@ -243,6 +276,42 @@ async def _check_test_set_execution_id_linked_to_specific_test_set_id_or_404(
             status_code=404,
             detail=f"Test set execution with ID '{test_set_execution_id}' not linked "
                    f"to test set with ID '{test_set_id}'"
+        )
+
+
+async def _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404(
+        test_plan_id: uuid.UUID,
+        test_plan_execution_id: uuid.UUID,
+        session: AsyncSession,
+):
+    """Raise 404 if the given execution doesn't belong to the given test plan.
+
+    Scoped lookup, mirroring _check_test_set_execution_id_linked_to_specific_test_set_id_or_404
+    one layer up: prevents a caller from replaying execution X of test plan A
+    by hitting test plan B's endpoint. Callers are expected to have already
+    confirmed the execution exists at all (via
+    _check_test_plan_execution_or_404) — this only distinguishes "exists,
+    but belongs to a different test plan" from that.
+
+    Args:
+        test_plan_id: UUID of the test plan the execution must belong to.
+        test_plan_execution_id: UUID of the test plan execution to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 404 if the execution isn't linked to this test plan.
+    """
+    found = await session.scalar(
+        select(TestPlanExecutionModel.id)
+        .where(TestPlanExecutionModel.id == test_plan_execution_id)
+        .where(TestPlanExecutionModel.test_plan_id == test_plan_id)
+    )
+
+    if found is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test plan execution with ID '{test_plan_execution_id}' not linked "
+                   f"to test plan with ID '{test_plan_id}'"
         )
 
 
@@ -284,6 +353,51 @@ async def _find_test_set_execution_id_entries_or_409(
         raise HTTPException(
             status_code=409,
             detail=f"Test set execution with ID '{test_set_execution_id}' has no test set entries"
+        )
+
+    return found
+
+
+async def _find_test_plan_execution_id_entries_or_409(
+        test_plan_execution_id: uuid.UUID,
+        session: AsyncSession,
+):
+    """Fetch a test plan execution's run entry IDs, raising 409 if it has none.
+
+    A test set can be unlinked from the plan (its TestPlanEntryModel link
+    removed) after being run without invalidating the run itself, so
+    reading through test_plan_execution_id here keeps returning every
+    entry that execution actually ran, regardless of the plan's current
+    linked test sets. Callers needing "does this execution belong to this
+    test plan" should use
+    _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404
+    first — this function only reads the execution's already-frozen run
+    history.
+
+    Same empty-target reasoning as _find_test_set_execution_id_entries_or_409:
+    a replay execution with zero runs to reproduce would silently succeed
+    with an empty scope, indistinguishable to the caller from a real
+    replay.
+
+    Args:
+        test_plan_execution_id: UUID of the test plan execution to fetch entry IDs for.
+        session: Active async database session.
+
+    Returns:
+        The test_set_entry_id of every run belonging to this execution (always >= 1 item).
+
+    Raises:
+        HTTPException: 409 if the execution has zero runs.
+    """
+    found = list((await session.scalars(
+        select(TestRunModel.test_set_entry_id)
+        .where(TestRunModel.test_plan_execution_id == test_plan_execution_id)
+    )).all())
+
+    if not found:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Test plan execution with ID '{test_plan_execution_id}' has no test set entries"
         )
 
     return found

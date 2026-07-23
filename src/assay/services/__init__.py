@@ -13,6 +13,7 @@ from assay.services.datasets import (
 from assay.services.runs import (
     create_new_live_test_plan_run,
     create_new_live_test_set_run,
+    create_new_replay_test_plan_run,
     create_new_replay_test_set_run,
     create_new_standalone_run,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "add_tests_to_test_set_by_test_id",
     "create_new_live_test_plan_run",
     "create_new_live_test_set_run",
+    "create_new_replay_test_plan_run",
     "create_new_replay_test_set_run",
     "create_new_standalone_run",
     "create_new_test",

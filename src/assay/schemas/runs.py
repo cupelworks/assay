@@ -134,3 +134,29 @@ class TestPlanLiveRunCreationMetadata(TestPlanExecutionID, TestPlanExecutionCrea
             "this live execution was triggered."
         ),
     )
+
+
+class TestPlanReplayedExecutionID(BaseModel):
+    id: uuid.UUID = Field(
+        ...,
+        description=(
+            "Unique identifier of the prior test plan execution "
+            "(`TestPlanExecutionModel.replayed_execution_id`) that this execution "
+            "replayed — its new runs target the exact same test set entries that "
+            "execution used, rather than fanning out fresh from the plan's "
+            "currently linked test sets."
+        )
+    )
+
+
+class TestPlanReplayedExecutionCreationMetadata(TestPlanLiveRunCreationMetadata):
+    replayed_execution_id: TestPlanReplayedExecutionID
+    run_count: int = Field(
+        ...,
+        description=(
+            "Number of TestRunModel rows created by this replay — always equal "
+            "to the number of runs `replayed_execution_id` produced, since "
+            "replay re-targets the exact same test set entries rather than "
+            "fanning out fresh."
+        )
+    )
