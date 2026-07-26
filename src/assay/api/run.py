@@ -622,7 +622,7 @@ async def replay_previous_test_plan_execution(
 
 
 @router.get(
-    path="/runs/standalone/{test_id}/metadata/test_runs",
+    path="/runs/standalone/{test_id}/test_runs",
     summary="List standalone runs created for a test",
     responses={
         200: {
@@ -693,7 +693,7 @@ async def get_standalone_run_metadata(
 
 
 @router.get(
-    path="/runs/standalone/{test_id}/details/test_runs/{test_run_id}",
+    path="/runs/standalone/{test_id}/test_runs/{test_run_id}",
     summary="Get full details for a single standalone run",
     responses={
         200: {
