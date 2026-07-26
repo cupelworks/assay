@@ -16,6 +16,8 @@ from assay.services.runs import (
     create_new_replay_test_plan_run,
     create_new_replay_test_set_run,
     create_new_standalone_run,
+    get_run_details_by_test_and_run_id,
+    get_standalone_run_metadata_all_test_runs,
 )
 from assay.services.stats import run_z_test
 from assay.services.test_plans import (
@@ -73,6 +75,8 @@ __all__ = [
     "get_datasets_metadata",
     "get_dataset_metadata_by_id",
     "get_dataset_rows_by_id",
+    "get_run_details_by_test_and_run_id",
+    "get_standalone_run_metadata_all_test_runs",
     "get_test_case_by_id",
     "get_all_test_sets_metadata",
     "get_test_set_metadata_by_id",

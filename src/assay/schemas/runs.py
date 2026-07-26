@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from assay.models import TestStatus
-from assay.schemas import TestCaseID, TestPlanID, TestSetID
+from assay.schemas import Pagination, TestCaseID, TestPlanID, TestSetID
 
 
 class RunID(BaseModel):
@@ -35,11 +35,54 @@ class RunCreationDate(BaseModel):
     )
 
 
+class RunScores(BaseModel):
+    scores: dict[str, float] | None = Field(
+        ...,
+        description=(
+            'Per-metric scores produced when the run completed, keyed by metric '
+            'name (e.g. `{"exact_match": 1.0, "bleu": 0.42}`). Populated only once '
+            'the run reaches `Completed`; mutually exclusive with `error` — a run '
+            'either scores successfully or fails, never both.'
+        ),
+    )
+
+
+class RunError(BaseModel):
+    error: str | None = Field(
+        ...,
+        description=(
+            'Error message describing why the run failed. Populated instead of '
+            '`scores` when the run reaches `Failed`; mutually exclusive with '
+            '`scores`.'
+        ),
+    )
+
+
+class RunExecutionDate(BaseModel):
+    executed_at: datetime | None = Field(
+        ...,
+        description=(
+            'Timestamp when the run finished executing, successfully or not — '
+            'distinct from `created_at`, which marks when the run was enqueued '
+            'as `Pending`. Set once the run reaches a terminal status '
+            '(`Completed` or `Failed`).'
+        ),
+    )
+
+
 class StandaloneRunCreationMetadata(RunID, RunStatus, RunCreationDate):
     test_case_id: TestCaseID = Field(
         ...,
         description='ID of the live test this standalone run was created for.',
     )
+
+
+class PaginatedStandaloneRunCreationMetadata(Pagination):
+    items: list[StandaloneRunCreationMetadata]
+
+
+class StandaloneRunDetails(StandaloneRunCreationMetadata, RunScores, RunError, RunExecutionDate):
+    pass
 
 
 class TestSetExecutionID(BaseModel):

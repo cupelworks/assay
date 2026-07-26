@@ -442,3 +442,70 @@ async def _find_test_plan_entries_or_409(
         )
 
     return test_plan_entries
+
+
+async def _check_test_run_by_id_or_404(
+        test_run_id: uuid.UUID,
+        session: AsyncSession,
+) -> None:
+    """Raise 404 if no test run with the given ID exists.
+
+    Unscoped — does not check which test the run belongs to. Use
+    _check_test_run_id_linked_to_specific_test_id_or_404 when the run also
+    needs to be scoped to a specific test, so the two failure modes
+    ("doesn't exist at all" vs. "exists, but not for this test") get
+    distinct, precise messages instead of being collapsed into one.
+
+    Args:
+        test_run_id: UUID of the test run to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 404 if no test run with this ID exists.
+    """
+    found = await session.scalar(
+        select(TestRunModel.id)
+        .where(TestRunModel.id == test_run_id)
+    )
+
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test run with ID '{test_run_id}' does not exist"
+        )
+
+
+async def _check_test_run_id_linked_to_specific_test_id_or_404(
+        test_id: uuid.UUID,
+        test_run_id: uuid.UUID,
+        session: AsyncSession,
+) -> None:
+    """Raise 404 if the given run doesn't belong to the given test.
+
+    Scoped lookup, mirroring
+    _check_test_set_execution_id_linked_to_specific_test_set_id_or_404 one
+    layer down: prevents a caller from reading run X of test A by hitting
+    test B's endpoint. Callers are expected to have already confirmed the
+    run exists at all (via _check_test_run_by_id_or_404) — this only
+    distinguishes "exists, but belongs to a different test" from that.
+
+    Args:
+        test_id: UUID of the test the run must belong to.
+        test_run_id: UUID of the test run to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 404 if the run isn't linked to this test.
+    """
+    found = await session.scalar(
+        select(TestRunModel.id)
+        .where(TestRunModel.id == test_run_id)
+        .where(TestRunModel.test_id == test_id)
+    )
+
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test run with ID '{test_run_id}' not linked "
+                   f"to test with ID '{test_id}'"
+        )
