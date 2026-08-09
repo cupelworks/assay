@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from assay.api.datasets import router as datasets_router
 from assay.api.meta import router as meta_router
-from assay.api.run import router as runs_router
+from assay.api.runs import router as runs_router
 from assay.api.stats import router as stats_router
 from assay.api.test import router as test_router
 from assay.api.test_plan import router as test_plan_router

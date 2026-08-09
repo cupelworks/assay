@@ -64,7 +64,11 @@ src/assay/
 │   ├── test.py          # Test case endpoints
 │   ├── test_sets.py     # Test set and test set entry endpoints
 │   ├── test_plan.py     # Test plan endpoints
-│   ├── run.py           # Run creation (standalone; live/replay for test sets and test plans) plus reading a standalone run's own metadata/details back
+│   ├── runs/            # Run creation and reads, split by sub-domain (too much for one file)
+│   │   ├── __init__.py       # Combines the three sub-routers below into one `router`
+│   │   ├── standalone.py     # Standalone run creation, plus reading its own metadata/details back
+│   │   ├── test_sets.py      # Live/replay test-set run creation, plus listing a test set's past executions
+│   │   └── test_plans.py     # Live/replay test-plan run creation
 │   ├── stats.py         # Statistical test endpoints
 │   └── meta.py          # Health check
 ├── schemas/             # Pydantic models — API validation and serialization
@@ -117,7 +121,7 @@ src/assay/
 │   ├── runs/
 │   │   ├── _common.py                  # Shared helpers (_find_test_set_entries_ids_or_409, _find_test_sets_entries_ids_or_409, _check_tests_have_test_types_or_409, _check_test_set_entries_have_test_types_or_409, _check_test_set_execution_or_404, _check_test_set_execution_id_linked_to_specific_test_set_id_or_404, _find_test_set_execution_id_entries_or_409, _find_test_plan_entries_or_409, _check_test_plan_execution_or_404, _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404, _find_test_plan_execution_id_entries_or_409, _check_test_run_by_id_or_404, _check_test_run_id_linked_to_specific_test_id_or_404 — use-case guards, not test_sets/test_plans-domain ones; existence checks themselves stay in test_sets/_common.py and test_plans/_common.py)
 │   │   ├── create_new_run.py           # Create a standalone pending run (one row regardless of test type count, 409 if none assigned), trigger a live test-set run (one execution + one row per entry, 409 if the set has no entries or if any entry has no test types assigned), replay a past test-set execution (one new execution + one row per entry the replayed execution ran, 404 if the execution doesn't exist or isn't linked to this set, 409 if it has zero runs), trigger a live test-plan run (one execution + one row per entry across every linked test set, 409 if the plan has no linked test sets, a linked set has no entries, or any entry has no test types assigned), or replay a past test-plan execution (one new execution + one row per entry the replayed execution ran, 404 if the execution doesn't exist or isn't linked to this plan, 409 if it has zero runs)
-│   │   ├── get_run_metadata.py         # Paginated listing of every standalone run created for a test
+│   │   ├── get_run_metadata.py         # Paginated listing of every standalone run created for a test, or every execution triggered for a test set
 │   │   └── get_run_details.py          # Full detail for a single standalone run, including scores/error/executed_at once populated
 │   └── stats.py         # run_z_test
 └── models/              # SQLAlchemy ORM models — database table definitions
