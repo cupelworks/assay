@@ -145,6 +145,32 @@ class TestSetReplayedExecutionCreationMetadata(TestSetLiveRunCreationMetadata):
     )
 
 
+class TestSetRunCreationMetadata(TestSetExecutionID, TestSetExecutionCreationDate):
+    test_set_id: TestSetID
+    run_count: int = Field(
+        ...,
+        description=(
+            'Number of TestRunModel rows this execution produced — one per '
+            'entry it targeted, fanned out fresh from the test set\'s live '
+            'entries if `replayed_execution_id` is null, or re-pointed at '
+            'the entries `replayed_execution_id` originally used otherwise.'
+        ),
+    )
+    replayed_execution_id: TestSetReplayedExecutionID | None = Field(
+        ...,
+        description=(
+            'Null if this was a live execution — its runs were fanned out '
+            'fresh from the test set\'s entries at the moment it was '
+            'triggered. Set if this was a replay — the ID of the prior '
+            'execution whose exact entries this one re-targeted.'
+        ),
+    )
+
+
+class PaginatedTestSetRunCreationMetadata(Pagination):
+    items: list[TestSetRunCreationMetadata]
+
+
 class TestPlanExecutionID(BaseModel):
     id: uuid.UUID = Field(
         ...,

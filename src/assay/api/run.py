@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from assay.db import get_session
 from assay.schemas import (
     PaginatedStandaloneRunCreationMetadata,
+    PaginatedTestSetRunCreationMetadata,
     StandaloneRunCreationMetadata,
     StandaloneRunDetails,
     TestPlanLiveRunCreationMetadata,
@@ -22,6 +23,7 @@ from assay.services import (
     create_new_standalone_run,
     get_run_details_by_test_and_run_id,
     get_standalone_run_metadata_all_test_runs,
+    get_test_set_run_metadata_all_test_runs,
 )
 
 router = APIRouter(tags=["run"])
@@ -622,7 +624,7 @@ async def replay_previous_test_plan_execution(
 
 
 @router.get(
-    path="/runs/standalone/{test_id}/test_runs",
+    path="/runs/standalone/{test_id}/test-runs",
     summary="List standalone runs created for a test",
     responses={
         200: {
@@ -693,7 +695,7 @@ async def get_standalone_run_metadata(
 
 
 @router.get(
-    path="/runs/standalone/{test_id}/test_runs/{test_run_id}",
+    path="/runs/standalone/{test_id}/test-runs/{test_run_id}",
     summary="Get full details for a single standalone run",
     responses={
         200: {
@@ -786,3 +788,81 @@ async def get_standalone_run_details(
     successfully or fails, never both.
     """
     return await get_run_details_by_test_and_run_id(test_id, test_run_id, session)
+
+
+@router.get(
+    path="/runs/test-sets/{test_set_id}/executions",
+    summary="List past executions of a test set",
+    responses={
+        200: {
+            "description": "A paginated list of executions triggered for the test set.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "total": 2,
+                        "offset": 0,
+                        "limit": 100,
+                        "items": [
+                            {
+                                "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                                "created_at": "2026-07-14T18:03:21.123456",
+                                "test_set_id": {
+                                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                                },
+                                "run_count": 5,
+                                "replayed_execution_id": None,
+                            },
+                            {
+                                "id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
+                                "created_at": "2026-07-15T09:12:47.884213",
+                                "test_set_id": {
+                                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                                },
+                                "run_count": 3,
+                                "replayed_execution_id": {
+                                    "id": "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                                },
+                            },
+                        ],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "No test set exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test set with ID '<test_set_id>' not found"
+                    }
+                }
+            },
+        },
+    },
+    response_model=PaginatedTestSetRunCreationMetadata,
+)
+async def get_test_sets_runs_metadata(
+        test_set_id: uuid.UUID,
+        session: SessionDep,
+        offset: int = Query(default=0, description="Number of records to skip for pagination."),
+        limit: int = Query(
+            default=100, description="Maximum number of records to return for pagination."
+        ),
+) -> PaginatedTestSetRunCreationMetadata: # pragma: no cover
+    """List every execution ever triggered for a test set, newest first.
+
+    Covers both live fan-outs (`POST /runs/test-sets/{test_set_id}`) and
+    replays (`POST /runs/test-sets/{test_set_id}/executions/{test_set_execution_id}`)
+    — a replay's item has `replayed_execution_id` set to the execution it
+    replayed, a live fan-out's is null.
+
+    One guard runs before the list is fetched:
+    - The test set must exist (404).
+
+    Returns a paginated list of each execution's `id`, `created_at`,
+    `test_set_id`, `run_count` (the number of `TestRunModel` rows that
+    execution produced), and `replayed_execution_id`, ordered by
+    `created_at` descending (ties broken by `id` descending), plus the
+    usual `total`, `offset`, and `limit`.
+    """
+    return await get_test_set_run_metadata_all_test_runs(test_set_id, session, offset, limit)
