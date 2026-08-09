@@ -10,13 +10,13 @@ from assay.models import TestRunModel, TestStatus
 from assay.schemas import (
     StandaloneRunCreationMetadata,
     TestCaseID,
+    TestSetExecutionMetadata,
     TestSetID,
     TestSetReplayedExecutionID,
-    TestSetRunCreationMetadata,
 )
 from assay.services import (
     get_standalone_run_metadata_all_test_runs,
-    get_test_set_run_metadata_all_test_runs,
+    get_test_set_execution_metadata_all_executions,
 )
 
 # --- _get_standalone_run_metadata_all_test_runs() ---
@@ -97,16 +97,16 @@ def test_get_standalone_run_metadata_all_test_runs_happy_path():
     ]
 
 
-# --- get_test_set_run_metadata_all_test_runs() ---
+# --- get_test_set_execution_metadata_all_executions() ---
 
-def test_get_test_set_run_metadata_all_test_runs_test_set_not_found():
+def test_get_test_set_execution_metadata_all_executions_test_set_not_found():
     test_set_id = uuid.uuid4()
 
     session = AsyncMock()
     session.scalar.return_value = None
 
     with pytest.raises(HTTPException) as e:
-        asyncio.run(get_test_set_run_metadata_all_test_runs(test_set_id, session))
+        asyncio.run(get_test_set_execution_metadata_all_executions(test_set_id, session))
 
     session.scalar.assert_called_once()
     session.execute.assert_not_called()
@@ -114,7 +114,7 @@ def test_get_test_set_run_metadata_all_test_runs_test_set_not_found():
     assert f"Test set with ID '{test_set_id}' not found" in str(e.value.detail)
 
 
-def test_get_test_set_run_metadata_all_test_runs_no_executions_found():
+def test_get_test_set_execution_metadata_all_executions_no_executions_found():
     test_set_id = uuid.uuid4()
 
     session = AsyncMock()
@@ -124,7 +124,9 @@ def test_get_test_set_run_metadata_all_test_runs_no_executions_found():
     ]
     session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
 
-    response = asyncio.run(get_test_set_run_metadata_all_test_runs(test_set_id, session, 1, 1))
+    response = asyncio.run(
+        get_test_set_execution_metadata_all_executions(test_set_id, session, 1, 1)
+    )
 
     session.execute.assert_called_once()
     assert session.scalar.call_count == 2
@@ -134,7 +136,7 @@ def test_get_test_set_run_metadata_all_test_runs_no_executions_found():
     assert response.items == []
 
 
-def test_get_test_set_run_metadata_all_test_runs_happy_path():
+def test_get_test_set_execution_metadata_all_executions_happy_path():
     test_set_id = uuid.uuid4()
 
     session = AsyncMock()
@@ -159,7 +161,7 @@ def test_get_test_set_run_metadata_all_test_runs_happy_path():
     ]
     session.execute.return_value = MagicMock(all=MagicMock(return_value=returned_rows))
 
-    response = asyncio.run(get_test_set_run_metadata_all_test_runs(test_set_id, session))
+    response = asyncio.run(get_test_set_execution_metadata_all_executions(test_set_id, session))
 
     session.execute.assert_called_once()
     assert session.scalar.call_count == 2
@@ -168,7 +170,7 @@ def test_get_test_set_run_metadata_all_test_runs_happy_path():
     assert response.limit == 100
 
     assert response.items == [
-        TestSetRunCreationMetadata(
+        TestSetExecutionMetadata(
             id=row.id,
             created_at=row.created_at,
             test_set_id=TestSetID(id=test_set_id),

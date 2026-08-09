@@ -6,14 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
 from assay.schemas import (
-    PaginatedTestSetRunCreationMetadata,
+    PaginatedTestSetExecutionMetadata,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
 )
 from assay.services import (
     create_new_live_test_set_run,
     create_new_replay_test_set_run,
-    get_test_set_run_metadata_all_test_runs,
+    get_test_set_execution_metadata_all_executions,
 )
 
 router = APIRouter(tags=["run (test-set)"])
@@ -315,16 +315,16 @@ async def replay_previous_test_set_execution(
             },
         },
     },
-    response_model=PaginatedTestSetRunCreationMetadata,
+    response_model=PaginatedTestSetExecutionMetadata,
 )
-async def get_test_sets_runs_metadata(
+async def get_test_set_execution_metadata(
         test_set_id: uuid.UUID,
         session: SessionDep,
         offset: int = Query(default=0, description="Number of records to skip for pagination."),
         limit: int = Query(
             default=100, description="Maximum number of records to return for pagination."
         ),
-) -> PaginatedTestSetRunCreationMetadata: # pragma: no cover
+) -> PaginatedTestSetExecutionMetadata: # pragma: no cover
     """List every execution ever triggered for a test set, newest first.
 
     Covers both live fan-outs (`POST /runs/test-sets/{test_set_id}`) and
@@ -341,4 +341,4 @@ async def get_test_sets_runs_metadata(
     `created_at` descending (ties broken by `id` descending), plus the
     usual `total`, `offset`, and `limit`.
     """
-    return await get_test_set_run_metadata_all_test_runs(test_set_id, session, offset, limit)
+    return await get_test_set_execution_metadata_all_executions(test_set_id, session, offset, limit)

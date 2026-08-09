@@ -6,12 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from assay.models import TestRunModel, TestSetExecutionModel
 from assay.schemas import (
     PaginatedStandaloneRunCreationMetadata,
-    PaginatedTestSetRunCreationMetadata,
+    PaginatedTestSetExecutionMetadata,
     StandaloneRunCreationMetadata,
     TestCaseID,
+    TestSetExecutionMetadata,
     TestSetID,
     TestSetReplayedExecutionID,
-    TestSetRunCreationMetadata,
 )
 from assay.services.test_sets._common import _find_test_set_or_404
 from assay.services.tests._common import _find_test_by_id_or_404
@@ -69,12 +69,12 @@ async def get_standalone_run_metadata_all_test_runs(
     )
 
 
-async def get_test_set_run_metadata_all_test_runs(
+async def get_test_set_execution_metadata_all_executions(
         test_set_id: uuid.UUID,
         session: AsyncSession,
         offset: int = 0,
         limit: int = 100,
-) -> PaginatedTestSetRunCreationMetadata:
+) -> PaginatedTestSetExecutionMetadata:
     await _find_test_set_or_404(test_set_id, session)
     
     total = await session.scalar(
@@ -101,12 +101,12 @@ async def get_test_set_run_metadata_all_test_runs(
         .limit(limit)
     )).all()
     
-    return PaginatedTestSetRunCreationMetadata(
+    return PaginatedTestSetExecutionMetadata(
         total=total,
         offset=offset,
         limit=limit,
         items=[
-            TestSetRunCreationMetadata(
+            TestSetExecutionMetadata(
                 id=item.id,
                 created_at=item.created_at,
                 test_set_id=TestSetID(id=test_set_id),

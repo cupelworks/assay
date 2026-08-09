@@ -53,7 +53,7 @@ from assay.schemas.tests import (
 # test_set_entries imports CreateTestCaseRequest from assay.schemas — must load after tests
 from assay.schemas.runs import (
     PaginatedStandaloneRunCreationMetadata,
-    PaginatedTestSetRunCreationMetadata,
+    PaginatedTestSetExecutionMetadata,
     RunCreationDate,
     RunError,
     RunExecutionDate,
@@ -67,10 +67,10 @@ from assay.schemas.runs import (
     TestPlanReplayedExecutionID,
     TestSetExecutionCreationDate,
     TestSetExecutionID,
+    TestSetExecutionMetadata,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
     TestSetReplayedExecutionID,
-    TestSetRunCreationMetadata,
 )
 from assay.schemas.test_set_entries import (
     PaginatedTestSetEntriesDetails,
@@ -110,7 +110,7 @@ __all__ = [
     "PaginatedTestPlanMetadataResponse",
     "PaginatedTestSetEntriesDetails",
     "PaginatedTestSetMetadataResponse",
-    "PaginatedTestSetRunCreationMetadata",
+    "PaginatedTestSetExecutionMetadata",
     "Pagination",
     "RunID",
     "RunCreationDate",
@@ -138,7 +138,7 @@ __all__ = [
     "TestSetLiveRunCreationMetadata",
     "TestSetMetadata",
     "TestSetName",
-    "TestSetRunCreationMetadata",
+    "TestSetExecutionMetadata",
     "TestSetCreationResponse",
     "TestSetReplayedExecutionCreationMetadata",
     "TestSetReplayedExecutionID",

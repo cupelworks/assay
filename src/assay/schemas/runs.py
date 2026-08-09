@@ -145,7 +145,7 @@ class TestSetReplayedExecutionCreationMetadata(TestSetLiveRunCreationMetadata):
     )
 
 
-class TestSetRunCreationMetadata(TestSetExecutionID, TestSetExecutionCreationDate):
+class TestSetExecutionMetadata(TestSetExecutionID, TestSetExecutionCreationDate):
     test_set_id: TestSetID
     run_count: int = Field(
         ...,
@@ -167,8 +167,8 @@ class TestSetRunCreationMetadata(TestSetExecutionID, TestSetExecutionCreationDat
     )
 
 
-class PaginatedTestSetRunCreationMetadata(Pagination):
-    items: list[TestSetRunCreationMetadata]
+class PaginatedTestSetExecutionMetadata(Pagination):
+    items: list[TestSetExecutionMetadata]
 
 
 class TestPlanExecutionID(BaseModel):

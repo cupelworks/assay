@@ -80,7 +80,7 @@ src/assay/
 │   ├── test_plans.py    # Test plan schemas (TestPlanMetadata, PaginatedTestPlanMetadataResponse, etc.)
 │   ├── test_plan_entries.py  # Test plan entry schemas (TestPlanEntryDetails, PaginatedTestPlanEntriesDetails)
 │   ├── tests.py         # Test case schemas (CreateTestCaseRequest, ModifyTestCaseRequest, etc.)
-│   ├── runs.py          # Run schemas (RunID, RunStatus, RunCreationDate, RunScores, RunError, RunExecutionDate, StandaloneRunCreationMetadata, StandaloneRunDetails, PaginatedStandaloneRunCreationMetadata, TestSetExecutionID, TestSetLiveRunCreationMetadata, TestSetReplayedExecutionID, TestSetReplayedExecutionCreationMetadata, TestPlanExecutionID, TestPlanExecutionCreationDate, TestPlanLiveRunCreationMetadata, TestPlanReplayedExecutionID, TestPlanReplayedExecutionCreationMetadata)
+│   ├── runs.py          # Run schemas (RunID, RunStatus, RunCreationDate, RunScores, RunError, RunExecutionDate, StandaloneRunCreationMetadata, StandaloneRunDetails, PaginatedStandaloneRunCreationMetadata, TestSetExecutionID, TestSetLiveRunCreationMetadata, TestSetReplayedExecutionID, TestSetReplayedExecutionCreationMetadata, TestSetExecutionMetadata, PaginatedTestSetExecutionMetadata, TestPlanExecutionID, TestPlanExecutionCreationDate, TestPlanLiveRunCreationMetadata, TestPlanReplayedExecutionID, TestPlanReplayedExecutionCreationMetadata)
 │   └── stats.py         # ZTestRequest, ZTestResult
 ├── services/            # Business logic — one file per operation
 │   ├── datasets/
