@@ -229,3 +229,30 @@ class TestPlanReplayedExecutionCreationMetadata(TestPlanLiveRunCreationMetadata)
             "fanning out fresh."
         )
     )
+
+
+class TestPlanExecutionMetadata(TestPlanExecutionID, TestPlanExecutionCreationDate):
+    test_plan_id: TestPlanID
+    run_count: int = Field(
+        ...,
+        description=(
+            'Number of TestRunModel rows this execution produced — one per '
+            'entry it targeted, fanned out fresh from every test set '
+            'currently linked to the plan if `replayed_execution_id` is '
+            'null, or re-pointed at the entries `replayed_execution_id` '
+            'originally used otherwise.'
+        ),
+    )
+    replayed_execution_id: TestPlanReplayedExecutionID | None = Field(
+        ...,
+        description=(
+            'Null if this was a live execution — its runs were fanned out '
+            "fresh from the plan's linked test sets at the moment it was "
+            'triggered. Set if this was a replay — the ID of the prior '
+            'execution whose exact entries this one re-targeted.'
+        ),
+    )
+
+
+class PaginatedTestPlanExecutionMetadata(Pagination):
+    items: list[TestPlanExecutionMetadata]

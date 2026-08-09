@@ -10,12 +10,16 @@ from assay.models import TestRunModel, TestStatus
 from assay.schemas import (
     StandaloneRunCreationMetadata,
     TestCaseID,
+    TestPlanExecutionMetadata,
+    TestPlanID,
+    TestPlanReplayedExecutionID,
     TestSetExecutionMetadata,
     TestSetID,
     TestSetReplayedExecutionID,
 )
 from assay.services import (
     get_standalone_run_metadata_all_test_runs,
+    get_test_plan_execution_metadata_all_executions,
     get_test_set_execution_metadata_all_executions,
 )
 
@@ -182,4 +186,92 @@ def test_get_test_set_execution_metadata_all_executions_happy_path():
     ]
     # run_count must track each row's own aggregate, not the page size
     assert response.items[0].run_count == 3
+    assert response.items[1].run_count == 0
+
+
+# --- get_test_plan_execution_metadata_all_executions() ---
+
+def test_get_test_plan_execution_metadata_all_executions_test_plan_not_found():
+    test_plan_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.return_value = None
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(get_test_plan_execution_metadata_all_executions(test_plan_id, session))
+
+    session.scalar.assert_called_once()
+    session.execute.assert_not_called()
+    assert e.value.status_code == 404
+    assert f"Test plan with ID '{test_plan_id}' not found" in str(e.value.detail)
+
+
+def test_get_test_plan_execution_metadata_all_executions_no_executions_found():
+    test_plan_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        MagicMock(),
+        0,
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    response = asyncio.run(
+        get_test_plan_execution_metadata_all_executions(test_plan_id, session, 1, 1)
+    )
+
+    session.execute.assert_called_once()
+    assert session.scalar.call_count == 2
+    assert response.total == 0
+    assert response.offset == 1
+    assert response.limit == 1
+    assert response.items == []
+
+
+def test_get_test_plan_execution_metadata_all_executions_happy_path():
+    test_plan_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        MagicMock(),
+        2,
+    ]
+    replayed_execution_id = uuid.uuid4()
+    returned_rows = [
+        MagicMock(
+            id=uuid.uuid4(),
+            created_at=datetime.now().astimezone(),
+            replayed_execution_id=None,
+            run_count=5,
+        ),
+        MagicMock(
+            id=uuid.uuid4(),
+            created_at=datetime.now().astimezone(),
+            replayed_execution_id=replayed_execution_id,
+            run_count=0,
+        ),
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=returned_rows))
+
+    response = asyncio.run(get_test_plan_execution_metadata_all_executions(test_plan_id, session))
+
+    session.execute.assert_called_once()
+    assert session.scalar.call_count == 2
+    assert response.total == 2
+    assert response.offset == 0
+    assert response.limit == 100
+
+    assert response.items == [
+        TestPlanExecutionMetadata(
+            id=row.id,
+            created_at=row.created_at,
+            test_plan_id=TestPlanID(id=test_plan_id),
+            run_count=row.run_count,
+            replayed_execution_id=TestPlanReplayedExecutionID(id=row.replayed_execution_id)
+            if row.replayed_execution_id else None,
+        )
+        for row in returned_rows
+    ]
+    # run_count must track each row's own aggregate, not the page size
+    assert response.items[0].run_count == 5
     assert response.items[1].run_count == 0

@@ -1,17 +1,19 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
 from assay.schemas import (
+    PaginatedTestPlanExecutionMetadata,
     TestPlanLiveRunCreationMetadata,
     TestPlanReplayedExecutionCreationMetadata,
 )
 from assay.services import (
     create_new_live_test_plan_run,
     create_new_replay_test_plan_run,
+    get_test_plan_execution_metadata_all_executions,
 )
 
 router = APIRouter(tags=["run (test plan)"])
@@ -280,3 +282,83 @@ async def replay_previous_test_plan_execution(
     replayed.
     """
     return await create_new_replay_test_plan_run(test_plan_id, test_plan_execution_id, session)
+
+
+@router.get(
+    path="/runs/test-plans/{test_plan_id}/executions",
+    summary="List past executions of a test plan",
+    responses={
+        200: {
+            "description": "A paginated list of executions triggered for the test plan.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "total": 2,
+                        "offset": 0,
+                        "limit": 100,
+                        "items": [
+                            {
+                                "id": "a2b3c4d5-e6f7-8901-ab23-456789abcdef",
+                                "created_at": "2026-07-17T09:21:44.512873",
+                                "test_plan_id": {
+                                    "id": "7c1d2e3f-4a5b-6c7d-8e9f-0123456789ab"
+                                },
+                                "run_count": 5,
+                                "replayed_execution_id": None,
+                            },
+                            {
+                                "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0",
+                                "created_at": "2026-07-18T11:05:52.284917",
+                                "test_plan_id": {
+                                    "id": "7c1d2e3f-4a5b-6c7d-8e9f-0123456789ab"
+                                },
+                                "run_count": 5,
+                                "replayed_execution_id": {
+                                    "id": "a2b3c4d5-e6f7-8901-ab23-456789abcdef"
+                                },
+                            },
+                        ],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "No test plan exists with the given ID.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Test plan with ID '<test_plan_id>' not found"
+                    }
+                }
+            },
+        },
+    },
+    response_model=PaginatedTestPlanExecutionMetadata,
+)
+async def get_test_plan_execution_metadata(
+        test_plan_id: uuid.UUID,
+        session: SessionDep,
+        offset: int = Query(default=0, description="Number of records to skip for pagination."),
+        limit: int = Query(
+            default=100, description="Maximum number of records to return for pagination."
+        ),
+) -> PaginatedTestPlanExecutionMetadata: # pragma: no cover
+    """List every execution ever triggered for a test plan, newest first.
+
+    Covers both live fan-outs (`POST /runs/test-plans/{test_plan_id}`) and
+    replays (`POST /runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}`)
+    — a replay's item has `replayed_execution_id` set to the execution it
+    replayed, a live fan-out's is null.
+
+    One guard runs before the list is fetched:
+    - The test plan must exist (404).
+
+    Returns a paginated list of each execution's `id`, `created_at`,
+    `test_plan_id`, `run_count` (the number of `TestRunModel` rows that
+    execution produced), and `replayed_execution_id`, ordered by
+    `created_at` descending (ties broken by `id` descending), plus the
+    usual `total`, `offset`, and `limit`.
+    """
+    return await get_test_plan_execution_metadata_all_executions(
+        test_plan_id, session, offset, limit
+    )
