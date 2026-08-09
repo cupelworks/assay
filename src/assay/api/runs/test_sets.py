@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from assay.db import get_session
 from assay.schemas import (
     PaginatedTestSetExecutionMetadata,
+    PaginatedTestSetExecutionRunMetadata,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
 )
@@ -14,6 +15,7 @@ from assay.services import (
     create_new_live_test_set_run,
     create_new_replay_test_set_run,
     get_test_set_execution_metadata_all_executions,
+    get_test_set_execution_run_metadata_all_runs,
 )
 
 router = APIRouter(tags=["run (test-set)"])
@@ -342,3 +344,114 @@ async def get_test_set_execution_metadata(
     usual `total`, `offset`, and `limit`.
     """
     return await get_test_set_execution_metadata_all_executions(test_set_id, session, offset, limit)
+
+
+@router.get(
+    path="/runs/test-sets/{test_set_id}/executions/{test_set_execution_id}/test-runs",
+    summary="List runs produced by a specific test set execution",
+    responses={
+        200: {
+            "description": "A paginated list of runs produced by this test set execution.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "total": 2,
+                        "offset": 0,
+                        "limit": 100,
+                        "items": [
+                            {
+                                "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                                "status": "Completed",
+                                "created_at": "2026-07-15T16:44:30.163355",
+                                "test_set_entry_id": {
+                                    "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
+                                },
+                                "test_set_execution_id": {
+                                    "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12"
+                                },
+                            },
+                            {
+                                "id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123",
+                                "status": "Pending",
+                                "created_at": "2026-07-15T16:44:30.163355",
+                                "test_set_entry_id": {
+                                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                                },
+                                "test_set_execution_id": {
+                                    "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12"
+                                },
+                            },
+                        ],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": (
+                "One of three things: no test set exists with the given ID; "
+                "no test set execution exists with the given ID; or the "
+                "execution exists but belongs to a different test set than "
+                "the one in the path — reading the runs of execution X of "
+                "test set A through test set B's URL is rejected rather "
+                "than silently allowed. The three response examples below "
+                "show each distinct failure."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_set_not_found": {
+                            "summary": "Test set does not exist",
+                            "value": {
+                                "detail": "Test set with ID '<test_set_id>' not found"
+                            },
+                        },
+                        "execution_not_found": {
+                            "summary": "Test set execution does not exist",
+                            "value": {
+                                "detail": "Test set execution with ID "
+                                          "'<test_set_execution_id>' does not exist"
+                            },
+                        },
+                        "execution_not_linked_to_test_set": {
+                            "summary": "Execution belongs to a different test set",
+                            "value": {
+                                "detail": "Test set execution with ID "
+                                          "'<test_set_execution_id>' not linked to "
+                                          "test set with ID '<test_set_id>'"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+    response_model=PaginatedTestSetExecutionRunMetadata,
+)
+async def get_test_set_execution_run_metadata(
+        test_set_id: uuid.UUID,
+        test_set_execution_id: uuid.UUID,
+        session: SessionDep,
+        offset: int = Query(default=0, description="Number of records to skip for pagination."),
+        limit: int = Query(
+            default=100, description="Maximum number of records to return for pagination."),
+) -> PaginatedTestSetExecutionRunMetadata: # pragma: no cover
+    """List every run produced by a specific test set execution, newest first.
+
+    Scoped to exactly one execution — covers only the runs
+    `test_set_execution_id` itself produced, not the test set's other past
+    executions or its current live entries.
+
+    Three guards run before the list is fetched:
+    - The test set must exist (404).
+    - The referenced test set execution must exist (404).
+    - That execution must belong to this test set (404) — prevents reading
+      the runs of execution X of test set A through test set B's URL.
+
+    Returns a paginated list of each run's `id`, `status`, `created_at`,
+    `test_set_entry_id` (which entry it ran), and `test_set_execution_id`,
+    ordered by `created_at` descending (ties broken by `id` descending),
+    plus the usual `total`, `offset`, and `limit`.
+    """
+    return await get_test_set_execution_run_metadata_all_runs(
+        test_set_id, test_set_execution_id, session, offset, limit
+    )

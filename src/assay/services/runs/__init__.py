@@ -10,6 +10,7 @@ from assay.services.runs.get_run_metadata import (
     get_standalone_run_metadata_all_test_runs,
     get_test_plan_execution_metadata_all_executions,
     get_test_set_execution_metadata_all_executions,
+    get_test_set_execution_run_metadata_all_runs,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "get_standalone_run_metadata_all_test_runs",
     "get_test_plan_execution_metadata_all_executions",
     "get_test_set_execution_metadata_all_executions",
+    "get_test_set_execution_run_metadata_all_runs",
 ]

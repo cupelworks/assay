@@ -49,12 +49,21 @@ from assay.schemas.tests import (
 )
 
 # isort: split
-# runs imports TestCaseID and TestSetID from assay.schemas — must load after tests and test_sets
 # test_set_entries imports CreateTestCaseRequest from assay.schemas — must load after tests
+from assay.schemas.test_set_entries import (
+    PaginatedTestSetEntriesDetails,
+    TestSetEntryDetails,
+    TestSetEntryID,
+)
+
+# isort: split
+# runs imports TestCaseID, TestPlanID, TestSetID, and TestSetEntryID from assay.schemas —
+# must load after tests, test_plans, test_sets, and test_set_entries
 from assay.schemas.runs import (
     PaginatedStandaloneRunCreationMetadata,
     PaginatedTestPlanExecutionMetadata,
     PaginatedTestSetExecutionMetadata,
+    PaginatedTestSetExecutionRunMetadata,
     RunCreationDate,
     RunError,
     RunExecutionDate,
@@ -70,14 +79,10 @@ from assay.schemas.runs import (
     TestSetExecutionCreationDate,
     TestSetExecutionID,
     TestSetExecutionMetadata,
+    TestSetExecutionRunMetadata,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
     TestSetReplayedExecutionID,
-)
-from assay.schemas.test_set_entries import (
-    PaginatedTestSetEntriesDetails,
-    TestSetEntryDetails,
-    TestSetEntryID,
 )
 
 __all__ = [
@@ -112,6 +117,7 @@ __all__ = [
     "PaginatedTestPlanExecutionMetadata",
     "PaginatedTestPlanMetadataResponse",
     "PaginatedTestSetEntriesDetails",
+    "PaginatedTestSetExecutionRunMetadata",
     "PaginatedTestSetMetadataResponse",
     "PaginatedTestSetExecutionMetadata",
     "Pagination",
@@ -138,6 +144,7 @@ __all__ = [
     "TestSetEntryID",
     "TestSetExecutionCreationDate",
     "TestSetExecutionID",
+    "TestSetExecutionRunMetadata",
     "TestSetID",
     "TestSetLiveRunCreationMetadata",
     "TestSetMetadata",

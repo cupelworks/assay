@@ -20,6 +20,7 @@ from assay.services.runs import (
     get_standalone_run_metadata_all_test_runs,
     get_test_plan_execution_metadata_all_executions,
     get_test_set_execution_metadata_all_executions,
+    get_test_set_execution_run_metadata_all_runs,
 )
 from assay.services.stats import run_z_test
 from assay.services.test_plans import (
@@ -86,6 +87,7 @@ __all__ = [
     "get_test_sets_linked_tests",
     "get_test_set_linked_test_by_entry_id",
     "get_test_set_execution_metadata_all_executions",
+    "get_test_set_execution_run_metadata_all_runs",
     "run_z_test",
     "update_dataset_name_by_id",
     "update_dataset_rows_by_id",
