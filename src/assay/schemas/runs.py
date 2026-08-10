@@ -4,7 +4,15 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from assay.models import TestStatus
-from assay.schemas import Pagination, TestCaseID, TestPlanID, TestSetEntryID, TestSetID
+from assay.schemas import (
+    CreateTestCaseRequest,
+    Pagination,
+    TestCaseID,
+    TestCaseSnapshotDate,
+    TestPlanID,
+    TestSetEntryID,
+    TestSetID,
+)
 
 
 class RunID(BaseModel):
@@ -178,6 +186,13 @@ class TestSetExecutionRunMetadata(RunID, RunStatus, RunCreationDate):
 
 class PaginatedTestSetExecutionRunMetadata(Pagination):
     items: list[TestSetExecutionRunMetadata]
+
+
+class TestSetExecutionRunDetails(TestSetExecutionRunMetadata, RunScores, RunError,
+                                 RunExecutionDate, CreateTestCaseRequest):
+    test_case_id: TestCaseID
+    test_set_id: TestSetID
+    test_case_snapshot_at: TestCaseSnapshotDate
 
 
 class TestPlanExecutionID(BaseModel):

@@ -8,12 +8,14 @@ from assay.db import get_session
 from assay.schemas import (
     PaginatedTestSetExecutionMetadata,
     PaginatedTestSetExecutionRunMetadata,
+    TestSetExecutionRunDetails,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
 )
 from assay.services import (
     create_new_live_test_set_run,
     create_new_replay_test_set_run,
+    get_run_details_by_test_set_execution_and_run_id,
     get_test_set_execution_metadata_all_executions,
     get_test_set_execution_run_metadata_all_runs,
 )
@@ -454,4 +456,148 @@ async def get_test_set_execution_run_metadata(
     """
     return await get_test_set_execution_run_metadata_all_runs(
         test_set_id, test_set_execution_id, session, offset, limit
+    )
+
+
+@router.get(
+    path="/runs/test-sets/{test_set_id}/executions/{test_set_execution_id}/test-runs/{test_run_id}",
+    summary="Get full details for a single run produced by a test set execution",
+    responses={
+        200: {
+            "description": (
+                "Full details for the run, including the snapshotted test set "
+                "entry it ran against and its post-execution results. `scores`, "
+                "`error`, and `executed_at` are null until the run reaches a "
+                "terminal status (`Completed` or `Failed`) — this example shows "
+                "a completed run with scores populated."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                        "status": "Completed",
+                        "created_at": "2026-07-15T16:44:30.163355",
+                        "test_set_entry_id": {
+                            "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
+                        },
+                        "test_set_execution_id": {
+                            "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12"
+                        },
+                        "scores": {
+                            "exact_match": 1.0,
+                            "bleu": 0.42
+                        },
+                        "error": None,
+                        "executed_at": "2026-07-15T16:44:33.981022",
+                        "test_case_id": {
+                            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                        },
+                        "name": "greets the user by name",
+                        "input": "Say hello to Alice.",
+                        "expected_output": "Hello, Alice!",
+                        "model_output": "Hello, Alice!",
+                        "test_type_names": ["exact_match", "bleu"],
+                        "test_case_snapshot_at": {
+                            "snapshot_at": "2026-07-15T16:40:02.552210"
+                        },
+                        "test_set_id": {
+                            "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                        },
+                    }
+                }
+            },
+        },
+        404: {
+            "description": (
+                "One of five things: no test set exists with the given ID; "
+                "no test set execution exists with the given ID; the "
+                "execution exists but belongs to a different test set than "
+                "the one in the path; no test run exists with the given ID; "
+                "or the run exists but belongs to a different execution than "
+                "the one in the path — reading run X of execution Y through "
+                "execution Z's URL is rejected rather than silently allowed. "
+                "The five response examples below show each distinct failure."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_set_not_found": {
+                            "summary": "Test set does not exist",
+                            "value": {
+                                "detail": "Test set with ID '<test_set_id>' not found"
+                            },
+                        },
+                        "execution_not_found": {
+                            "summary": "Test set execution does not exist",
+                            "value": {
+                                "detail": "Test set execution with ID "
+                                          "'<test_set_execution_id>' does not exist"
+                            },
+                        },
+                        "execution_not_linked_to_test_set": {
+                            "summary": "Execution belongs to a different test set",
+                            "value": {
+                                "detail": "Test set execution with ID "
+                                          "'<test_set_execution_id>' not linked to "
+                                          "test set with ID '<test_set_id>'"
+                            },
+                        },
+                        "test_run_not_found": {
+                            "summary": "Test run does not exist",
+                            "value": {
+                                "detail": "Test run with ID '<test_run_id>' "
+                                          "does not exist"
+                            },
+                        },
+                        "test_run_not_linked_to_execution": {
+                            "summary": "Test run belongs to a different execution",
+                            "value": {
+                                "detail": "Test run with ID '<test_run_id>' not linked "
+                                          "to test set execution with ID "
+                                          "'<test_set_execution_id>'"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+    response_model=TestSetExecutionRunDetails,
+)
+async def get_test_set_execution_run_details(
+        test_set_id: uuid.UUID,
+        test_set_execution_id: uuid.UUID,
+        test_run_id: uuid.UUID,
+        session: SessionDep,
+) -> TestSetExecutionRunDetails: # pragma: no cover
+    """Retrieve full details for a single run produced by a test set execution,
+    including the snapshotted test set entry it ran against.
+
+    Covers only runs produced by a test set execution (live or replay,
+    `POST /runs/test-sets/{test_set_id}` or its replay counterpart) — not
+    standalone runs, and not runs produced by a test plan execution, even
+    if one happened to target this same test set entry.
+
+    Five guards run before the details are fetched:
+    - The test set must exist (404).
+    - The referenced test set execution must exist (404).
+    - That execution must belong to this test set (404) — prevents reading
+      execution X of test set A through test set B's URL.
+    - The test run must exist (404).
+    - That run must belong to this execution (404) — prevents reading run X
+      of execution Y through execution Z's URL.
+
+    Returns the run's `id`, `status`, `created_at`, `test_set_entry_id`, and
+    `test_set_execution_id`, plus `scores`, `error`, and `executed_at` — the
+    latter three are null until the run reaches a terminal status
+    (`Completed` or `Failed`), and `scores`/`error` are mutually exclusive
+    even then: a run either scores successfully or fails, never both.
+    Also returns the snapshotted test set entry the run executed against —
+    `test_case_id` (the live test it was originally snapshotted from),
+    `name`, `input`, `expected_output`, `model_output`, `test_type_names`,
+    and `test_case_snapshot_at` — frozen at the moment the entry was added
+    to the test set, and never updated by later edits to the live test.
+    """
+    return await get_run_details_by_test_set_execution_and_run_id(
+        test_set_id, test_set_execution_id, test_run_id, session
     )

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,6 +42,13 @@ class TestCaseID(BaseModel):
     id: uuid.UUID = Field(
         ...,
         description="ID of test case",
+    )
+
+
+class TestCaseSnapshotDate(BaseModel):
+    snapshot_at: datetime = Field(
+        ...,
+        description="When this entry was snapshotted from its live test",
     )
 
 

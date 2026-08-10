@@ -509,3 +509,39 @@ async def _check_test_run_id_linked_to_specific_test_id_or_404(
             detail=f"Test run with ID '{test_run_id}' not linked "
                    f"to test with ID '{test_id}'"
         )
+
+
+async def _check_test_run_id_linked_to_specific_test_set_execution_id_or_404(
+        test_set_execution_id: uuid.UUID,
+        test_run_id: uuid.UUID,
+        session: AsyncSession,
+) -> None:
+    """Raise 404 if the given run doesn't belong to the given test set execution.
+
+    Scoped lookup, same shape as
+    _check_test_run_id_linked_to_specific_test_id_or_404 one layer up:
+    prevents a caller from reading run X of execution Y by hitting execution
+    Z's endpoint. Callers are expected to have already confirmed the run
+    exists at all (via _check_test_run_by_id_or_404) — this only
+    distinguishes "exists, but belongs to a different execution" from that.
+
+    Args:
+        test_set_execution_id: UUID of the test set execution the run must belong to.
+        test_run_id: UUID of the test run to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 404 if the run isn't linked to this test set execution.
+    """
+    found = await session.scalar(
+        select(TestRunModel.id)
+        .where(TestRunModel.id == test_run_id)
+        .where(TestRunModel.test_set_execution_id == test_set_execution_id)
+    )
+
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test run with ID '{test_run_id}' not linked "
+                   f"to test set execution with ID '{test_set_execution_id}'"
+        )

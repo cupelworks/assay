@@ -46,6 +46,7 @@ from assay.schemas.tests import (
     ModifyTestCaseRequest,
     PaginatedTestCases,
     TestCaseID,
+    TestCaseSnapshotDate,
 )
 
 # isort: split
@@ -79,6 +80,7 @@ from assay.schemas.runs import (
     TestSetExecutionCreationDate,
     TestSetExecutionID,
     TestSetExecutionMetadata,
+    TestSetExecutionRunDetails,
     TestSetExecutionRunMetadata,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
@@ -130,6 +132,7 @@ __all__ = [
     "StandaloneRunCreationMetadata",
     "StandaloneRunDetails",
     "TestCaseID",
+    "TestCaseSnapshotDate",
     "TestPlanCreationResponse",
     "TestPlanEntryDetails",
     "TestPlanEntryID",
@@ -144,6 +147,7 @@ __all__ = [
     "TestSetEntryID",
     "TestSetExecutionCreationDate",
     "TestSetExecutionID",
+    "TestSetExecutionRunDetails",
     "TestSetExecutionRunMetadata",
     "TestSetID",
     "TestSetLiveRunCreationMetadata",
