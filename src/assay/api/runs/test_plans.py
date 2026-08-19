@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from assay.db import get_session
 from assay.schemas import (
     PaginatedTestPlanExecutionMetadata,
+    PaginatedTestPlanExecutionRunMetadata,
     TestPlanLiveRunCreationMetadata,
     TestPlanReplayedExecutionCreationMetadata,
 )
@@ -14,6 +15,7 @@ from assay.services import (
     create_new_live_test_plan_run,
     create_new_replay_test_plan_run,
     get_test_plan_execution_metadata_all_executions,
+    get_test_plan_execution_run_metadata_all_runs,
 )
 
 router = APIRouter(tags=["run (test plan)"])
@@ -361,4 +363,116 @@ async def get_test_plan_execution_metadata(
     """
     return await get_test_plan_execution_metadata_all_executions(
         test_plan_id, session, offset, limit
+    )
+
+
+@router.get(
+    path="/runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}/test-runs",
+    summary="List runs produced by a specific test plan execution",
+    responses={
+        200: {
+            "description": "A paginated list of runs produced by this test plan execution.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "total": 2,
+                        "offset": 0,
+                        "limit": 100,
+                        "items": [
+                            {
+                                "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                                "status": "Completed",
+                                "created_at": "2026-07-18T11:05:55.163355",
+                                "test_set_entry_id": {
+                                    "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
+                                },
+                                "test_plan_execution_id": {
+                                    "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0"
+                                },
+                            },
+                            {
+                                "id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123",
+                                "status": "Pending",
+                                "created_at": "2026-07-18T11:05:55.163355",
+                                "test_set_entry_id": {
+                                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                                },
+                                "test_plan_execution_id": {
+                                    "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0"
+                                },
+                            },
+                        ],
+                    }
+                }
+            },
+        },
+        404: {
+            "description": (
+                "One of three things: no test plan exists with the given ID; "
+                "no test plan execution exists with the given ID; or the "
+                "execution exists but belongs to a different test plan than "
+                "the one in the path — reading the runs of execution X of "
+                "test plan A through test plan B's URL is rejected rather "
+                "than silently allowed. The three response examples below "
+                "show each distinct failure."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "test_plan_not_found": {
+                            "summary": "Test plan does not exist",
+                            "value": {
+                                "detail": "Test plan with ID '<test_plan_id>' not found"
+                            },
+                        },
+                        "execution_not_found": {
+                            "summary": "Test plan execution does not exist",
+                            "value": {
+                                "detail": "Test plan execution with ID "
+                                          "'<test_plan_execution_id>' does not exist"
+                            },
+                        },
+                        "execution_not_linked_to_test_plan": {
+                            "summary": "Execution belongs to a different test plan",
+                            "value": {
+                                "detail": "Test plan execution with ID "
+                                          "'<test_plan_execution_id>' not linked to "
+                                          "test plan with ID '<test_plan_id>'"
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+    response_model=PaginatedTestPlanExecutionRunMetadata,
+)
+async def get_test_plan_execution_run_metadata(
+        test_plan_id: uuid.UUID,
+        test_plan_execution_id: uuid.UUID,
+        session: SessionDep,
+        offset: int = Query(default=0, description="Number of records to skip for pagination."),
+        limit: int = Query(
+            default=100, description="Maximum number of records to return for pagination."
+        ),
+) -> PaginatedTestPlanExecutionRunMetadata: # pragma: no cover
+    """List every run produced by a specific test plan execution, newest first.
+
+    Scoped to exactly one execution — covers only the runs
+    `test_plan_execution_id` itself produced, not the test plan's other past
+    executions or its current live entries.
+
+    Three guards run before the list is fetched:
+    - The test plan must exist (404).
+    - The referenced test plan execution must exist (404).
+    - That execution must belong to this test plan (404) — prevents reading
+      the runs of execution X of test plan A through test plan B's URL.
+
+    Returns a paginated list of each run's `id`, `status`, `created_at`,
+    `test_set_entry_id` (which entry it ran), and `test_plan_execution_id`,
+    ordered by `created_at` descending (ties broken by `id` descending),
+    plus the usual `total`, `offset`, and `limit`.
+    """
+    return await get_test_plan_execution_run_metadata_all_runs(
+        test_plan_id, test_plan_execution_id, session, offset, limit
     )

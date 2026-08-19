@@ -11,6 +11,7 @@ from assay.schemas import (
     StandaloneRunCreationMetadata,
     TestCaseID,
     TestPlanExecutionMetadata,
+    TestPlanExecutionRunMetadata,
     TestPlanID,
     TestPlanReplayedExecutionID,
     TestSetEntryID,
@@ -20,9 +21,11 @@ from assay.schemas import (
     TestSetID,
     TestSetReplayedExecutionID,
 )
+from assay.schemas.runs import TestPlanExecutionID
 from assay.services import (
     get_standalone_run_metadata_all_test_runs,
     get_test_plan_execution_metadata_all_executions,
+    get_test_plan_execution_run_metadata_all_runs,
     get_test_set_execution_metadata_all_executions,
     get_test_set_execution_run_metadata_all_runs,
 )
@@ -434,5 +437,164 @@ def test_get_test_set_execution_run_metadata_all_runs_happy_path():
     # (possibly cross-joined/duplicated) per-row column
     assert all(
         item.test_set_execution_id == TestSetExecutionID(id=test_set_execution_id)
+        for item in response.items
+    )
+
+
+# --- get_test_plan_execution_run_metadata_all_runs() ---
+
+def test_get_test_plan_execution_run_metadata_all_runs_test_plan_not_found():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.return_value = None
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(
+            get_test_plan_execution_run_metadata_all_runs(
+                test_plan_id, test_plan_execution_id, session
+            )
+        )
+
+    session.scalar.assert_called_once()
+    session.execute.assert_not_called()
+    assert e.value.status_code == 404
+    assert f"Test plan with ID '{test_plan_id}' not found" in str(e.value.detail)
+
+
+def test_get_test_plan_execution_run_metadata_all_runs_execution_not_found():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        MagicMock(),
+        None,
+    ]
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(
+            get_test_plan_execution_run_metadata_all_runs(
+                test_plan_id, test_plan_execution_id, session
+            )
+        )
+
+    assert session.scalar.call_count == 2
+    session.execute.assert_not_called()
+    assert e.value.status_code == 404
+    assert (
+        f"Test plan execution with ID '{test_plan_execution_id}' does not exist"
+        in str(e.value.detail)
+    )
+
+
+def test_get_test_plan_execution_run_metadata_all_runs_execution_not_linked_to_test_plan():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        MagicMock(),
+        MagicMock(),
+        None,
+    ]
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(
+            get_test_plan_execution_run_metadata_all_runs(
+                test_plan_id, test_plan_execution_id, session
+            )
+        )
+
+    assert session.scalar.call_count == 3
+    session.execute.assert_not_called()
+    assert e.value.status_code == 404
+    assert (
+        f"Test plan execution with ID '{test_plan_execution_id}' not linked to "
+        f"test plan with ID '{test_plan_id}'" in str(e.value.detail)
+    )
+
+
+def test_get_test_plan_execution_run_metadata_all_runs_no_runs_found():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        0,
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    response = asyncio.run(
+        get_test_plan_execution_run_metadata_all_runs(
+            test_plan_id, test_plan_execution_id, session, 1, 1
+        )
+    )
+
+    session.execute.assert_called_once()
+    assert session.scalar.call_count == 4
+    assert response.total == 0
+    assert response.offset == 1
+    assert response.limit == 1
+    assert response.items == []
+
+
+def test_get_test_plan_execution_run_metadata_all_runs_happy_path():
+    test_plan_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        2,
+    ]
+    returned_rows = [
+        MagicMock(
+            id=uuid.uuid4(),
+            status=TestStatus.completed,
+            created_at=datetime.now().astimezone(),
+            test_set_entry_id=uuid.uuid4(),
+        ),
+        MagicMock(
+            id=uuid.uuid4(),
+            status=TestStatus.pending,
+            created_at=datetime.now().astimezone(),
+            test_set_entry_id=uuid.uuid4(),
+        ),
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=returned_rows))
+
+    response = asyncio.run(
+        get_test_plan_execution_run_metadata_all_runs(
+            test_plan_id, test_plan_execution_id, session
+        )
+    )
+
+    session.execute.assert_called_once()
+    assert session.scalar.call_count == 4
+    assert response.total == 2
+    assert response.offset == 0
+    assert response.limit == 100
+
+    assert response.items == [
+        TestPlanExecutionRunMetadata(
+            id=row.id,
+            status=row.status,
+            created_at=row.created_at,
+            test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
+            test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
+        )
+        for row in returned_rows
+    ]
+    # test_plan_execution_id must come from the validated parameter, not a
+    # (possibly cross-joined/duplicated) per-row column
+    assert all(
+        item.test_plan_execution_id == TestPlanExecutionID(id=test_plan_execution_id)
         for item in response.items
     )

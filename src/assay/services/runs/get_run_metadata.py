@@ -7,11 +7,13 @@ from assay.models import TestPlanExecutionModel, TestRunModel, TestSetExecutionM
 from assay.schemas import (
     PaginatedStandaloneRunCreationMetadata,
     PaginatedTestPlanExecutionMetadata,
+    PaginatedTestPlanExecutionRunMetadata,
     PaginatedTestSetExecutionMetadata,
     PaginatedTestSetExecutionRunMetadata,
     StandaloneRunCreationMetadata,
     TestCaseID,
     TestPlanExecutionMetadata,
+    TestPlanExecutionRunMetadata,
     TestPlanID,
     TestPlanReplayedExecutionID,
     TestSetEntryID,
@@ -21,7 +23,10 @@ from assay.schemas import (
     TestSetID,
     TestSetReplayedExecutionID,
 )
+from assay.schemas.runs import TestPlanExecutionID
 from assay.services.runs._common import (
+    _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404,
+    _check_test_plan_execution_or_404,
     _check_test_set_execution_id_linked_to_specific_test_set_id_or_404,
     _check_test_set_execution_or_404,
 )
@@ -283,6 +288,76 @@ async def get_test_set_execution_run_metadata_all_runs(
                 created_at=item.created_at,
                 test_set_entry_id=TestSetEntryID(id=item.test_set_entry_id),
                 test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
+            )
+            for item in found
+        ]
+    )
+
+
+async def get_test_plan_execution_run_metadata_all_runs(
+        test_plan_id: uuid.UUID,
+        test_plan_execution_id: uuid.UUID,
+        session: AsyncSession,
+        offset: int = 0,
+        limit: int = 100,
+) -> PaginatedTestPlanExecutionRunMetadata:
+    """Orchestrates run listing for a single test plan execution: validates the
+    test plan ID, the execution ID, and that the execution belongs to this
+    test plan, counts total runs the execution produced, fetches the
+    requested page, and returns a paginated response.
+
+    Args:
+        test_plan_id: The UUID of the test plan the execution must belong to.
+        test_plan_execution_id: The UUID of the execution whose runs are being listed.
+        session: Async SQLAlchemy session injected by FastAPI.
+        offset: Number of records to skip.
+        limit: Maximum number of records to return.
+
+    Returns:
+        A paginated response with each run's ID, status, created_at,
+        test_set_entry_id, and test_plan_execution_id, plus total count,
+        offset, and limit.
+
+    Raises:
+        HTTPException 404: No test plan exists with the given ID, no
+            execution exists with the given ID, or the execution exists
+            but doesn't belong to this test plan.
+    """
+    await _find_test_plan_by_id_or_404(test_plan_id, session)
+    await _check_test_plan_execution_or_404(test_plan_execution_id, session)
+    await _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404(
+        test_plan_id, test_plan_execution_id, session
+    )
+
+    total = await session.scalar(
+        select(func.count(TestRunModel.id))
+        .where(TestRunModel.test_plan_execution_id == test_plan_execution_id)
+    ) or 0
+    
+    found = (await session.execute(
+        select(
+            TestRunModel.id,
+            TestRunModel.status,
+            TestRunModel.created_at,
+            TestRunModel.test_set_entry_id,
+        )
+        .where(TestRunModel.test_plan_execution_id == test_plan_execution_id)
+        .order_by(TestRunModel.created_at.desc(), TestRunModel.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )).all()
+    
+    return PaginatedTestPlanExecutionRunMetadata(
+        total=total,
+        offset=offset,
+        limit=limit,
+        items=[
+            TestPlanExecutionRunMetadata(
+                id=item.id,
+                status=item.status,
+                created_at=item.created_at,
+                test_set_entry_id=TestSetEntryID(id=item.test_set_entry_id),
+                test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
             )
             for item in found
         ]

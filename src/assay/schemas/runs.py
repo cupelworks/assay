@@ -280,3 +280,12 @@ class TestPlanExecutionMetadata(TestPlanExecutionID, TestPlanExecutionCreationDa
 
 class PaginatedTestPlanExecutionMetadata(Pagination):
     items: list[TestPlanExecutionMetadata]
+
+
+class TestPlanExecutionRunMetadata(RunID, RunStatus, RunCreationDate):
+    test_set_entry_id: TestSetEntryID
+    test_plan_execution_id: TestPlanExecutionID
+
+
+class PaginatedTestPlanExecutionRunMetadata(Pagination):
+    items: list[TestPlanExecutionRunMetadata]
