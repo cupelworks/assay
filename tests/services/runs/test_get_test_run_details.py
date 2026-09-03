@@ -298,6 +298,65 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
     )
 
 
+def test_get_run_details_by_test_set_execution_and_run_id_reachable_after_unlink():
+    """Regression test for dev_notes.md note 22: the entry lookup must not
+    filter on the entry's current test_set_id, so a run's detail stays
+    reachable even after its entry has been unlinked from the test set
+    (PATCH /test-sets/{test_set_id}/entries nulls TestSetEntryModel.test_set_id).
+
+    The mocked session returns a canned row regardless of the query's WHERE
+    clauses, so it can't tell an unlinked entry apart from a linked one by
+    itself — the real assertion here is on the query that was actually
+    executed: it must not reference test_set_entries.test_set_id at all,
+    which is what excluded an unlinked entry's row before this was fixed.
+    """
+    test_set_id = uuid.uuid4()
+    test_set_execution_id = uuid.uuid4()
+    test_run_id = uuid.uuid4()
+    test_set_entry_id = uuid.uuid4()
+    test_case_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.scalar.side_effect = [
+        test_set_id, test_set_execution_id, test_set_execution_id, test_run_id, test_run_id
+    ]
+
+    scores = {"bleu": 0.5}
+    created_at = datetime.now().astimezone()
+    executed_at = datetime.now().astimezone()
+    snapshot_at = datetime.now().astimezone()
+
+    row = SimpleNamespace(
+        status=TestStatus.completed,
+        created_at=created_at,
+        test_set_entry_id=test_set_entry_id,
+        scores=scores,
+        error=None,
+        executed_at=executed_at,
+        test_id=test_case_id,
+        name="greets the user by name",
+        input="Say hello to Alice.",
+        expected_output="Hello, Alice!",
+        model_output="Hello, Alice!",
+        test_type_names=["bleu"],
+        snapshot_at=snapshot_at,
+    )
+    result = MagicMock()
+    result.one.return_value = row
+    session.execute.return_value = result
+
+    response = asyncio.run(get_run_details_by_test_set_execution_and_run_id(
+        test_set_id, test_set_execution_id, test_run_id, session
+    ))
+
+    executed_stmt = session.execute.call_args[0][0]
+    compiled_sql = str(executed_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "test_set_entries.test_set_id" not in compiled_sql
+
+    assert response.test_set_entry_id == TestSetEntryID(id=test_set_entry_id)
+    assert response.scores == scores
+
+
 def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_terminal_run():
     test_set_id = uuid.uuid4()
     test_set_execution_id = uuid.uuid4()

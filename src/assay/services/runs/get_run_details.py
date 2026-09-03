@@ -104,7 +104,12 @@ async def get_run_details_by_test_set_execution_and_run_id(
         test_set_execution_id, plus scores, error, and executed_at (null
         until the run reaches a terminal status), plus the snapshotted
         entry it ran against — test_case_id, name, input, expected_output,
-        model_output, test_type_names, and test_case_snapshot_at.
+        model_output, test_type_names, and test_case_snapshot_at. The
+        entry is resolved via test_set_entry_id alone, not scoped to the
+        entry's current test_set_id, so a run's detail stays reachable
+        even after its entry has been unlinked from the set (test_set_id
+        nulled) — the run and execution guards above already establish
+        that this run belongs to this test set's history.
 
     Raises:
         HTTPException: 404 if the test set, execution, or run doesn't
@@ -142,7 +147,6 @@ async def get_run_details_by_test_set_execution_and_run_id(
         )
         .where(TestRunModel.id == test_run_id)
         .where(TestRunModel.test_set_execution_id == test_set_execution_id)
-        .where(TestSetEntryModel.test_set_id == test_set_id)
     )).one()
 
     return TestSetExecutionRunDetails(

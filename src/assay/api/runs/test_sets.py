@@ -597,6 +597,10 @@ async def get_test_set_execution_run_details(
     `name`, `input`, `expected_output`, `model_output`, `test_type_names`,
     and `test_case_snapshot_at` — frozen at the moment the entry was added
     to the test set, and never updated by later edits to the live test.
+    This stays reachable even if the entry has since been unlinked from
+    the test set (`PATCH /test-sets/{test_set_id}/entries`) — the five
+    guards above already establish that this run belongs to this test
+    set's history, independent of the entry's current membership.
     """
     return await get_run_details_by_test_set_execution_and_run_id(
         test_set_id, test_set_execution_id, test_run_id, session
