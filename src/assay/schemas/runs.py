@@ -289,3 +289,11 @@ class TestPlanExecutionRunMetadata(RunID, RunStatus, RunCreationDate):
 
 class PaginatedTestPlanExecutionRunMetadata(Pagination):
     items: list[TestPlanExecutionRunMetadata]
+
+
+class TestPlanExecutionRunDetails(TestPlanExecutionRunMetadata, RunScores, RunError,
+                                 RunExecutionDate, CreateTestCaseRequest):
+    test_case_id: TestCaseID
+    test_set_id: TestSetID | None
+    test_plan_id: TestPlanID
+    test_case_snapshot_at: TestCaseSnapshotDate

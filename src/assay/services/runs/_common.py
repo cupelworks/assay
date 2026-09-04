@@ -8,6 +8,7 @@ from assay.models import (
     TestModel,
     TestPlanEntryModel,
     TestPlanExecutionModel,
+    TestPlanModel,
     TestRunModel,
     TestSetEntryModel,
     TestSetExecutionModel,
@@ -544,4 +545,71 @@ async def _check_test_run_id_linked_to_specific_test_set_execution_id_or_404(
             status_code=404,
             detail=f"Test run with ID '{test_run_id}' not linked "
                    f"to test set execution with ID '{test_set_execution_id}'"
+        )
+
+
+async def _check_test_run_id_linked_to_specific_test_plan_execution_id_or_404(
+        test_plan_execution_id: uuid.UUID,
+        test_run_id: uuid.UUID,
+        session: AsyncSession,
+) -> None:
+    """Raise 404 if the given run doesn't belong to the given test plan execution.
+
+    Scoped lookup, mirroring
+    _check_test_run_id_linked_to_specific_test_set_execution_id_or_404 one
+    layer up: prevents a caller from reading run X of execution Y by hitting
+    execution Z's endpoint. Callers are expected to have already confirmed
+    the run exists at all (via _check_test_run_by_id_or_404) — this only
+    distinguishes "exists, but belongs to a different execution" from that.
+
+    Args:
+        test_plan_execution_id: UUID of the test plan execution the run
+            must belong to.
+        test_run_id: UUID of the test run to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 404 if the run isn't linked to this test plan execution.
+    """
+    found = await session.scalar(
+        select(TestRunModel.id)
+        .where(TestRunModel.id == test_run_id)
+        .where(TestRunModel.test_plan_execution_id == test_plan_execution_id)
+    )
+
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test run with ID '{test_run_id}' not linked "
+                   f"to test plan execution with ID '{test_plan_execution_id}'"
+        )
+
+
+async def _check_test_plan_or_404(test_plan_id: uuid.UUID, session: AsyncSession) -> None:
+    """Raise 404 if no test plan with the given ID exists.
+
+    Deliberately selects only TestPlanModel.id rather than the full row —
+    unlike _find_test_plan_by_id_or_404 (test_plans/_common.py), which
+    fetches and hydrates the whole model. Callers here only need existence
+    confirmed, never the model instance itself, so there's no reason to
+    pay for the extra columns or ORM construction.
+
+    Unscoped — does not check anything about the plan beyond existence.
+
+    Args:
+        test_plan_id: UUID of the test plan to check.
+        session: Active async database session.
+
+    Raises:
+        HTTPException: 404 if no test plan with this ID exists.
+    """
+    found = await session.scalar(
+        select(TestPlanModel.id)
+        .where(TestPlanModel.id == test_plan_id)
+    )
+
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Test plan with ID '{test_plan_id}' not found"
         )
