@@ -303,7 +303,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
 
 
 def test_get_run_details_by_test_set_execution_and_run_id_reachable_after_unlink():
-    """Regression test for dev_notes.md note 22: the entry lookup must not
+    """Regression test for basic_api_implementation/dev_notes.md note 22: the entry lookup must not
     filter on the entry's current test_set_id, so a run's detail stays
     reachable even after its entry has been unlinked from the test set
     (PATCH /test-sets/{test_set_id}/entries nulls TestSetEntryModel.test_set_id).
@@ -647,8 +647,9 @@ def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlin
     up: the entry lookup must not filter on the entry's current test_set_id,
     and must not join TestPlanEntryModel at all, so a run's detail stays
     reachable even after its entry has been unlinked from its test set, or
-    that test set has since been unlinked from this plan (dev_notes.md note 4
-    — test-plan-to-set links never freeze).
+    that test set has since been unlinked from this plan
+    (basic_api_implementation/dev_notes.md note 4 — test-plan-to-set links
+    never freeze).
 
     The mocked session returns a canned row regardless of the query's WHERE
     clauses, so the real assertion is on the query that was actually

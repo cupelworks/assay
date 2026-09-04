@@ -215,10 +215,10 @@ async def get_run_details_by_test_plan_execution_and_run_id(
         span multiple test sets, so there's no single "the" set to echo
         back. It's resolved live from the entry's current test_set_id
         instead, and is None once the entry has since been unlinked from
-        its set (dev_notes.md note 12). The entry itself is resolved via
+        its set (basic_api_implementation/dev_notes.md note 12). The entry itself is resolved via
         test_set_entry_id alone, not scoped to test_set_id or to the
         entry's test set still being linked to this plan
-        (TestPlanEntryModel, which never freezes — dev_notes.md note 4)
+        (TestPlanEntryModel, which never freezes — basic_api_implementation/dev_notes.md note 4)
         — so a run's detail stays reachable regardless of either. The
         guards above already establish that this run belongs to this
         test plan's history.
