@@ -106,6 +106,43 @@ def test_happy_path_executes_delete_and_commits():
     session.commit.assert_called_once()
 
 
+def test_unlinking_a_run_having_test_set_does_not_raise_and_leaves_test_runs_untouched():
+    """Regression test for dev_notes.md note 4: unlinking a test set from a
+    plan is unconditional — allowed even if TestRunModel rows already exist
+    against that test set via this plan (test_plan_execution_id). There is
+    no runs-history guard anywhere in this function's guard chain (only the
+    three patched above run at all), so a test set with run history unlinks
+    exactly the same way an untouched one does — no raise.
+
+    The already-created runs are guaranteed left untouched, not just
+    unasserted: the executed DELETE can only ever affect test_plan_entries
+    — TestRunModel has no FK to TestPlanEntryModel at all (a run points at
+    a frozen TestSetEntryModel directly, see the cross-cutting freeze note
+    in current_implementation.md), so there is no join, cascade, or shared
+    table through which this statement could reach test_runs.
+    """
+    test_plan_id = uuid.uuid4()
+    test_set_id = uuid.uuid4()
+
+    session = AsyncMock()
+
+    with patch(_PATCH_FIND_TEST_PLAN), \
+            patch(_PATCH_FIND_TEST_SETS, new=AsyncMock(return_value=[test_set_id])), \
+            patch(_PATCH_FIND_TEST_PLAN_ENTRIES):
+        result = asyncio.run(remove_test_sets_from_test_plan_by_id(test_plan_id, [
+            TestSetID(id=test_set_id),
+        ], session))
+
+    assert result is None
+    session.execute.assert_called_once()
+    session.commit.assert_called_once()
+
+    executed_stmt = session.execute.call_args.args[0]
+    compiled_sql = str(executed_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "test_plan_entries" in compiled_sql
+    assert "test_runs" not in compiled_sql
+
+
 def test_delete_statement_scoped_to_plan_and_requested_test_sets():
     # The executed DELETE must filter on both test_plan_id and the requested test_set_ids,
     # so links belonging to other plans, or to test sets outside this request, are untouched.
