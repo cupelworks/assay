@@ -47,6 +47,7 @@ Copy `.env.example` to `.env` to configure the app locally. Every variable is op
 | `ASSAY_PORT` | `8000` | Port the dev server binds to, same caveat as `ASSAY_HOST` |
 | `ASSAY_LOG_LEVEL` | `INFO` | Only currently wired to one thing: setting this to `DEBUG` turns on SQLAlchemy engine echo, logging every SQL statement. Not yet a general application log level |
 | `ASSAY_DATABASE_URL` | `sqlite+aiosqlite:///./assay.db` | Database connection string — see [Database](#database) for the production format |
+| `ASSAY_CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated list of origins allowed to make cross-origin requests (e.g. `https://app.example.com,https://staging.example.com`). Credentialed requests (cookies, auth headers) are only allowed when the list isn't `*` — browsers reject `Access-Control-Allow-Credentials` paired with a wildcard origin |
 | `ASSAY_LLM_PROVIDER` | *(unset)* | Reserved for the LLM-as-judge evaluator's provider selection (`anthropic` or `openai`). Not yet read anywhere — `Settings` in `config.py` has no field for it yet, since the evaluator itself isn't implemented |
 | `ASSAY_LLM_MODEL` | *(unset)* | Reserved for the LLM-as-judge evaluator's model selection. Same caveat as `ASSAY_LLM_PROVIDER` |
 | `ANTHROPIC_API_KEY` | *(unset)* | Will be needed once the Anthropic LLM-as-judge evaluator ships. Install the optional extra ahead of time with `pip install -e ".[anthropic]"` (or `uv sync --extra anthropic`) |
