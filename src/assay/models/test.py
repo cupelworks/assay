@@ -141,15 +141,15 @@ class TestStatus(StrEnum):
 
 
 class TestTypes(StrEnum):
-    deterministic = "Deterministic"
-    nlp_metric = "NLP Metric"
-    llm_as_judge = "LLM-As-Judge"
+    deterministic = "deterministic"
+    nlp_metric = "nlp_metric"
+    llm_as_judge = "llm_as_judge"
 
 
 class TestTypesCost(StrEnum):
-    very_fast = "Free & Lightning Fast"
-    fast = "Free & Fast"
-    expensive = "Expensive & Slow"
+    very_fast = "very_fast"
+    fast = "fast"
+    expensive = "expensive"
 
 
 class TestTypesModel(Base):

@@ -55,20 +55,8 @@ def upgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_executed_tests_pending_test_id'))
     op.drop_table('executed_tests')
 
-    with op.batch_alter_table('test_types', schema=None) as batch_op:
-        batch_op.alter_column('cost',
-               existing_type=sa.VARCHAR(length=21),
-               type_=sa.Enum('very_fast', 'fast', 'expensive', name='testtypescost'),
-               existing_nullable=True)
-
 
 def downgrade() -> None:
-    with op.batch_alter_table('test_types', schema=None) as batch_op:
-        batch_op.alter_column('cost',
-               existing_type=sa.Enum('very_fast', 'fast', 'expensive', name='testtypescost'),
-               type_=sa.VARCHAR(length=21),
-               existing_nullable=True)
-
     with op.batch_alter_table('statistical_verifications', schema=None) as batch_op:
         batch_op.drop_constraint('fk_statistical_verifications_test_run_id', type_='foreignkey')
         batch_op.add_column(sa.Column('executed_test_id', sa.Uuid(), nullable=True))
