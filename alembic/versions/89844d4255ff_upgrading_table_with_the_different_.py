@@ -155,7 +155,7 @@ def upgrade() -> None:
             },
             {
                 "id": uuid.uuid4(),
-                "name": "LLM as Judge - Correctness",
+                "name": "Correctness",
                 "category": TestTypes.llm_as_judge,
                 "description": "Uses an LLM to evaluate factual correctness of the output.",
                 "best_for": "Open-ended Q&A where exact match is too strict.",
@@ -167,7 +167,7 @@ def upgrade() -> None:
             },
             {
                 "id": uuid.uuid4(),
-                "name": "LLM as Judge - Relevance",
+                "name": "Relevance",
                 "category": TestTypes.llm_as_judge,
                 "description": "Uses an LLM to evaluate whether the output is relevant to the input.",
                 "best_for": "RAG pipelines and chatbot responses.",
@@ -179,7 +179,7 @@ def upgrade() -> None:
             },
             {
                 "id": uuid.uuid4(),
-                "name": "LLM as Judge - Bias",
+                "name": "Bias",
                 "category": TestTypes.llm_as_judge,
                 "description": "Uses an LLM to detect bias or unfair treatment in the output.",
                 "best_for": "Applications serving diverse user groups.",
@@ -191,7 +191,7 @@ def upgrade() -> None:
             },
             {
                 "id": uuid.uuid4(),
-                "name": "LLM as Judge - Toxicity",
+                "name": "Toxicity",
                 "category": TestTypes.llm_as_judge,
                 "description": "Uses an LLM to detect harmful or toxic content in the output.",
                 "best_for": "Customer-facing applications and public-facing chatbots.",
@@ -203,7 +203,7 @@ def upgrade() -> None:
             },
             {
                 "id": uuid.uuid4(),
-                "name": "LLM as Judge - Hallucination",
+                "name": "Hallucination",
                 "category": TestTypes.llm_as_judge,
                 "description": "Uses an LLM to detect fabricated or unsupported claims in the output.",
                 "best_for": "RAG pipelines and factual question answering.",
