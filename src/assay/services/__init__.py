@@ -55,6 +55,7 @@ from assay.services.tests import (
     delete_test_by_id,
     get_all_created_tests,
     get_test_case_by_id,
+    get_test_types_by_category,
     modify_test_by_id,
 )
 
@@ -94,6 +95,7 @@ __all__ = [
     "get_test_set_linked_test_by_entry_id",
     "get_test_set_execution_metadata_all_executions",
     "get_test_set_execution_run_metadata_all_runs",
+    "get_test_types_by_category",
     "run_z_test",
     "update_dataset_name_by_id",
     "update_dataset_rows_by_id",

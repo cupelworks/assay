@@ -47,6 +47,7 @@ from assay.schemas.tests import (
     PaginatedTestCases,
     TestCaseID,
     TestCaseSnapshotDate,
+    TestTypesSchema,
 )
 
 # isort: split
@@ -165,4 +166,5 @@ __all__ = [
     "TestSetCreationResponse",
     "TestSetReplayedExecutionCreationMetadata",
     "TestSetReplayedExecutionID",
+    "TestTypesSchema",
 ]

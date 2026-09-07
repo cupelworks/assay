@@ -172,10 +172,10 @@ class TestTypesModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    category: Mapped[str] = mapped_column(SAEnum(TestTypes), nullable=False)
+    category: Mapped[TestTypes] = mapped_column(SAEnum(TestTypes), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=True)
     best_for: Mapped[str] = mapped_column(Text, nullable=True)
-    cost: Mapped[str] = mapped_column(SAEnum(TestTypesCost), nullable=True)
+    cost: Mapped[TestTypesCost | None] = mapped_column(SAEnum(TestTypesCost), nullable=True)
     limitations: Mapped[str] = mapped_column(Text, nullable=True)
     # If True, the test type requires an expected_output to function correctly.
     required_reference: Mapped[bool] = mapped_column(Boolean, nullable=True)
