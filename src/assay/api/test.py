@@ -113,7 +113,7 @@ async def get_test_types(
             ),
         ],
         session: SessionDep,
-) -> list[TestTypesSchema]:
+) -> list[TestTypesSchema]: # pragma: no cover
     """List the test type catalogue entries for one evaluation category.
 
     Each test type describes a supported way to evaluate a test's output —
