@@ -8,6 +8,8 @@ from fastapi import HTTPException
 
 from assay.models import TestRunModel, TestStatus
 from assay.schemas import (
+    RunMetadata,
+    RunOrigin,
     StandaloneRunCreationMetadata,
     TestCaseID,
     TestPlanExecutionMetadata,
@@ -23,6 +25,7 @@ from assay.schemas import (
 )
 from assay.schemas.runs import TestPlanExecutionID
 from assay.services import (
+    get_run_metadata_all_runs,
     get_standalone_run_metadata_all_test_runs,
     get_test_plan_execution_metadata_all_executions,
     get_test_plan_execution_run_metadata_all_runs,
@@ -105,6 +108,106 @@ def test_get_standalone_run_metadata_all_test_runs_happy_path():
             test_case_id=TestCaseID(id=test_id),
         )
         for test_run_model in returned_test_run_models
+    ]
+
+
+# --- get_run_metadata_all_runs() ---
+
+def test_get_run_metadata_all_runs_no_runs_found():
+    session = AsyncMock()
+    session.scalar.return_value = 0
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    response = asyncio.run(get_run_metadata_all_runs(session, 1, 1))
+
+    session.execute.assert_called_once()
+    session.scalar.assert_called_once()
+    assert response.total == 0
+    assert response.offset == 1
+    assert response.limit == 1
+    assert response.items == []
+
+
+def test_get_run_metadata_all_runs_happy_path():
+    session = AsyncMock()
+    session.scalar.return_value = 3
+
+    standalone_test_id = uuid.uuid4()
+    test_set_entry_id = uuid.uuid4()
+    test_set_execution_id = uuid.uuid4()
+    test_plan_entry_id = uuid.uuid4()
+    test_plan_execution_id = uuid.uuid4()
+
+    returned_rows = [
+        MagicMock(
+            id=uuid.uuid4(),
+            status=TestStatus.pending,
+            created_at=datetime.now().astimezone(),
+            test_id=standalone_test_id,
+            test_set_entry_id=None,
+            test_set_execution_id=None,
+            test_plan_execution_id=None,
+        ),
+        MagicMock(
+            id=uuid.uuid4(),
+            status=TestStatus.completed,
+            created_at=datetime.now().astimezone(),
+            test_id=None,
+            test_set_entry_id=test_set_entry_id,
+            test_set_execution_id=test_set_execution_id,
+            test_plan_execution_id=None,
+        ),
+        MagicMock(
+            id=uuid.uuid4(),
+            status=TestStatus.failed,
+            created_at=datetime.now().astimezone(),
+            test_id=None,
+            test_set_entry_id=test_plan_entry_id,
+            test_set_execution_id=None,
+            test_plan_execution_id=test_plan_execution_id,
+        ),
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=returned_rows))
+
+    response = asyncio.run(get_run_metadata_all_runs(session))
+
+    session.execute.assert_called_once()
+    session.scalar.assert_called_once()
+    assert response.total == 3
+    assert response.offset == 0
+    assert response.limit == 100
+
+    assert response.items == [
+        RunMetadata(
+            id=returned_rows[0].id,
+            status=returned_rows[0].status,
+            created_at=returned_rows[0].created_at,
+            origin=RunOrigin.standalone,
+            test_case_id=TestCaseID(id=standalone_test_id),
+            test_set_entry_id=None,
+            test_set_execution_id=None,
+            test_plan_execution_id=None,
+        ),
+        RunMetadata(
+            id=returned_rows[1].id,
+            status=returned_rows[1].status,
+            created_at=returned_rows[1].created_at,
+            origin=RunOrigin.test_set,
+            test_case_id=None,
+            test_set_entry_id=TestSetEntryID(id=test_set_entry_id),
+            test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
+            test_plan_execution_id=None,
+        ),
+        RunMetadata(
+            id=returned_rows[2].id,
+            status=returned_rows[2].status,
+            created_at=returned_rows[2].created_at,
+            origin=RunOrigin.test_plan,
+            test_case_id=None,
+            test_set_entry_id=TestSetEntryID(id=test_plan_entry_id),
+            test_set_execution_id=None,
+            test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
+        ),
     ]
 
 

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -296,4 +297,55 @@ class TestPlanExecutionRunDetails(TestPlanExecutionRunMetadata, RunScores, RunEr
     test_case_id: TestCaseID
     test_set_id: TestSetID | None
     test_plan_id: TestPlanID
-    test_case_snapshot_at: TestCaseSnapshotDate
+
+
+class RunOrigin(StrEnum):
+    standalone = "Standalone"
+    test_set = "TestSet"
+    test_plan = "TestPlan"
+
+
+class RunMetadata(RunID, RunStatus, RunCreationDate):
+    origin: RunOrigin = Field(
+        ...,
+        description=(
+            'Which of the three ways this run was created: `Standalone` '
+            '(created directly against a live test via '
+            '`POST /runs/standalone/{test_id}`), `TestSet` (created as part '
+            'of a test set execution), or `TestPlan` (created as part of a '
+            'test plan execution).'
+        ),
+    )
+    test_case_id: TestCaseID | None = Field(
+        ...,
+        description=(
+            'ID of the live test this run targets. Set only if `origin` is '
+            '`Standalone`; null otherwise.'
+        ),
+    )
+    test_set_entry_id: TestSetEntryID | None = Field(
+        ...,
+        description=(
+            'ID of the frozen test set entry this run targets. Set if '
+            '`origin` is `TestSet` or `TestPlan`; null if `origin` is '
+            '`Standalone`.'
+        ),
+    )
+    test_set_execution_id: TestSetExecutionID | None = Field(
+        ...,
+        description=(
+            'ID of the test set execution that produced this run. Set only '
+            'if `origin` is `TestSet`; null otherwise.'
+        ),
+    )
+    test_plan_execution_id: TestPlanExecutionID | None = Field(
+        ...,
+        description=(
+            'ID of the test plan execution that produced this run. Set only '
+            'if `origin` is `TestPlan`; null otherwise.'
+        ),
+    )
+
+
+class PaginatedRunMetadata(Pagination):
+    items: list[RunMetadata]

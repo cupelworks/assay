@@ -1,15 +1,19 @@
 import uuid
 
 from sqlalchemy import func, select
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestPlanExecutionModel, TestRunModel, TestSetExecutionModel
 from assay.schemas import (
+    PaginatedRunMetadata,
     PaginatedStandaloneRunCreationMetadata,
     PaginatedTestPlanExecutionMetadata,
     PaginatedTestPlanExecutionRunMetadata,
     PaginatedTestSetExecutionMetadata,
     PaginatedTestSetExecutionRunMetadata,
+    RunMetadata,
+    RunOrigin,
     StandaloneRunCreationMetadata,
     TestCaseID,
     TestPlanExecutionMetadata,
@@ -84,6 +88,115 @@ async def get_standalone_run_metadata_all_test_runs(
             )
             for item in found
         ],
+    )
+
+
+async def get_run_metadata_all_runs(
+        session: AsyncSession,
+        offset: int = 0,
+        limit: int = 100,
+) -> PaginatedRunMetadata:
+    """Orchestrates run listing across the entire system, regardless of
+    origin: counts every TestRunModel row that exists, fetches the requested
+    page, and returns a paginated response with each row's origin resolved
+    from TestRunModel's own mode invariant.
+
+    Unlike every other listing in this module, this has no parent resource
+    to validate — no guard runs first — and no origin-specific filter: every
+    run is in scope, whether it was created standalone, via a test set
+    execution, or via a test plan execution. A single unfiltered query over
+    TestRunModel covers all three, since the mode a row belongs to is
+    already fully determined by which of its own FK columns is set (see
+    TestRunModel's docstring) — no join needed to tell them apart.
+
+    Args:
+        session: Async SQLAlchemy session injected by FastAPI.
+        offset: Number of records to skip.
+        limit: Maximum number of records to return.
+
+    Returns:
+        A paginated response with each run's ID, status, created_at,
+        origin, and the origin-specific ID(s) that follow from it (exactly
+        one of `test_case_id`, or the `test_set_entry_id` +
+        `test_set_execution_id`/`test_plan_execution_id` pair, is non-null
+        per item), plus total count, offset, and limit.
+    """
+    total = await session.scalar(select(func.count(TestRunModel.id))) or 0
+
+    found = (await session.execute(
+        select(
+            TestRunModel.id,
+            TestRunModel.status,
+            TestRunModel.created_at,
+            TestRunModel.test_id,
+            TestRunModel.test_set_entry_id,
+            TestRunModel.test_set_execution_id,
+            TestRunModel.test_plan_execution_id,
+        )
+        .order_by(TestRunModel.created_at.desc(), TestRunModel.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )).all()
+
+    return PaginatedRunMetadata(
+        total=total,
+        offset=offset,
+        limit=limit,
+        items=[_run_metadata_from_row(item) for item in found],
+    )
+
+
+def _run_metadata_from_row(row: Row) -> RunMetadata:
+    """Resolve a single TestRunModel row's origin from its own FK columns.
+
+    Mirrors TestRunModel's documented mode invariant exactly: `test_id` set
+    means standalone, `test_set_execution_id` set means test-set-triggered,
+    `test_plan_execution_id` set means test-plan-triggered — the three
+    patterns are mutually exclusive by construction, so checking them in
+    this order is enough to classify every row.
+
+    Args:
+        row: A result row carrying id, status, created_at, test_id,
+            test_set_entry_id, test_set_execution_id, and
+            test_plan_execution_id.
+
+    Returns:
+        The row's RunMetadata, with `origin` and only the ID field(s) that
+        origin implies populated — the rest left null.
+    """
+    if row.test_id is not None:
+        return RunMetadata(
+            id=row.id,
+            status=row.status,
+            created_at=row.created_at,
+            origin=RunOrigin.standalone,
+            test_case_id=TestCaseID(id=row.test_id),
+            test_set_entry_id=None,
+            test_set_execution_id=None,
+            test_plan_execution_id=None,
+        )
+
+    if row.test_set_execution_id is not None:
+        return RunMetadata(
+            id=row.id,
+            status=row.status,
+            created_at=row.created_at,
+            origin=RunOrigin.test_set,
+            test_case_id=None,
+            test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
+            test_set_execution_id=TestSetExecutionID(id=row.test_set_execution_id),
+            test_plan_execution_id=None,
+        )
+
+    return RunMetadata(
+        id=row.id,
+        status=row.status,
+        created_at=row.created_at,
+        origin=RunOrigin.test_plan,
+        test_case_id=None,
+        test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
+        test_set_execution_id=None,
+        test_plan_execution_id=TestPlanExecutionID(id=row.test_plan_execution_id),
     )
 
 

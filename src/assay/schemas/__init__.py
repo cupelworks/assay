@@ -62,6 +62,7 @@ from assay.schemas.test_set_entries import (
 # runs imports TestCaseID, TestPlanID, TestSetID, and TestSetEntryID from assay.schemas —
 # must load after tests, test_plans, test_sets, and test_set_entries
 from assay.schemas.runs import (
+    PaginatedRunMetadata,
     PaginatedStandaloneRunCreationMetadata,
     PaginatedTestPlanExecutionMetadata,
     PaginatedTestPlanExecutionRunMetadata,
@@ -71,6 +72,8 @@ from assay.schemas.runs import (
     RunError,
     RunExecutionDate,
     RunID,
+    RunMetadata,
+    RunOrigin,
     RunScores,
     RunStatus,
     StandaloneRunCreationMetadata,
@@ -119,6 +122,7 @@ __all__ = [
     "ModifyTestSetMetadataRequest",
     "PaginatedDataSetResponse",
     "PaginatedDataSetRowResponse",
+    "PaginatedRunMetadata",
     "PaginatedStandaloneRunCreationMetadata",
     "PaginatedTestPlanEntriesDetails",
     "PaginatedTestPlanExecutionMetadata",
@@ -133,6 +137,8 @@ __all__ = [
     "RunCreationDate",
     "RunError",
     "RunExecutionDate",
+    "RunMetadata",
+    "RunOrigin",
     "RunScores",
     "RunStatus",
     "StandaloneRunCreationMetadata",
