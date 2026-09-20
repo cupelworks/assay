@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.create_table('test_types',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sa.Text(), nullable=False),
-    sa.Column('category', sa.Enum('Deterministic', 'NLP Metric', 'LLM-As-Judge',
+    sa.Column('category', sa.Enum('deterministic', 'nlp_metric', 'llm_as_judge',
                                   name='testtypes', create_constraint=True), nullable=False),
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=False),

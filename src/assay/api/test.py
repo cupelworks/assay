@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
+from assay.models import TestTypes
 from assay.schemas import (
     CreateTestCaseFromDatasetRequest,
     CreateTestCaseFromDatasetResponse,
@@ -13,6 +14,7 @@ from assay.schemas import (
     ModifyTestCaseRequest,
     PaginatedTestCases,
     TestCaseID,
+    TestTypesSchema,
 )
 from assay.services import (
     create_new_test,
@@ -20,12 +22,121 @@ from assay.services import (
     delete_test_by_id,
     get_all_created_tests,
     get_test_case_by_id,
+    get_test_types_by_category,
     modify_test_by_id,
 )
 
 router = APIRouter(tags=["test"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+@router.get(
+    path="/tests/types",
+    summary="List available test types",
+    responses={
+        200: {
+            "description": "Every catalogue entry in the given category, "
+                           "ordered by name (descending).",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": "696bf21b-6263-4024-8182-ddaba33d5b30",
+                            "name": "ROUGE",
+                            "category": "nlp_metric",
+                            "description": "Measures n-gram overlap between output "
+                                            "and expected text.",
+                            "is_active": True,
+                            "created_at": "2026-05-27T19:36:01.272322",
+                            "best_for": "Summarization tasks.",
+                            "cost": "fast",
+                            "limitations": "Doesn't account for semantic meaning; "
+                                           "penalizes valid paraphrases.",
+                            "required_reference": True,
+                        },
+                        {
+                            "id": "ede3f4b9-1f31-4296-90ca-f34e6e3adb1f",
+                            "name": "METEOR",
+                            "category": "nlp_metric",
+                            "description": "Measures alignment between output and "
+                                            "reference, accounting for synonyms and "
+                                            "stemming.",
+                            "is_active": True,
+                            "created_at": "2026-05-27T19:36:01.272322",
+                            "best_for": "Tasks where paraphrasing and word variations "
+                                        "are common.",
+                            "cost": "fast",
+                            "limitations": "More complex to compute than BLEU/ROUGE; "
+                                           "language support varies.",
+                            "required_reference": True,
+                        },
+                    ]
+                }
+            },
+        },
+        422: {
+            "description": "Validation error — `test_category` is not one of the "
+                           "recognized categories.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "type": "enum",
+                                "loc": ["query", "test_category"],
+                                "msg": "Input should be 'deterministic', 'nlp_metric' "
+                                       "or 'llm_as_judge'",
+                                "input": "not_a_real_category",
+                                "ctx": {
+                                    "expected": "'deterministic', 'nlp_metric' "
+                                                "or 'llm_as_judge'"
+                                },
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+    },
+    response_model=list[TestTypesSchema],
+)
+async def get_test_types(
+        test_category: Annotated[
+            TestTypes,
+            Query(
+                description="Which broad evaluation strategy to list test types for. "
+                            "One of `deterministic` (exact/regex/substring checks), "
+                            "`nlp_metric` (ROUGE, BLEU, BERTScore, and similar), or "
+                            "`llm_as_judge` (an LLM scoring another model's output). "
+                            "Only test types in this category are returned."
+            ),
+        ],
+        session: SessionDep,
+) -> list[TestTypesSchema]: # pragma: no cover
+    """List the test type catalogue entries for one evaluation category.
+
+    Each test type describes a supported way to evaluate a test's output —
+    what it measures, what it's best suited for, its relative cost, its
+    known limitations, and whether it requires an `expected_output` to work
+    (`required_reference`). These are the names accepted as `test_type_names`
+    when creating or updating a test case or test set entry (e.g. `"ROUGE"`,
+    `"BERTScore"`).
+
+    No lookup guards apply — every value of `test_category` is a valid
+    category, so this always returns a 200. If no test types exist in that
+    category, the response is an empty list rather than a 404.
+
+    Both active and inactive entries are returned; check `is_active` if you
+    only want to offer currently-usable test types to a user (inactive
+    entries are kept for historical/audit reference, e.g. so past test
+    assignments referencing them remain resolvable, but shouldn't be offered
+    for new assignments).
+
+    Returns the matching test types ordered by `name` descending (ties
+    broken by `id` descending).
+    """
+    return await get_test_types_by_category(test_category, session)
 
 
 @router.patch(

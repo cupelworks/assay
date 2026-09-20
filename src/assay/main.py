@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from assay import __version__
@@ -14,6 +15,14 @@ def create_app() -> FastAPI:
             "NLP metrics, LLM-as-judge, and statistical reporting."
         ),
         version=__version__,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allowed_origins,
+        # browsers reject credentialed requests against a wildcard origin
+        allow_credentials=settings.cors_allowed_origins != ["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.include_router(router)
     Instrumentator().instrument(app).expose(app)

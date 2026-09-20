@@ -78,11 +78,12 @@ if TYPE_CHECKING:
 #     entry itself also freezes (see TestSetEntryModel), so the run's record of
 #     what it executed against stays accurate too.
 #
-#   - TEST-PLAN-TRIGGERED: test_set_entry_id + test_plan_id + test_plan_execution_id
-#     are set. Same reproducibility guarantee as test-set-triggered, but the run
-#     was produced by executing a test plan that has this entry's test set linked
+#   - TEST-PLAN-TRIGGERED: test_set_entry_id + test_plan_execution_id are set.
+#     Same reproducibility guarantee as test-set-triggered, but the run was
+#     produced by executing a test plan that has this entry's test set linked
 #     to it (TestPlanExecutionModel), rather than by executing the test set
-#     directly.
+#     directly. Which plan is reached via test_plan_execution_id ->
+#     TestPlanExecutionModel.test_plan_id, not a separate column here.
 #
 #   Invariant enforced at the service layer: exactly one of the three column
 #   patterns above holds per run. test_set_execution_id and test_plan_execution_id
@@ -140,15 +141,15 @@ class TestStatus(StrEnum):
 
 
 class TestTypes(StrEnum):
-    deterministic = "Deterministic"
-    nlp_metric = "NLP Metric"
-    llm_as_judge = "LLM-As-Judge"
+    deterministic = "deterministic"
+    nlp_metric = "nlp_metric"
+    llm_as_judge = "llm_as_judge"
 
 
 class TestTypesCost(StrEnum):
-    very_fast = "Free & Lightning Fast"
-    fast = "Free & Fast"
-    expensive = "Expensive & Slow"
+    very_fast = "very_fast"
+    fast = "fast"
+    expensive = "expensive"
 
 
 class TestTypesModel(Base):
@@ -171,10 +172,10 @@ class TestTypesModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    category: Mapped[str] = mapped_column(SAEnum(TestTypes), nullable=False)
+    category: Mapped[TestTypes] = mapped_column(SAEnum(TestTypes), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=True)
     best_for: Mapped[str] = mapped_column(Text, nullable=True)
-    cost: Mapped[str] = mapped_column(SAEnum(TestTypesCost), nullable=True)
+    cost: Mapped[TestTypesCost | None] = mapped_column(SAEnum(TestTypesCost), nullable=True)
     limitations: Mapped[str] = mapped_column(Text, nullable=True)
     # If True, the test type requires an expected_output to function correctly.
     required_reference: Mapped[bool] = mapped_column(Boolean, nullable=True)
@@ -536,19 +537,22 @@ class TestRunModel(Base):
         subsequent edits to the live test. Once a run exists, the entry
         itself also rejects further direct edits (see TestSetEntryModel).
 
-    TEST-PLAN-TRIGGERED (test_set_entry_id + test_plan_id + test_plan_execution_id set):
+    TEST-PLAN-TRIGGERED (test_set_entry_id + test_plan_execution_id set):
         Same reproducibility guarantee as test-set-triggered, but the run was
         produced by executing a test plan that has this entry's test set
-        linked to it, rather than by executing the test set directly.
+        linked to it, rather than by executing the test set directly. Which
+        plan is reached via test_plan_execution_id -> TestPlanExecutionModel
+        .test_plan_id — there is no separate test_plan_id column here, since
+        that would just be the same value one join away.
 
     Invariant (enforced at the service layer):
         Exactly one of these three column patterns holds per run:
-          - test_id set; test_set_entry_id, test_set_execution_id,
-            test_plan_id, test_plan_execution_id all null.
-          - test_set_entry_id + test_set_execution_id set; test_id and the
-            test_plan_* columns null.
-          - test_set_entry_id + test_plan_id + test_plan_execution_id set;
-            test_id and test_set_execution_id null.
+          - test_id set; test_set_entry_id, test_set_execution_id, and
+            test_plan_execution_id all null.
+          - test_set_entry_id + test_set_execution_id set; test_id and
+            test_plan_execution_id null.
+          - test_set_entry_id + test_plan_execution_id set; test_id and
+            test_set_execution_id null.
         test_set_execution_id and test_plan_execution_id are never both set
         on the same run — a run is triggered by exactly one path, even though
         the same TestSetEntryModel can accumulate runs from both paths over
@@ -578,11 +582,6 @@ class TestRunModel(Base):
         ForeignKey("test_set_executions.id"), nullable=True, index=True
     )
     # Test-plan-triggered mode — mutually exclusive with test_set_execution_id.
-    # test_plan_id is a convenience denormalization: a plan spans multiple test
-    # sets, so unlike test_set_id it can't be derived from test_set_entry_id alone.
-    test_plan_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("test_plans.id"), nullable=True, index=True
-    )
     test_plan_execution_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_plan_executions.id"), nullable=True, index=True
     )
@@ -598,7 +597,6 @@ class TestRunModel(Base):
     test_set_execution: Mapped["TestSetExecutionModel | None"] = relationship(
         back_populates="runs"
     )
-    test_plan: Mapped["TestPlanModel | None"] = relationship()
     test_plan_execution: Mapped["TestPlanExecutionModel | None"] = relationship(
         back_populates="runs"
     )
