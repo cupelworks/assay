@@ -6,6 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestPlanExecutionModel, TestRunModel, TestSetExecutionModel
 from assay.schemas import (
+    ExecutionMetadata,
+    ExecutionOrigin,
+    PaginatedExecutionMetadata,
     PaginatedRunMetadata,
     PaginatedStandaloneRunCreationMetadata,
     PaginatedTestPlanExecutionMetadata,
@@ -335,6 +338,160 @@ async def get_test_plan_execution_metadata_all_executions(
             )
             for item in found
         ]
+    )
+
+
+async def get_execution_metadata_all_executions(
+        session: AsyncSession,
+        offset: int = 0,
+        limit: int = 100,
+) -> PaginatedExecutionMetadata:
+    """Orchestrates execution listing across the entire system, regardless of
+    origin: fetches the top `offset + limit` most recent executions from
+    each of TestSetExecutionModel and TestPlanExecutionModel (each with its
+    own run_count aggregated exactly like the scoped listings above), merges
+    the two streams in Python, and returns the requested page.
+
+    No parent resource to validate — no guard runs first, same as
+    get_run_metadata_all_runs. Unlike that function, this can't be answered
+    by a single unfiltered query: TestSetExecutionModel and
+    TestPlanExecutionModel are two separate tables (an execution has no
+    shared base table to select across, unlike a run's mode columns all
+    living on TestRunModel), so a correctly globally-ordered, paginated feed
+    across both requires fetching enough of each side and merging.
+
+    Fetching the top `offset + limit` rows from each side (ordered
+    created_at descending, same tiebreak as everywhere else) is sufficient
+    to guarantee correctness: in the fully-merged global ordering, any item
+    ranked within the first `offset + limit` positions can have at most
+    `offset + limit - 1` items ranked before it, so it must itself already
+    be within its own table's top `offset + limit` rows. Slicing the merged,
+    re-sorted result to `[offset : offset + limit]` then gives the correct
+    page. This avoids a cross-table SQL UNION (portability risk between the
+    SQLite used locally and the Postgres this is meant to run against in
+    production) at the cost of over-fetching from whichever side is not
+    well-represented near the top — acceptable at the pagination sizes this
+    API already uses elsewhere (default limit 100, no deep-pagination use
+    case for this endpoint).
+
+    Args:
+        session: Async SQLAlchemy session injected by FastAPI.
+        offset: Number of records to skip.
+        limit: Maximum number of records to return.
+
+    Returns:
+        A paginated response with each execution's ID, created_at, origin,
+        run_count, and the origin-specific ID(s) that follow from it
+        (`test_set_id` + `replayed_test_set_execution_id` for `TestSet`,
+        `test_plan_id` + `replayed_test_plan_execution_id` for `TestPlan`),
+        plus total count, offset, and limit.
+    """
+    test_set_total = await session.scalar(
+        select(func.count(TestSetExecutionModel.id))
+    ) or 0
+    test_plan_total = await session.scalar(
+        select(func.count(TestPlanExecutionModel.id))
+    ) or 0
+    total = test_set_total + test_plan_total
+
+    fetch_count = offset + limit
+
+    test_set_rows = (await session.execute(
+        select(
+            TestSetExecutionModel.id,
+            TestSetExecutionModel.created_at,
+            TestSetExecutionModel.test_set_id,
+            TestSetExecutionModel.replayed_execution_id,
+            func.count(TestRunModel.id).label("run_count"),
+        )
+        .join(
+            TestRunModel,
+            TestSetExecutionModel.id == TestRunModel.test_set_execution_id,
+            isouter=True,
+        )
+        .group_by(TestSetExecutionModel.id)
+        .order_by(TestSetExecutionModel.created_at.desc(), TestSetExecutionModel.id.desc())
+        .limit(fetch_count)
+    )).all()
+
+    test_plan_rows = (await session.execute(
+        select(
+            TestPlanExecutionModel.id,
+            TestPlanExecutionModel.created_at,
+            TestPlanExecutionModel.test_plan_id,
+            TestPlanExecutionModel.replayed_execution_id,
+            func.count(TestRunModel.id).label("run_count"),
+        )
+        .join(
+            TestRunModel,
+            TestPlanExecutionModel.id == TestRunModel.test_plan_execution_id,
+            isouter=True,
+        )
+        .group_by(TestPlanExecutionModel.id)
+        .order_by(TestPlanExecutionModel.created_at.desc(), TestPlanExecutionModel.id.desc())
+        .limit(fetch_count)
+    )).all()
+
+    merged = sorted(
+        [_execution_metadata_from_test_set_row(row) for row in test_set_rows]
+        + [_execution_metadata_from_test_plan_row(row) for row in test_plan_rows],
+        key=lambda item: (item.created_at, item.id),
+        reverse=True,
+    )
+
+    return PaginatedExecutionMetadata(
+        total=total,
+        offset=offset,
+        limit=limit,
+        items=merged[offset:offset + limit],
+    )
+
+
+def _execution_metadata_from_test_set_row(row: Row) -> ExecutionMetadata:
+    """Build a `TestSet`-origin ExecutionMetadata from a TestSetExecutionModel row.
+
+    Args:
+        row: A result row carrying id, created_at, test_set_id,
+            replayed_execution_id, and run_count.
+
+    Returns:
+        The row's ExecutionMetadata, with origin=TestSet, test_plan_id and
+        replayed_test_plan_execution_id left null.
+    """
+    return ExecutionMetadata(
+        id=row.id,
+        created_at=row.created_at,
+        origin=ExecutionOrigin.test_set,
+        run_count=row.run_count,
+        test_set_id=TestSetID(id=row.test_set_id),
+        test_plan_id=None,
+        replayed_test_set_execution_id=TestSetReplayedExecutionID(id=row.replayed_execution_id)
+                                       if row.replayed_execution_id else None,
+        replayed_test_plan_execution_id=None,
+    )
+
+
+def _execution_metadata_from_test_plan_row(row: Row) -> ExecutionMetadata:
+    """Build a `TestPlan`-origin ExecutionMetadata from a TestPlanExecutionModel row.
+
+    Args:
+        row: A result row carrying id, created_at, test_plan_id,
+            replayed_execution_id, and run_count.
+
+    Returns:
+        The row's ExecutionMetadata, with origin=TestPlan, test_set_id and
+        replayed_test_set_execution_id left null.
+    """
+    return ExecutionMetadata(
+        id=row.id,
+        created_at=row.created_at,
+        origin=ExecutionOrigin.test_plan,
+        run_count=row.run_count,
+        test_set_id=None,
+        test_plan_id=TestPlanID(id=row.test_plan_id),
+        replayed_test_set_execution_id=None,
+        replayed_test_plan_execution_id=TestPlanReplayedExecutionID(id=row.replayed_execution_id)
+                                        if row.replayed_execution_id else None,
     )
 
 

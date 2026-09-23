@@ -349,3 +349,75 @@ class RunMetadata(RunID, RunStatus, RunCreationDate):
 
 class PaginatedRunMetadata(Pagination):
     items: list[RunMetadata]
+
+
+class ExecutionOrigin(StrEnum):
+    test_set = "TestSet"
+    test_plan = "TestPlan"
+
+
+class ExecutionMetadata(BaseModel):
+    id: uuid.UUID = Field(
+        ...,
+        description=(
+            'Unique identifier of the execution (`TestSetExecutionModel.id` '
+            'or `TestPlanExecutionModel.id`, depending on `origin`).'
+        ),
+    )
+    created_at: datetime = Field(
+        ...,
+        description=(
+            'Timestamp when the execution was triggered (when its runs got '
+            'enqueued as `Pending`), not when they started or finished '
+            'executing.'
+        ),
+    )
+    origin: ExecutionOrigin = Field(
+        ...,
+        description=(
+            'Which of the two ways this execution was created: `TestSet` '
+            '(from `POST /runs/test-sets/{test_set_id}` or its replay) or '
+            '`TestPlan` (from `POST /runs/test-plans/{test_plan_id}` or its '
+            'replay).'
+        ),
+    )
+    run_count: int = Field(
+        ...,
+        description='Number of TestRunModel rows this execution produced.',
+    )
+    test_set_id: TestSetID | None = Field(
+        ...,
+        description=(
+            'ID of the test set this execution belongs to. Set only if '
+            '`origin` is `TestSet`; null otherwise.'
+        ),
+    )
+    test_plan_id: TestPlanID | None = Field(
+        ...,
+        description=(
+            'ID of the test plan this execution belongs to. Set only if '
+            '`origin` is `TestPlan`; null otherwise.'
+        ),
+    )
+    replayed_test_set_execution_id: TestSetReplayedExecutionID | None = Field(
+        ...,
+        description=(
+            'ID of the prior test set execution this one replayed. Set '
+            'only if `origin` is `TestSet` and this execution was itself a '
+            'replay; null for a live test set execution or any test plan '
+            'execution.'
+        ),
+    )
+    replayed_test_plan_execution_id: TestPlanReplayedExecutionID | None = Field(
+        ...,
+        description=(
+            'ID of the prior test plan execution this one replayed. Set '
+            'only if `origin` is `TestPlan` and this execution was itself a '
+            'replay; null for a live test plan execution or any test set '
+            'execution.'
+        ),
+    )
+
+
+class PaginatedExecutionMetadata(Pagination):
+    items: list[ExecutionMetadata]
