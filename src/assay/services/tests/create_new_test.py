@@ -1,5 +1,7 @@
+import re
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestModel, TestTypeAssignmentModel
@@ -12,6 +14,39 @@ from assay.schemas import (
 )
 from assay.services.datasets._common import _get_all_rows_or_404, _get_dataset_or_404
 from assay.services.tests._common import _validate_test_type_assignments
+
+_NEW_TEST_NAME_PATTERN = re.compile(r"^New Test (\d+)$")
+
+
+async def _next_new_test_number(session: AsyncSession) -> int:
+    """Find the next number to use for a "New Test <n>" default name.
+
+    Scans every existing test name matching the "New Test <n>" pattern
+    exactly and returns one past the highest number found — global across
+    the whole tests table, not scoped to any one dataset or import, so a
+    second import doesn't restart at "New Test 1" and collide with names
+    the first one already used. A name that doesn't match the pattern
+    exactly (including one a user has since renamed) is ignored, not
+    counted — this only ever looks at the pattern's own numbering, never
+    at how many tests exist in total.
+
+    Args:
+        session: Active async database session.
+
+    Returns:
+        The next number to use — 1 if no matching name exists yet.
+    """
+    existing_names = (await session.scalars(
+        select(TestModel.name).where(TestModel.name.like("New Test %"))
+    )).all()
+
+    existing_numbers = [
+        int(match.group(1))
+        for name in existing_names
+        if (match := _NEW_TEST_NAME_PATTERN.match(name))
+    ]
+
+    return max(existing_numbers, default=0) + 1
 
 
 async def create_new_test(
@@ -70,6 +105,14 @@ async def create_new_test_from_dataset(
         session: AsyncSession) -> CreateTestCaseFromDatasetResponse:
     """Create test cases in bulk from all rows of an existing dataset.
 
+    Each created test is named "New Test <n>", numbered globally across the
+    whole tests table (see _next_new_test_number) — dataset rows have no
+    name of their own to reuse, and a random UUID (the manual-creation
+    default) is unreadable at a glance across dozens of rows. Numbering is
+    global, not scoped to this batch or dataset, so re-running an import
+    continues from the highest "New Test <n>" that already exists instead
+    of restarting at 1 and duplicating a name already in use.
+
     Args:
         request: Dataset ID and optional list of test type assignments.
         session: Active async database session.
@@ -88,16 +131,18 @@ async def create_new_test_from_dataset(
     if request.test_type_assignments:
         await _validate_test_type_assignments(session, request.test_type_assignments)
 
+    next_number = await _next_new_test_number(session)
+
     tests = [
         TestModel(
             id=uuid.uuid4(),
             dataset_row_id=row.id,
-            name=str(uuid.uuid4()),
+            name=f"New Test {next_number + offset}",
             input=row.input,
             model_output=row.model_output,
             expected_output=row.expected_output,
         )
-        for row in rows
+        for offset, row in enumerate(rows)
     ]
 
     test_types = [

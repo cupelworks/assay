@@ -164,7 +164,7 @@ def test_validate_passes_for_optional_config_omitted():
     mock_session = AsyncMock()
     mock_session.execute.return_value = MagicMock(
         all=MagicMock(return_value=[_catalogue_row("Toxicity", [
-            {"key": "rubric", "label": "Custom toxicity rubric (optional)",
+            {"key": "rubric", "label": "Custom toxicity rubric",
              "kind": "rubric", "required": False}
         ])])
     )
@@ -195,6 +195,16 @@ def _patch_validate_test_type_assignments():
     return patch("assay.services.tests.create_new_test._validate_test_type_assignments")
 
 
+def _patch_next_new_test_number(start=1):
+    # shorthand for tests that don't care about the numbering itself —
+    # see test_names_start_at_1_when_none_exist_yet and
+    # test_names_continue_globally_from_existing_new_test_names for that
+    return patch(
+        "assay.services.tests.create_new_test._next_new_test_number",
+        new=AsyncMock(return_value=start),
+    )
+
+
 def _get_rows():
     return MagicMock(
         input="first", expected_output="y", model_output="z", id=uuid.uuid4()), MagicMock(
@@ -210,6 +220,7 @@ def test_row_exist_no_test_type_assignments():
 
     # _patch_validate_test_type_assignments is captured so we can assert it was never called
     with _patch_rows(*_get_rows()), \
+            _patch_next_new_test_number(), \
             _patch_validate_test_type_assignments() as mock_validate_test_type_assignments:
         result = asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
@@ -237,7 +248,9 @@ def test_correct_number_of_test_type_assignments():
     mock_session = AsyncMock()
 
     # 3 rows → 3 TestModels, each assigned 2 test types → 6 TestTypeAssignmentModels
-    with _patch_rows(*_get_rows()), _patch_validate_test_type_assignments():
+    with _patch_rows(*_get_rows()), \
+            _patch_next_new_test_number(), \
+            _patch_validate_test_type_assignments():
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     # first add_all call is for tests: one per row
@@ -251,7 +264,9 @@ def test_correct_mapping():
 
     mock_session = AsyncMock()
 
-    with _patch_rows(*_get_rows()), _patch_validate_test_type_assignments():
+    with _patch_rows(*_get_rows()), \
+            _patch_next_new_test_number(), \
+            _patch_validate_test_type_assignments():
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     # mapping is the same for every row, so checking one is enough.
@@ -260,6 +275,41 @@ def test_correct_mapping():
     assert single_test.input == "first"
     assert single_test.expected_output == "y"
     assert single_test.model_output == "z"
+
+
+def test_names_start_at_1_when_none_exist_yet():
+    mock_request, _ = _get_mock_request_with_id()
+
+    mock_session = AsyncMock()
+    mock_session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    with _patch_rows(*_get_rows()), _patch_validate_test_type_assignments():
+        asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
+
+    created_tests = mock_session.add_all.call_args_list[0][0][0]
+    assert [test.name for test in created_tests] == [
+        "New Test 1", "New Test 2", "New Test 3"
+    ]
+
+
+def test_names_continue_globally_from_existing_new_test_names():
+    mock_request, _ = _get_mock_request_with_id()
+
+    mock_session = AsyncMock()
+    # a prior import already created "New Test 1"/"New Test 2"; a manually
+    # renamed test that doesn't match the pattern must be ignored, not
+    # counted, and must not derail the max() calculation
+    mock_session.scalars.return_value = MagicMock(all=MagicMock(
+        return_value=["New Test 1", "New Test 2", "Renamed by a user"]
+    ))
+
+    with _patch_rows(*_get_rows()), _patch_validate_test_type_assignments():
+        asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
+
+    created_tests = mock_session.add_all.call_args_list[0][0][0]
+    assert [test.name for test in created_tests] == [
+        "New Test 3", "New Test 4", "New Test 5"
+    ]
 
 
 def test_database_not_found():

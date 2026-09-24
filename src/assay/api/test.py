@@ -451,8 +451,12 @@ async def create_test_from_dataset(
         session: SessionDep) -> CreateTestCaseFromDatasetResponse:  # pragma: no cover
     """Create test cases in bulk from all rows of an existing dataset.
 
-    Each row in the dataset becomes a separate test case. All created tests share
-    the same optional list of evaluation strategies (`test_type_assignments`).
+    Each row in the dataset becomes a separate test case, named "New Test <n>"
+    (dataset rows have no name of their own to reuse), numbered globally across
+    every test in the system — re-running this endpoint continues the numbering
+    from the highest "New Test <n>" that already exists, rather than restarting
+    at 1 and duplicating a name already in use. All created tests share the same
+    optional list of evaluation strategies (`test_type_assignments`).
 
     `test_type_assignments` is an optional list of evaluation strategies to assign, each with
     any config it needs. Each name must exist in the test types catalogue and satisfy that

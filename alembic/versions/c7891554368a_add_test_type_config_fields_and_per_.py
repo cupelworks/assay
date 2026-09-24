@@ -77,24 +77,24 @@ def _seed_config_fields() -> None:
         "Cosine Similarity": reference_field,
         "Correctness": [
             *reference_field,
-            {"key": "rubric", "label": "Custom correctness rubric (optional)",
+            {"key": "rubric", "label": "Custom correctness rubric",
              "kind": "rubric", "required": False},
         ],
         "Relevance": [
-            {"key": "rubric", "label": "Custom relevance rubric (optional)",
+            {"key": "rubric", "label": "Custom relevance rubric",
              "kind": "rubric", "required": False},
         ],
         "Bias": [
-            {"key": "rubric", "label": "Custom bias rubric (optional)",
+            {"key": "rubric", "label": "Custom bias rubric",
              "kind": "rubric", "required": False},
         ],
         "Toxicity": [
-            {"key": "rubric", "label": "Custom toxicity rubric (optional)",
+            {"key": "rubric", "label": "Custom toxicity rubric",
              "kind": "rubric", "required": False},
         ],
         "Hallucination": [
             *reference_field,
-            {"key": "rubric", "label": "Custom hallucination rubric (optional)",
+            {"key": "rubric", "label": "Custom hallucination rubric",
              "kind": "rubric", "required": False},
         ],
     }
