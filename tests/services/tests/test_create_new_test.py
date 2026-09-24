@@ -8,7 +8,11 @@ from fastapi import HTTPException
 
 from assay.schemas import CreateTestCaseRequest, TestTypeAssignment
 from assay.services import create_new_test, create_new_test_from_dataset
-from assay.services.tests._common import _validate_test_type_assignments
+from assay.services.tests._common import (
+    _check_reference_required_types_have_expected_output_for_rows_or_422,
+    _check_reference_required_types_have_expected_output_or_422,
+    _validate_test_type_assignments,
+)
 
 name = "Test Name"
 model_input = "My Input"
@@ -102,6 +106,29 @@ def test_create_new_test_with_test_names():
         TestTypeAssignment(name="ROUGE"),
         TestTypeAssignment(name="BERTScore"),
     ]
+
+
+def test_create_new_test_raises_422_for_reference_required_type_with_no_expected_output():
+    request = CreateTestCaseRequest(
+        input=model_input,
+        expected_output=None,
+        test_type_assignments=[TestTypeAssignment(name="Exact Match")],
+    )
+
+    mock_session = AsyncMock()
+    catalogue_row = MagicMock()
+    catalogue_row.name = "Exact Match"
+    catalogue_row.config_fields = [
+        {"key": "reference", "label": "Expected output", "kind": "reference", "required": True}
+    ]
+    mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[catalogue_row]))
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(create_new_test(request, mock_session))
+
+    mock_session.commit.assert_not_called()
+    assert exc.value.status_code == 422
+    assert "Exact Match" in str(exc.value.detail)
 
 
 def test_validate_raises_for_unknown_name():
@@ -213,6 +240,99 @@ def test_validate_does_not_check_threshold_format():
     ))  # no raise
 
 
+# -- _check_reference_required_types_have_expected_output_or_422 --
+# _validate_test_type_assignments deliberately never checks a "reference"
+# field (it resolves from expected_output, not config — note 3), so this
+# guard exists specifically to catch the gap that leaves: an assignment
+# needing a reference with no expected_output anywhere to supply one.
+
+def test_check_reference_raises_when_expected_output_missing():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("Exact Match", [
+            {"key": "reference", "label": "Expected output",
+             "kind": "reference", "required": True},
+        ])])
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_check_reference_required_types_have_expected_output_or_422(
+            mock_session, [TestTypeAssignment(name="Exact Match")], None
+        ))
+    assert exc.value.status_code == 422
+    assert "Exact Match" in str(exc.value.detail)
+
+
+def test_check_reference_passes_when_expected_output_present():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("Exact Match", [
+            {"key": "reference", "label": "Expected output",
+             "kind": "reference", "required": True},
+        ])])
+    )
+
+    asyncio.run(_check_reference_required_types_have_expected_output_or_422(
+        mock_session, [TestTypeAssignment(name="Exact Match")], "some answer"
+    ))  # no raise
+
+
+def test_check_reference_passes_for_types_with_no_reference_field():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("Regex Match", [
+            {"key": "pattern", "label": "Regex pattern",
+             "kind": "multiline", "required": True},
+        ])])
+    )
+
+    # Regex Match has no "reference" field at all — missing expected_output
+    # is irrelevant to it, nothing to raise on.
+    asyncio.run(_check_reference_required_types_have_expected_output_or_422(
+        mock_session, [TestTypeAssignment(name="Regex Match", config={"pattern": "x"})], None
+    ))  # no raise
+
+
+# -- _check_reference_required_types_have_expected_output_for_rows_or_422 --
+
+def test_check_reference_for_rows_raises_listing_every_offending_row():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("Exact Match", [
+            {"key": "reference", "label": "Expected output",
+             "kind": "reference", "required": True},
+        ])])
+    )
+    good_row = MagicMock(id=uuid.uuid4(), expected_output="has one")
+    bad_row_1 = MagicMock(id=uuid.uuid4(), expected_output=None)
+    bad_row_2 = MagicMock(id=uuid.uuid4(), expected_output="")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_check_reference_required_types_have_expected_output_for_rows_or_422(
+            mock_session, [TestTypeAssignment(name="Exact Match")],
+            [good_row, bad_row_1, bad_row_2],
+        ))
+    assert exc.value.status_code == 422
+    assert str(bad_row_1.id) in str(exc.value.detail)
+    assert str(bad_row_2.id) in str(exc.value.detail)
+    assert str(good_row.id) not in str(exc.value.detail)
+
+
+def test_check_reference_for_rows_passes_when_every_row_has_one():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("Exact Match", [
+            {"key": "reference", "label": "Expected output",
+             "kind": "reference", "required": True},
+        ])])
+    )
+    rows = [MagicMock(id=uuid.uuid4(), expected_output="present") for _ in range(3)]
+
+    asyncio.run(_check_reference_required_types_have_expected_output_for_rows_or_422(
+        mock_session, [TestTypeAssignment(name="Exact Match")], rows
+    ))  # no raise
+
+
 # -- create_new_test_from_dataset
 
 def _get_mock_request_with_id():
@@ -231,6 +351,17 @@ def _patch_rows(*rows):
 
 def _patch_validate_test_type_assignments():
     return patch("assay.services.tests.create_new_test._validate_test_type_assignments")
+
+
+def _patch_check_reference_required_types_for_rows():
+    # shorthand for tests that don't care about the expected_output/reference
+    # check itself — see test_create_new_test.py's reference-specific tests
+    # for that
+    return patch(
+        "assay.services.tests.create_new_test"
+        "._check_reference_required_types_have_expected_output_for_rows_or_422",
+        new=AsyncMock(),
+    )
 
 
 def _patch_next_new_test_number(start=1):
@@ -288,7 +419,8 @@ def test_correct_number_of_test_type_assignments():
     # 3 rows → 3 TestModels, each assigned 2 test types → 6 TestTypeAssignmentModels
     with _patch_rows(*_get_rows()), \
             _patch_next_new_test_number(), \
-            _patch_validate_test_type_assignments():
+            _patch_validate_test_type_assignments(), \
+            _patch_check_reference_required_types_for_rows():
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     # first add_all call is for tests: one per row
@@ -304,7 +436,8 @@ def test_correct_mapping():
 
     with _patch_rows(*_get_rows()), \
             _patch_next_new_test_number(), \
-            _patch_validate_test_type_assignments():
+            _patch_validate_test_type_assignments(), \
+            _patch_check_reference_required_types_for_rows():
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     # mapping is the same for every row, so checking one is enough.
@@ -321,7 +454,9 @@ def test_names_start_at_1_when_none_exist_yet():
     mock_session = AsyncMock()
     mock_session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
 
-    with _patch_rows(*_get_rows()), _patch_validate_test_type_assignments():
+    with _patch_rows(*_get_rows()), \
+            _patch_validate_test_type_assignments(), \
+            _patch_check_reference_required_types_for_rows():
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     created_tests = mock_session.add_all.call_args_list[0][0][0]
@@ -341,7 +476,9 @@ def test_names_continue_globally_from_existing_new_test_names():
         return_value=["New Test 1", "New Test 2", "Renamed by a user"]
     ))
 
-    with _patch_rows(*_get_rows()), _patch_validate_test_type_assignments():
+    with _patch_rows(*_get_rows()), \
+            _patch_validate_test_type_assignments(), \
+            _patch_check_reference_required_types_for_rows():
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     created_tests = mock_session.add_all.call_args_list[0][0][0]
@@ -399,3 +536,31 @@ def test_unknown_test_type_name():
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     assert exc.value.status_code == 422
+
+
+def test_dataset_import_raises_422_when_any_row_missing_expected_output_for_reference_required_type():
+    mock_request, _ = _get_mock_request_with_id()
+    mock_request.test_type_assignments = [TestTypeAssignment(name="Exact Match")]
+
+    good_row = MagicMock(input="ok", expected_output="present",
+                         model_output="z", id=uuid.uuid4())
+    bad_row = MagicMock(input="missing ref", expected_output=None,
+                        model_output="z", id=uuid.uuid4())
+
+    mock_session = AsyncMock()
+    catalogue_row = MagicMock()
+    catalogue_row.name = "Exact Match"
+    catalogue_row.config_fields = [
+        {"key": "reference", "label": "Expected output", "kind": "reference", "required": True}
+    ]
+    mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[catalogue_row]))
+
+    with _patch_rows(good_row, bad_row), \
+            _patch_validate_test_type_assignments(), \
+            pytest.raises(HTTPException) as exc:
+        asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
+
+    mock_session.commit.assert_not_called()
+    assert exc.value.status_code == 422
+    assert str(bad_row.id) in str(exc.value.detail)
+    assert str(good_row.id) not in str(exc.value.detail)

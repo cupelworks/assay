@@ -143,3 +143,55 @@ def test_modify_test_type_assignments_none_leaves_assignments_untouched():
 
     session.commit.assert_called_once()
     assert response.test_type_assignments == [TestTypeAssignment(name="ROUGE", config=None)]
+
+
+def test_modify_raises_422_when_clearing_expected_output_with_reference_required_type_assigned():
+    mock_test_id = uuid.uuid4()
+
+    mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
+    mock_assignment = MagicMock()
+    mock_assignment.test_type_name = "Exact Match"
+    mock_assignment.config = None
+    mock_test.test_type_assignments = [mock_assignment]
+    # this request only clears expected_output — test_type_assignments isn't
+    # touched at all, so the *existing* Exact Match assignment stays in
+    # effect and must still be caught, not silently skipped because this
+    # particular request doesn't mention assignments
+    mock_request = ModifyTestCaseRequest(expected_output="") # noqa
+    session = _get_session(mock_test)
+    catalogue_row = MagicMock()
+    catalogue_row.name = "Exact Match"
+    catalogue_row.config_fields = [
+        {"key": "reference", "label": "Expected output", "kind": "reference", "required": True}
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[catalogue_row]))
+
+    with pytest.raises(HTTPException) as e:
+        _call_api_orchestrator(mock_test_id, mock_request, session)
+
+    session.commit.assert_not_called()
+    assert e.value.status_code == 422
+    assert "Exact Match" in str(e.value.detail)
+
+
+def test_modify_passes_assigning_reference_required_type_with_existing_expected_output():
+    mock_test_id = uuid.uuid4()
+
+    # mock_test.expected_output is already non-empty ("Testing Expected
+    # Output") and this request doesn't touch it — only assignments change
+    mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
+    mock_request = ModifyTestCaseRequest(
+        test_type_assignments=[TestTypeAssignment(name="Exact Match")],
+    )  # noqa
+    session = _get_session(mock_test)
+    catalogue_row = MagicMock()
+    catalogue_row.name = "Exact Match"
+    catalogue_row.config_fields = [
+        {"key": "reference", "label": "Expected output", "kind": "reference", "required": True}
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[catalogue_row]))
+
+    response = _call_api_orchestrator(mock_test_id, mock_request, session)
+
+    session.commit.assert_called_once()
+    assert response.test_type_assignments == [TestTypeAssignment(name="Exact Match", config=None)]

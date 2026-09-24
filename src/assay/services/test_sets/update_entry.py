@@ -2,13 +2,16 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.schemas import ModifyTestCaseRequest, TestCaseID, TestSetEntryDetails
+from assay.schemas import ModifyTestCaseRequest, TestCaseID, TestSetEntryDetails, TestTypeAssignment
 from assay.services.test_sets._common import (
     _check_test_set_entry_has_no_runs_or_409,
     _find_test_set_entry_in_specific_test_set_or_404,
     _find_test_set_or_404,
 )
-from assay.services.tests._common import _validate_test_type_assignments
+from assay.services.tests._common import (
+    _check_reference_required_types_have_expected_output_or_422,
+    _validate_test_type_assignments,
+)
 from assay.services.tests.update_test import _apply_scalar_updates
 
 
@@ -44,12 +47,30 @@ async def modify_entry_by_id(
         HTTPException: 404 if the test set does not exist, or no entry with that
             ID exists in it.
         HTTPException: 409 if the entry has already been executed at least once.
-        HTTPException: 422 if any provided test type name is unknown or a
-            required config field is missing.
+        HTTPException: 422 if any provided test type name is unknown, a
+            required config field is missing, or the *effective* state
+            after this update would leave a reference-requiring type
+            assigned with no expected_output (e.g. clearing
+            expected_output while Exact Match stays assigned, untouched,
+            from before this request).
     """
     await _find_test_set_or_404(test_set_id, session)
     found = await _find_test_set_entry_in_specific_test_set_or_404(test_set_id, entry_id, session)
     await _check_test_set_entry_has_no_runs_or_409(entry_id, session)
+
+    # Computed from the pre-mutation state, before _apply_scalar_updates
+    # touches `found` — see update_test.py's modify_test_by_id for why.
+    effective_expected_output = (
+        request.expected_output if request.expected_output is not None
+        else found.expected_output
+    )
+    effective_assignments = (
+        request.test_type_assignments if request.test_type_assignments is not None
+        else [TestTypeAssignment(**item) for item in found.test_type_assignments]
+    )
+    await _check_reference_required_types_have_expected_output_or_422(
+        session, effective_assignments, effective_expected_output
+    )
 
     _apply_scalar_updates(found, request)
 

@@ -187,8 +187,8 @@ async def get_test_types(
                         "expected_output": "A concise one-sentence summary.",
                         "model_output": "A concise one-sentence summary.",
                         "test_type_assignments": [
-                            {"name": "ROUGE", "config": None},
-                            {"name": "BERTScore", "config": None},
+                            {"name": "ROUGE", "config": {"threshold": "0.8"}},
+                            {"name": "BERTScore", "config": {"threshold": "0.8"}},
                         ],
                     }
                 }
@@ -207,8 +207,11 @@ async def get_test_types(
         422: {
             "description": (
                 "Validation error — either an unknown field was sent in the request body, "
-                "one or more test type names are not in the catalogue, or an assignment "
-                "is missing a required config field."
+                "one or more test type names are not in the catalogue, an assignment "
+                "is missing a required config field, or a reference-required type "
+                "(e.g. Exact Match, ROUGE) is left with no `expected_output` once this "
+                "update is applied — considering both the request and whatever the test "
+                "case already had for any field this request doesn't touch."
             ),
             "content": {
                 "application/json": {
@@ -228,6 +231,15 @@ async def get_test_types(
                         "unknown_test_type": {
                             "summary": "Unknown test type name",
                             "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "missing_expected_output": {
+                            "summary": "Reference-required type with no expected_output",
+                            "value": {
+                                "detail": (
+                                    "Test types ['Exact Match'] require a non-empty "
+                                    "expected_output, but none was provided"
+                                )
+                            },
                         },
                     }
                 }
@@ -253,7 +265,9 @@ async def update_test(
     Returns the full updated test case so the client does not need a follow-up GET to refresh.
 
     Returns a 404 if no test case with the given ID exists.
-    Returns a 422 if any unknown field is sent or if any test type name is not in the catalogue.
+    Returns a 422 if any unknown field is sent, if any test type name is not in the
+    catalogue, or if — considering the effective state after this update — a type
+    requiring a reference is assigned while `expected_output` is empty.
     """
     return await modify_test_by_id(test_case_id, request, session)
 
@@ -272,8 +286,8 @@ async def update_test(
                         "expected_output": "A concise one-sentence summary.",
                         "model_output": "A concise one-sentence summary.",
                         "test_type_assignments": [
-                            {"name": "ROUGE", "config": None},
-                            {"name": "BERTScore", "config": None},
+                            {"name": "ROUGE", "config": {"threshold": "0.8"}},
+                            {"name": "BERTScore", "config": {"threshold": "0.8"}},
                         ],
                     }
                 }
@@ -321,8 +335,8 @@ async def get_specific_test(
                                 "expected_output": "A concise one-sentence summary.",
                                 "model_output": "A concise one-sentence summary.",
                                 "test_type_assignments": [
-                                    {"name": "ROUGE", "config": None},
-                                    {"name": "BERTScore", "config": None},
+                                    {"name": "ROUGE", "config": {"threshold": "0.8"}},
+                                    {"name": "BERTScore", "config": {"threshold": "0.8"}},
                                 ],
                             }
                         ],
@@ -364,8 +378,8 @@ async def get_all_tests(
                         "expected_output": "A concise one-sentence summary.",
                         "model_output": None,
                         "test_type_assignments": [
-                            {"name": "ROUGE", "config": None},
-                            {"name": "BERTScore", "config": None},
+                            {"name": "ROUGE", "config": {"threshold": "0.8"}},
+                            {"name": "BERTScore", "config": {"threshold": "0.8"}},
                         ],
                     }
                 }
@@ -373,11 +387,25 @@ async def get_all_tests(
         },
         422: {
             "description": "One or more test type names are not in the catalogue, "
-                           "or an assignment is missing a required config field.",
+                           "an assignment is missing a required config field, or a "
+                           "type requiring a reference (e.g. Exact Match, ROUGE) is "
+                           "assigned while `expected_output` is empty.",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Unknown test types: ['Invalid Type']"
+                    "examples": {
+                        "unknown_test_type": {
+                            "summary": "Unknown test type name",
+                            "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "missing_expected_output": {
+                            "summary": "Reference-required type with no expected_output",
+                            "value": {
+                                "detail": (
+                                    "Test types ['Exact Match'] require a non-empty "
+                                    "expected_output, but none was provided"
+                                )
+                            },
+                        },
                     }
                 }
             },
@@ -400,7 +428,9 @@ async def create_test_manually(
     otherwise leave it `null` and it will be filled in when the test is run.
     `test_type_assignments` is an optional list of evaluation strategies to assign, each with
     any config it needs. Each name must exist in the test types catalogue and satisfy that
-    type's required config fields — a 422 is returned otherwise.
+    type's required config fields — a 422 is returned otherwise. A type with a required
+    reference field (e.g. Exact Match, ROUGE) also requires a non-empty `expected_output`
+    on this same request — a 422 is returned if one isn't provided.
 
     On success, returns the created test case with its generated `id` and all input fields.
     """
@@ -454,11 +484,27 @@ async def create_test_manually(
         },
         422: {
             "description": "One or more test type names are not in the catalogue, "
-                           "or an assignment is missing a required config field.",
+                           "an assignment is missing a required config field, or a "
+                           "type requiring a reference (e.g. Exact Match, ROUGE) is "
+                           "assigned while one or more dataset rows have an empty "
+                           "`expected_output`.",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Unknown test types: ['Invalid Type']"
+                    "examples": {
+                        "unknown_test_type": {
+                            "summary": "Unknown test type name",
+                            "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "missing_expected_output": {
+                            "summary": "Reference-required type with rows missing expected_output",
+                            "value": {
+                                "detail": (
+                                    "Test types ['Exact Match'] require a non-empty "
+                                    "expected_output, but Dataset Rows with ids "
+                                    "['11111111-1111-1111-1111-111111111111'] have none"
+                                )
+                            },
+                        },
                     }
                 }
             },
@@ -480,7 +526,10 @@ async def create_test_from_dataset(
 
     `test_type_assignments` is an optional list of evaluation strategies to assign, each with
     any config it needs. Each name must exist in the test types catalogue and satisfy that
-    type's required config fields — a 422 is returned otherwise.
+    type's required config fields — a 422 is returned otherwise. A type with a required
+    reference field (e.g. Exact Match, ROUGE) also requires every row in the dataset to
+    already have a non-empty `expected_output` — a 422 is returned listing every row that
+    doesn't, all-or-nothing.
 
     Returns a 404 if the dataset does not exist or has no rows.
 

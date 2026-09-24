@@ -368,7 +368,7 @@ async def delete_a_test_set(
                         "model_output": "Your refund for order #4471 has been "
                                          "issued.",
                         "test_type_assignments": [
-                            {"name": "Cosine Similarity", "config": None},
+                            {"name": "Cosine Similarity", "config": {"threshold": "0.75"}},
                             {
                                 "name": "Toxicity",
                                 "config": {"rubric": "Flag anything that could read as rude."},
@@ -418,12 +418,29 @@ async def delete_a_test_set(
             },
         },
         422: {
-            "description": "One or more test type names are not in the catalogue, "
-                           "or an assignment is missing a required config field.",
+            "description": (
+                "One or more test type names are not in the catalogue, an assignment "
+                "is missing a required config field, or a reference-required type "
+                "(e.g. Exact Match, ROUGE) is left with no `expected_output` once this "
+                "update is applied — considering both the request and whatever the "
+                "entry already had for any field this request doesn't touch."
+            ),
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Unknown test types: ['Invalid Type']"
+                    "examples": {
+                        "unknown_test_type": {
+                            "summary": "Unknown test type name",
+                            "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "missing_expected_output": {
+                            "summary": "Reference-required type with no expected_output",
+                            "value": {
+                                "detail": (
+                                    "Test types ['Exact Match'] require a non-empty "
+                                    "expected_output, but none was provided"
+                                )
+                            },
+                        },
                     }
                 }
             },
@@ -449,7 +466,10 @@ async def update_a_test_set_entry(
     left unchanged. For `test_type_assignments` specifically, omitting it leaves the
     snapshot list untouched, while `[]` clears it. Each provided name must exist in
     the test types catalogue and satisfy that type's required config fields — a 422
-    is returned otherwise.
+    is returned otherwise. Considering the effective state after this update, a type
+    requiring a reference (e.g. Exact Match, ROUGE) also requires a non-empty
+    `expected_output` — a 422 is returned if that's not the case, even if this
+    particular request doesn't touch either field directly.
 
     Returns the full updated entry, so no follow-up GET is needed.
     """
@@ -475,7 +495,7 @@ async def update_a_test_set_entry(
                         "model_output": "Your refund for order #4471 has been "
                                          "issued.",
                         "test_type_assignments": [
-                            {"name": "Cosine Similarity", "config": None},
+                            {"name": "Cosine Similarity", "config": {"threshold": "0.75"}},
                             {
                                 "name": "Toxicity",
                                 "config": {"rubric": "Flag anything that could read as rude."},
@@ -554,7 +574,7 @@ async def get_single_test_set_entry(
                                 "model_output": "Your refund for order #4471 has been "
                                                  "issued.",
                                 "test_type_assignments": [
-                                    {"name": "Cosine Similarity", "config": None},
+                                    {"name": "Cosine Similarity", "config": {"threshold": "0.75"}},
                                     {
                                         "name": "Toxicity",
                                         "config": {"rubric": "Flag anything rude."},
@@ -573,7 +593,7 @@ async def get_single_test_set_entry(
                                 "model_output": "I'm sorry, I can't process refunds "
                                                  "without an order number.",
                                 "test_type_assignments": [
-                                    {"name": "Cosine Similarity", "config": None},
+                                    {"name": "Cosine Similarity", "config": {"threshold": "0.75"}},
                                 ],
                             },
                         ],
@@ -728,7 +748,7 @@ async def add_tests_to_test_set(
             "description": "No test set exists with the given ID.",
             "content": {
                 "application/json": {
-                    "example": {"detail": "Test set with id <example-id> not found"},
+                    "example": {"detail": "Test set with ID '<test_set_id>' not found"},
                     "schema": {
                         "type": "object",
                         "properties": {"detail": {"type": "string"}},

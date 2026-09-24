@@ -498,7 +498,7 @@ async def get_test_set_execution_run_metadata(
                         "model_output": "Hello, Alice!",
                         "test_type_assignments": [
                             {"name": "Exact Match", "config": None},
-                            {"name": "BLEU", "config": None},
+                            {"name": "BLEU", "config": {"threshold": "0.6"}},
                         ],
                         "test_case_snapshot_at": {
                             "snapshot_at": "2026-07-15T16:40:02.552210"

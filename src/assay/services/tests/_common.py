@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
 
-from assay.models import ConfigFieldKind, TestModel, TestTypesModel
+from assay.models import ConfigFieldKind, DatasetRowModel, TestModel, TestTypesModel
 from assay.schemas import TestTypeAssignment
 
 
@@ -175,3 +175,133 @@ async def _validate_test_type_assignments(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail="; ".join(problems),
     )
+
+
+async def _find_test_type_names_needing_reference(
+        session: AsyncSession,
+        names: list[str],
+) -> set[str]:
+    """Return which of the given test type names have a required "reference"
+    config field.
+
+    A "reference"-kind field never appears in an assignment's own config
+    (see docs/test_type_config/dev_notes.md note 3) — it always resolves to
+    expected_output instead. This is the shared lookup behind
+    _check_reference_required_types_have_expected_output_or_422, factored
+    out so the dataset-import bulk path can reuse one catalogue query
+    across every row instead of repeating it per row.
+
+    Args:
+        session: Active async database session.
+        names: Test type names to check. Unknown names are silently
+            ignored — callers are expected to have already validated
+            existence via _validate_test_type_assignments.
+
+    Returns:
+        The subset of `names` whose catalogue entry has a required
+        "reference" config field.
+    """
+    found = (await session.execute(
+        select(TestTypesModel.name, TestTypesModel.config_fields)
+        .where(TestTypesModel.name.in_(names))
+    )).all()
+
+    return {
+        row.name for row in found
+        if any(
+            field["kind"] == ConfigFieldKind.reference and field["required"]
+            for field in row.config_fields
+        )
+    }
+
+
+async def _check_reference_required_types_have_expected_output_or_422(
+        session: AsyncSession,
+        assignments: list[TestTypeAssignment],
+        expected_output: str | None,
+) -> None:
+    """Raise 422 if any assigned type needs a "reference" but expected_output
+    is empty.
+
+    Nothing else in the system catches this: a "reference"-kind config
+    field is deliberately excluded from _validate_test_type_assignments'
+    per-assignment check (it resolves from expected_output, not config),
+    so without this guard a test/entry can be created or updated with e.g.
+    Exact Match assigned and no expected_output at all — a run against it
+    would sit pending forever with no way to ever produce a score, the
+    exact failure mode every other required-field guard in this module
+    already rejects upfront.
+
+    Callers pass the *effective* expected_output and assignments the
+    write will result in — not just what this one request happens to
+    touch — so that e.g. clearing expected_output on a PATCH while
+    leaving an already-assigned Exact Match untouched is caught too, not
+    just the case where both change in the same request.
+
+    Args:
+        session: Active async database session.
+        assignments: The effective test type assignments after this write.
+        expected_output: The effective expected_output after this write.
+
+    Raises:
+        HTTPException: 422 listing every assigned type that needs a
+            reference, if expected_output is empty.
+    """
+    if expected_output or not assignments:
+        return
+
+    needing_reference = await _find_test_type_names_needing_reference(
+        session, [assignment.name for assignment in assignments]
+    )
+
+    if needing_reference:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Test types {sorted(needing_reference)} require a "
+                   f"non-empty expected_output, but none was provided",
+        )
+
+
+async def _check_reference_required_types_have_expected_output_for_rows_or_422(
+        session: AsyncSession,
+        assignments: list[TestTypeAssignment],
+        rows: list[DatasetRowModel],
+) -> None:
+    """Bulk variant of _check_reference_required_types_have_expected_output_or_422
+    for dataset import.
+
+    The same assignments apply to every row created from a dataset, but
+    each row has its own expected_output — so unlike the single-item
+    version, this has to check every row individually. Reports every
+    offending row together in one 422 (all-or-nothing, no partial import),
+    the same bulk-guard convention used throughout this codebase, rather
+    than failing on the first bad row found.
+
+    Args:
+        session: Active async database session.
+        assignments: The test type assignments shared by every row.
+        rows: Dataset rows about to become tests, each with its own
+            expected_output.
+
+    Raises:
+        HTTPException: 422 listing every assigned type that needs a
+            reference and every row missing one, if any row's
+            expected_output is empty while such a type is assigned.
+    """
+    if not assignments:
+        return
+
+    needing_reference = await _find_test_type_names_needing_reference(
+        session, [assignment.name for assignment in assignments]
+    )
+    if not needing_reference:
+        return
+
+    rows_missing_expected_output = [row.id for row in rows if not row.expected_output]
+    if rows_missing_expected_output:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Test types {sorted(needing_reference)} require a "
+                   f"non-empty expected_output, but Dataset Rows with ids "
+                   f"{[str(row_id) for row_id in rows_missing_expected_output]} have none",
+        )

@@ -13,7 +13,11 @@ from assay.schemas import (
     TestCaseID,
 )
 from assay.services.datasets._common import _get_all_rows_or_404, _get_dataset_or_404
-from assay.services.tests._common import _validate_test_type_assignments
+from assay.services.tests._common import (
+    _check_reference_required_types_have_expected_output_for_rows_or_422,
+    _check_reference_required_types_have_expected_output_or_422,
+    _validate_test_type_assignments,
+)
 
 _NEW_TEST_NAME_PATTERN = re.compile(r"^New Test (\d+)$")
 
@@ -55,8 +59,9 @@ async def create_new_test(
     """Orchestrates test case creation: persists the model and returns the result.
 
     Validates test type assignments against the catalogue before inserting.
-    Raises HTTP 422 if any name is unknown or a required config field is
-    missing.
+    Raises HTTP 422 if any name is unknown, a required config field is
+    missing, or an assigned type needs a reference (expected_output) that
+    wasn't provided.
 
     Args:
         request: Request containing the test name, input, optional expected/model outputs,
@@ -68,6 +73,9 @@ async def create_new_test(
     """
     if request.test_type_assignments:
         await _validate_test_type_assignments(session, request.test_type_assignments)
+        await _check_reference_required_types_have_expected_output_or_422(
+            session, request.test_type_assignments, request.expected_output
+        )
 
     test = TestModel(
         id=uuid.uuid4(),
@@ -122,14 +130,21 @@ async def create_new_test_from_dataset(
 
     Raises:
         HTTPException: 404 if the dataset or its rows are not found.
-        HTTPException: 422 if any test type name is unknown or a required
-            config field is missing.
+        HTTPException: 422 if any test type name is unknown, a required
+            config field is missing, or any row's expected_output is empty
+            while a reference-requiring type is assigned — the same
+            assignments apply to every row, so this checks every row's own
+            expected_output, not just the request's, and reports every
+            offending row together (all-or-nothing, no partial import).
     """
     await _get_dataset_or_404(request.id, session)
     rows = await _get_all_rows_or_404(request.id, session)
 
     if request.test_type_assignments:
         await _validate_test_type_assignments(session, request.test_type_assignments)
+        await _check_reference_required_types_have_expected_output_for_rows_or_422(
+            session, request.test_type_assignments, rows
+        )
 
     next_number = await _next_new_test_number(session)
 

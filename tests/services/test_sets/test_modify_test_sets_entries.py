@@ -177,3 +177,86 @@ def test_general_happy_path_with_test_type_assignments_on_none():
     assert response.expected_output == "Old expected output"
     session.commit.assert_called_once()
     session.execute.assert_not_called()
+
+
+def test_raises_422_when_clearing_expected_output_with_reference_required_type_assigned():
+    entry_id = uuid.uuid4()
+
+    request = MagicMock()
+    # this request only clears expected_output — test_type_assignments
+    # isn't touched at all, so the *existing* Exact Match assignment on
+    # the entry stays in effect and must still be caught
+    request.test_type_assignments = None
+    request.expected_output = ""
+    request.name = None
+    request.input = None
+    request.model_output = None
+
+    session = AsyncMock()
+    session.scalar.return_value = TestSetEntryModel(
+        id=entry_id,
+        test_id=uuid.uuid4(),
+        test_type_assignments=[{"name": "Exact Match", "config": None}],
+        name="",
+        input="",
+        expected_output="Old expected output",
+        model_output="",
+    )
+    catalogue_row = MagicMock()
+    catalogue_row.name = "Exact Match"
+    catalogue_row.config_fields = [
+        {"key": "reference", "label": "Expected output", "kind": "reference", "required": True}
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[catalogue_row]))
+
+    with patch(_PATCH_FIND_TEST_SET_OR_404), \
+            patch(_PATCH_CHECK_TEST_SET_ENTRY_HAS_NO_RUNS_OR_409), \
+            pytest.raises(HTTPException) as e:
+        asyncio.run(
+            modify_entry_by_id(
+                uuid.uuid4(), entry_id, request, session
+            )
+        )
+
+    session.commit.assert_not_called()
+    assert e.value.status_code == 422
+    assert "Exact Match" in str(e.value.detail)
+
+
+def test_passes_assigning_reference_required_type_with_existing_expected_output():
+    entry_id = uuid.uuid4()
+
+    request = MagicMock()
+    request.test_type_assignments = [TestTypeAssignment(name="Exact Match")]
+    request.expected_output = None
+    request.name = None
+    request.input = None
+    request.model_output = None
+
+    session = AsyncMock()
+    session.scalar.return_value = TestSetEntryModel(
+        id=entry_id,
+        test_id=uuid.uuid4(),
+        test_type_assignments=[],
+        name="",
+        input="",
+        expected_output="Existing expected output",
+        model_output="",
+    )
+    catalogue_row = MagicMock()
+    catalogue_row.name = "Exact Match"
+    catalogue_row.config_fields = [
+        {"key": "reference", "label": "Expected output", "kind": "reference", "required": True}
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[catalogue_row]))
+
+    with patch(_PATCH_FIND_TEST_SET_OR_404), \
+            patch(_PATCH_CHECK_TEST_SET_ENTRY_HAS_NO_RUNS_OR_409):
+        response = asyncio.run(
+            modify_entry_by_id(
+                uuid.uuid4(), entry_id, request, session
+            )
+        )
+
+    session.commit.assert_called_once()
+    assert response.test_type_assignments == [TestTypeAssignment(name="Exact Match", config=None)]

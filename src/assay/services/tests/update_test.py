@@ -4,7 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestModel, TestSetEntryModel, TestTypeAssignmentModel
 from assay.schemas import CreateTestCaseResponse, ModifyTestCaseRequest, TestTypeAssignment
-from assay.services.tests._common import _find_test_by_id_or_404, _validate_test_type_assignments
+from assay.services.tests._common import (
+    _check_reference_required_types_have_expected_output_or_422,
+    _find_test_by_id_or_404,
+    _validate_test_type_assignments,
+)
 
 
 def _apply_scalar_updates(
@@ -81,10 +85,34 @@ async def modify_test_by_id(
 
     Raises:
         HTTPException: 404 if no test case with the given ID exists.
-        HTTPException: 422 if any provided test type name is unknown or a
-            required config field is missing.
+        HTTPException: 422 if any provided test type name is unknown, a
+            required config field is missing, or the *effective* state
+            after this update — the new value if this request changes it,
+            the existing one otherwise — would leave a reference-requiring
+            type assigned with no expected_output (e.g. clearing
+            expected_output while Exact Match stays assigned, untouched,
+            from before this request).
     """
     found = await _find_test_by_id_or_404(test_case_id, session)
+
+    # Computed from the pre-mutation state, before _apply_scalar_updates /
+    # _apply_test_type_assignments_update touch `found` — this is what the
+    # test will look like once this request is applied, whether or not
+    # this particular request is the one changing either field.
+    effective_expected_output = (
+        request.expected_output if request.expected_output is not None
+        else found.expected_output
+    )
+    effective_assignments = (
+        request.test_type_assignments if request.test_type_assignments is not None
+        else [
+            TestTypeAssignment(name=a.test_type_name, config=a.config)
+            for a in found.test_type_assignments
+        ]
+    )
+    await _check_reference_required_types_have_expected_output_or_422(
+        session, effective_assignments, effective_expected_output
+    )
 
     _apply_scalar_updates(found, request)
     await _apply_test_type_assignments_update(found, request, session)
