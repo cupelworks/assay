@@ -27,9 +27,16 @@ class RunStatus(BaseModel):
     status: TestStatus = Field(
         ...,
         description=(
-            'Current lifecycle status of the run: `Pending` (created but not '
-            'yet executed), `Running`, `Completed`, or `Failed`. A newly '
-            'created run is always `Pending`'
+            'Current status of the run — lifecycle up to a point, then the '
+            'outcome itself. `Pending` (created but not yet executed) and '
+            '`Running` are the only non-terminal values; a newly created run '
+            'is always `Pending`. The terminal values are a roll-up of every '
+            'assigned test type\'s own pass/fail (see `results`): `Green` '
+            '(every assigned type passed), `Amber` (some passed, some '
+            'didn\'t), `Red` (every assigned type was evaluated and none '
+            'passed), or `NotRan` (nothing could be attempted at all — the '
+            'model couldn\'t be called, the entry couldn\'t be read — the '
+            'only status `error` is ever set for).'
         ),
     )
 
@@ -44,14 +51,51 @@ class RunCreationDate(BaseModel):
     )
 
 
-class RunScores(BaseModel):
-    scores: dict[str, float] | None = Field(
+class TestTypeResult(BaseModel):
+    passed: bool = Field(
         ...,
         description=(
-            'Per-metric scores produced when the run completed, keyed by metric '
-            'name (e.g. `{"exact_match": 1.0, "bleu": 0.42}`). Populated only once '
-            'the run reaches `Completed`; mutually exclusive with `error` — a run '
-            'either scores successfully or fails, never both.'
+            'Whether this test type\'s own pass criterion was met — exact/regex/'
+            'substring match for `deterministic` types, score vs. the type\'s own '
+            '`threshold` config field for `nlp_metric` types, or the judge\'s own '
+            'verdict for `llm_as_judge` types. Always present; every test type '
+            'must resolve to a boolean, regardless of whether it also produces '
+            'a `score`.'
+        ),
+    )
+    score: float | None = Field(
+        ...,
+        description=(
+            'The raw numeric result, when this test type produces one — always '
+            'for `deterministic` and `nlp_metric` types, sometimes for '
+            '`llm_as_judge` types. Null when the type has no natural score '
+            '(e.g. a judge verdict with nothing to reduce to a number) or when '
+            'this type failed to evaluate at all (see `detail`).'
+        ),
+    )
+    detail: str | None = Field(
+        ...,
+        description=(
+            'Free text alongside the result — an `llm_as_judge` type\'s '
+            'rationale for its verdict, or this specific type\'s own error '
+            'message if it individually failed to evaluate (e.g. a judge API '
+            'timeout) while the rest of the run\'s other assigned types '
+            'proceeded normally. Null when there\'s nothing to add.'
+        ),
+    )
+
+
+class RunResults(BaseModel):
+    results: dict[str, TestTypeResult] | None = Field(
+        ...,
+        description=(
+            'Per-test-type results, keyed by assigned test type name (e.g. '
+            '`{"ROUGE": {"passed": true, "score": 0.81, "detail": null}, '
+            '"Toxicity": {"passed": false, "score": null, "detail": "..."}}`. '
+            'Populated once the run reaches `Green`, `Amber`, or `Red` — one '
+            'entry per test type that was assigned to the test/entry this run '
+            'targeted. Null while `Pending`/`Running`, and for `NotRan` (see '
+            '`error` instead).'
         ),
     )
 
@@ -60,9 +104,13 @@ class RunError(BaseModel):
     error: str | None = Field(
         ...,
         description=(
-            'Error message describing why the run failed. Populated instead of '
-            '`scores` when the run reaches `Failed`; mutually exclusive with '
-            '`scores`.'
+            'Error message describing why the run could not be executed at '
+            'all — the model couldn\'t be called, the entry couldn\'t be read. '
+            'Populated only when the run reaches `NotRan`; mutually exclusive '
+            'with `results`, which stays null in that case. Never set for an '
+            'individual test type failing its own pass criterion — that shows '
+            'up as that type\'s own `results[name].detail` instead, alongside '
+            'whatever other types did produce a result.'
         ),
     )
 
@@ -74,7 +122,7 @@ class RunExecutionDate(BaseModel):
             'Timestamp when the run finished executing, successfully or not — '
             'distinct from `created_at`, which marks when the run was enqueued '
             'as `Pending`. Set once the run reaches a terminal status '
-            '(`Completed` or `Failed`).'
+            '(`Green`, `Amber`, `Red`, or `NotRan`).'
         ),
     )
 
@@ -90,7 +138,7 @@ class PaginatedStandaloneRunCreationMetadata(Pagination):
     items: list[StandaloneRunCreationMetadata]
 
 
-class StandaloneRunDetails(StandaloneRunCreationMetadata, RunScores, RunError, RunExecutionDate):
+class StandaloneRunDetails(StandaloneRunCreationMetadata, RunResults, RunError, RunExecutionDate):
     pass
 
 
@@ -189,7 +237,7 @@ class PaginatedTestSetExecutionRunMetadata(Pagination):
     items: list[TestSetExecutionRunMetadata]
 
 
-class TestSetExecutionRunDetails(TestSetExecutionRunMetadata, RunScores, RunError,
+class TestSetExecutionRunDetails(TestSetExecutionRunMetadata, RunResults, RunError,
                                  RunExecutionDate, CreateTestCaseRequest):
     test_case_id: TestCaseID
     test_set_id: TestSetID
@@ -292,7 +340,7 @@ class PaginatedTestPlanExecutionRunMetadata(Pagination):
     items: list[TestPlanExecutionRunMetadata]
 
 
-class TestPlanExecutionRunDetails(TestPlanExecutionRunMetadata, RunScores, RunError,
+class TestPlanExecutionRunDetails(TestPlanExecutionRunMetadata, RunResults, RunError,
                                  RunExecutionDate, CreateTestCaseRequest):
     test_case_id: TestCaseID
     test_set_id: TestSetID | None

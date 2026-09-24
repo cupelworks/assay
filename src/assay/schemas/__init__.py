@@ -79,7 +79,7 @@ from assay.schemas.runs import (
     RunID,
     RunMetadata,
     RunOrigin,
-    RunScores,
+    RunResults,
     RunStatus,
     StandaloneRunCreationMetadata,
     StandaloneRunDetails,
@@ -98,6 +98,7 @@ from assay.schemas.runs import (
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
     TestSetReplayedExecutionID,
+    TestTypeResult,
 )
 
 __all__ = [
@@ -148,7 +149,7 @@ __all__ = [
     "RunExecutionDate",
     "RunMetadata",
     "RunOrigin",
-    "RunScores",
+    "RunResults",
     "RunStatus",
     "StandaloneRunCreationMetadata",
     "StandaloneRunDetails",
@@ -182,5 +183,6 @@ __all__ = [
     "TestSetReplayedExecutionCreationMetadata",
     "TestSetReplayedExecutionID",
     "TestTypeAssignment",
+    "TestTypeResult",
     "TestTypesSchema",
 ]

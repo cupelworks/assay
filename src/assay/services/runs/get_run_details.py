@@ -52,9 +52,9 @@ async def get_run_details_by_test_and_run_id(
         session: Active async database session.
 
     Returns:
-        The run's id, status, created_at, and test_case_id, plus scores,
+        The run's id, status, created_at, and test_case_id, plus results,
         error, and executed_at — the latter three are null until the run
-        reaches a terminal status (`Completed` or `Failed`).
+        reaches a terminal status (`Green`, `Amber`, `Red`, or `NotRan`).
 
     Raises:
         HTTPException: 404 if the test doesn't exist, the run doesn't
@@ -75,7 +75,7 @@ async def get_run_details_by_test_and_run_id(
         status=found.status,
         created_at=found.created_at,
         test_case_id=TestCaseID(id=found.test_id),
-        scores=found.scores,
+        results=found.results,
         error=found.error,
         executed_at=found.executed_at,
     )
@@ -108,7 +108,7 @@ async def get_run_details_by_test_set_execution_and_run_id(
 
     Returns:
         The run's id, status, created_at, test_set_entry_id, and
-        test_set_execution_id, plus scores, error, and executed_at (null
+        test_set_execution_id, plus results, error, and executed_at (null
         until the run reaches a terminal status), plus the snapshotted
         entry it ran against — test_case_id, name, input, expected_output,
         model_output, test_type_assignments, and test_case_snapshot_at. The
@@ -137,7 +137,7 @@ async def get_run_details_by_test_set_execution_and_run_id(
             TestRunModel.status,
             TestRunModel.created_at,
             TestRunModel.test_set_entry_id,
-            TestRunModel.scores,
+            TestRunModel.results,
             TestRunModel.error,
             TestRunModel.executed_at,
             TestSetEntryModel.test_id,
@@ -162,7 +162,7 @@ async def get_run_details_by_test_set_execution_and_run_id(
         created_at=test_run.created_at,
         test_set_entry_id=TestSetEntryID(id=test_run.test_set_entry_id),
         test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
-        scores=test_run.scores,
+        results=test_run.results,
         error=test_run.error,
         executed_at=test_run.executed_at,
         test_case_id=TestCaseID(id=test_run.test_id),
@@ -204,7 +204,7 @@ async def get_run_details_by_test_plan_execution_and_run_id(
 
     Returns:
         The run's id, status, created_at, test_set_entry_id, and
-        test_plan_execution_id, plus scores, error, and executed_at (null
+        test_plan_execution_id, plus results, error, and executed_at (null
         until the run reaches a terminal status), plus the snapshotted
         entry it ran against — test_case_id, name, input, expected_output,
         model_output, test_type_assignments, and test_case_snapshot_at — and
@@ -242,7 +242,7 @@ async def get_run_details_by_test_plan_execution_and_run_id(
             TestRunModel.status,
             TestRunModel.created_at,
             TestRunModel.test_set_entry_id,
-            TestRunModel.scores,
+            TestRunModel.results,
             TestRunModel.error,
             TestRunModel.executed_at,
             TestSetEntryModel.test_id,
@@ -268,7 +268,7 @@ async def get_run_details_by_test_plan_execution_and_run_id(
         created_at=test_run.created_at,
         test_set_entry_id=TestSetEntryID(id=test_run.test_set_entry_id),
         test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
-        scores=test_run.scores,
+        results=test_run.results,
         error=test_run.error,
         executed_at=test_run.executed_at,
         test_case_id=TestCaseID(id=test_run.test_id),

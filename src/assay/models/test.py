@@ -136,8 +136,10 @@ if TYPE_CHECKING:
 class TestStatus(StrEnum):
     pending = "Pending"
     running = "Running"
-    completed = "Completed"
-    failed = "Failed"
+    green = "Green"
+    amber = "Amber"
+    red = "Red"
+    not_ran = "NotRan"
 
 
 class TestTypes(StrEnum):
@@ -590,9 +592,16 @@ class TestRunModel(Base):
         the same TestSetEntryModel can accumulate runs from both paths over
         its lifetime, across different trigger events.
 
-    Results (scores, error) are written back to this record on completion.
-    Statistical verifications produced post-run are linked via the
-    statistical_verifications relationship.
+    Results are written back to this record once execution reaches a
+    terminal status. status itself is the outcome, not just the lifecycle
+    stage: Green (every assigned test type passed), Amber (some passed,
+    some didn't), and Red (every assigned type was evaluated and none
+    passed) are all backed by results, one entry per assigned test type
+    keyed by name. NotRan means nothing could be attempted at all (the
+    model couldn't be called, the entry couldn't be read) — error carries
+    the reason, and results stays null; NotRan is the only status error is
+    ever set for. Statistical verifications produced post-run are linked
+    via the statistical_verifications relationship.
     """
 
     __tablename__ = "test_runs"
@@ -640,9 +649,13 @@ class TestRunModel(Base):
         DateTime, default=lambda: datetime.now().astimezone()
     )
 
-    # Populated on completion. scores is a dict of {metric_name: score}.
-    # error is set instead of scores if the run failed.
-    scores: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Populated once status reaches Green/Amber/Red. results is
+    # {type_name: {"passed": bool, "score": float | None, "detail": str | None}},
+    # one entry per assigned test type. error is only ever set for NotRan —
+    # a run-level failure where no per-type result exists at all, distinct
+    # from an individual type failing its own pass criterion (which shows
+    # up as that type's own results[type_name]["detail"] instead).
+    results: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

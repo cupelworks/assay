@@ -30,7 +30,8 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                 "enqueues the run — it does not call the model, score anything, "
                 "or write back results. `status` is always `Pending` in the "
                 "response; a separate, later mechanism promotes the run to "
-                "`Running`, `Completed`, or `Failed` once it actually executes."
+                "`Running`, then a terminal outcome (`Green`, `Amber`, `Red`, "
+                "or `NotRan`) once it actually executes."
             ),
             "content": {
                 "application/json": {
@@ -120,7 +121,7 @@ async def run_standalone_test(
                         "items": [
                             {
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-                                "status": "Completed",
+                                "status": "Green",
                                 "created_at": "2026-07-14T18:03:21.123456",
                                 "test_case_id": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
@@ -183,23 +184,23 @@ async def get_standalone_run_metadata(
         200: {
             "description": (
                 "Full details for the standalone run, including its "
-                "post-execution results. `scores`, `error`, and "
+                "post-execution results. `results`, `error`, and "
                 "`executed_at` are null until the run reaches a terminal "
-                "status (`Completed` or `Failed`) — this example shows a "
-                "completed run with scores populated."
+                "status (`Green`, `Amber`, `Red`, or `NotRan`) — this "
+                "example shows a run where every assigned test type passed."
             ),
             "content": {
                 "application/json": {
                     "example": {
                         "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-                        "status": "Completed",
+                        "status": "Green",
                         "created_at": "2026-07-14T18:03:21.123456",
                         "test_case_id": {
                             "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                         },
-                        "scores": {
-                            "exact_match": 1.0,
-                            "bleu": 0.42
+                        "results": {
+                            "Exact Match": {"passed": True, "score": 1.0, "detail": None},
+                            "BLEU": {"passed": True, "score": 0.42, "detail": None},
                         },
                         "error": None,
                         "executed_at": "2026-07-14T18:03:24.981022",
@@ -264,9 +265,9 @@ async def get_standalone_run_details(
       of test A through test B's URL.
 
     Returns the run's `id`, `status`, `created_at`, and `test_case_id`,
-    plus `scores`, `error`, and `executed_at` — the latter three are null
-    until the run reaches a terminal status (`Completed` or `Failed`), and
-    `scores`/`error` are mutually exclusive even then: a run either scores
-    successfully or fails, never both.
+    plus `results`, `error`, and `executed_at` — the latter three are null
+    until the run reaches a terminal status (`Green`, `Amber`, `Red`, or
+    `NotRan`), and `results`/`error` are mutually exclusive even then:
+    `error` is only ever set for `NotRan`, `results` for the other three.
     """
     return await get_run_details_by_test_and_run_id(test_id, test_run_id, session)

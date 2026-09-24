@@ -19,6 +19,7 @@ from assay.schemas import (
     TestSetExecutionID,
     TestSetExecutionRunDetails,
     TestSetID,
+    TestTypeResult,
 )
 from assay.services import (
     get_run_details_by_test_and_run_id,
@@ -79,14 +80,17 @@ def test_get_run_details_by_test_and_run_id_happy_path():
     
     session = AsyncMock()
 
-    scores = {"bleu": 0.5, "rogue": 0.9}
+    results = {
+        "BLEU": {"passed": True, "score": 0.5, "detail": None},
+        "ROUGE": {"passed": True, "score": 0.9, "detail": None},
+    }
     
     returned_test_run_model_for_validation = TestRunModel(
         id=test_run_id,
-        status=TestStatus.completed,
+        status=TestStatus.green,
         created_at=datetime.now().astimezone(),
         test_id=test_id,
-        scores=scores,
+        results=results,
         error=None,
         executed_at=datetime.now().astimezone(),
     )
@@ -105,7 +109,7 @@ def test_get_run_details_by_test_and_run_id_happy_path():
         status=returned_test_run_model_for_validation.status,
         created_at=returned_test_run_model_for_validation.created_at,
         test_case_id=TestCaseID(id=test_id),
-        scores=returned_test_run_model_for_validation.scores,
+        results=returned_test_run_model_for_validation.results,
         error=returned_test_run_model_for_validation.error,
         executed_at=returned_test_run_model_for_validation.executed_at,
     )
@@ -122,7 +126,7 @@ def test_get_run_details_by_test_and_run_id_happy_path_non_terminal_run():
         status=TestStatus.pending,
         created_at=datetime.now().astimezone(),
         test_id=test_id,
-        scores=None,
+        results=None,
         error=None,
         executed_at=None,
     )
@@ -141,7 +145,7 @@ def test_get_run_details_by_test_and_run_id_happy_path_non_terminal_run():
         status=TestStatus.pending,
         created_at=returned_test_run_model_for_validation.created_at,
         test_case_id=TestCaseID(id=test_id),
-        scores=None,
+        results=None,
         error=None,
         executed_at=None,
     )
@@ -252,16 +256,19 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
         test_set_id, test_set_execution_id, test_set_execution_id, test_run_id, test_run_id
     ]
 
-    scores = {"bleu": 0.5, "rogue": 0.9}
+    results = {
+        "BLEU": {"passed": True, "score": 0.5, "detail": None},
+        "ROUGE": {"passed": True, "score": 0.9, "detail": None},
+    }
     created_at = datetime.now().astimezone()
     executed_at = datetime.now().astimezone()
     snapshot_at = datetime.now().astimezone()
 
     row = SimpleNamespace(
-        status=TestStatus.completed,
+        status=TestStatus.green,
         created_at=created_at,
         test_set_entry_id=test_set_entry_id,
-        scores=scores,
+        results=results,
         error=None,
         executed_at=executed_at,
         test_id=test_case_id,
@@ -286,11 +293,11 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
     session.execute.assert_called_once()
     assert response == TestSetExecutionRunDetails(
         id=test_run_id,
-        status=TestStatus.completed,
+        status=TestStatus.green,
         created_at=created_at,
         test_set_entry_id=TestSetEntryID(id=test_set_entry_id),
         test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
-        scores=scores,
+        results=results,
         error=None,
         executed_at=executed_at,
         test_case_id=TestCaseID(id=test_case_id),
@@ -329,16 +336,16 @@ def test_get_run_details_by_test_set_execution_and_run_id_reachable_after_unlink
         test_set_id, test_set_execution_id, test_set_execution_id, test_run_id, test_run_id
     ]
 
-    scores = {"bleu": 0.5}
+    results = {"BLEU": TestTypeResult(passed=True, score=0.5, detail=None)}
     created_at = datetime.now().astimezone()
     executed_at = datetime.now().astimezone()
     snapshot_at = datetime.now().astimezone()
 
     row = SimpleNamespace(
-        status=TestStatus.completed,
+        status=TestStatus.green,
         created_at=created_at,
         test_set_entry_id=test_set_entry_id,
-        scores=scores,
+        results=results,
         error=None,
         executed_at=executed_at,
         test_id=test_case_id,
@@ -362,7 +369,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_reachable_after_unlink
     assert "test_set_entries.test_set_id" not in compiled_sql
 
     assert response.test_set_entry_id == TestSetEntryID(id=test_set_entry_id)
-    assert response.scores == scores
+    assert response.results == results
 
 
 def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_terminal_run():
@@ -384,7 +391,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_termina
         status=TestStatus.pending,
         created_at=created_at,
         test_set_entry_id=test_set_entry_id,
-        scores=None,
+        results=None,
         error=None,
         executed_at=None,
         test_id=test_case_id,
@@ -410,7 +417,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_termina
         created_at=created_at,
         test_set_entry_id=TestSetEntryID(id=test_set_entry_id),
         test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
-        scores=None,
+        results=None,
         error=None,
         executed_at=None,
         test_case_id=TestCaseID(id=test_case_id),
@@ -532,16 +539,19 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path():
         test_plan_id, test_plan_execution_id, test_plan_execution_id, test_run_id, test_run_id
     ]
 
-    scores = {"bleu": 0.5, "rogue": 0.9}
+    results = {
+        "BLEU": {"passed": True, "score": 0.5, "detail": None},
+        "ROUGE": {"passed": True, "score": 0.9, "detail": None},
+    }
     created_at = datetime.now().astimezone()
     executed_at = datetime.now().astimezone()
     snapshot_at = datetime.now().astimezone()
 
     row = SimpleNamespace(
-        status=TestStatus.completed,
+        status=TestStatus.green,
         created_at=created_at,
         test_set_entry_id=test_set_entry_id,
-        scores=scores,
+        results=results,
         error=None,
         executed_at=executed_at,
         test_id=test_case_id,
@@ -567,11 +577,11 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path():
     session.execute.assert_called_once()
     assert response == TestPlanExecutionRunDetails(
         id=test_run_id,
-        status=TestStatus.completed,
+        status=TestStatus.green,
         created_at=created_at,
         test_set_entry_id=TestSetEntryID(id=test_set_entry_id),
         test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
-        scores=scores,
+        results=results,
         error=None,
         executed_at=executed_at,
         test_case_id=TestCaseID(id=test_case_id),
@@ -608,7 +618,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
         status=TestStatus.pending,
         created_at=created_at,
         test_set_entry_id=test_set_entry_id,
-        scores=None,
+        results=None,
         error=None,
         executed_at=None,
         test_id=test_case_id,
@@ -635,7 +645,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
         created_at=created_at,
         test_set_entry_id=TestSetEntryID(id=test_set_entry_id),
         test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
-        scores=None,
+        results=None,
         error=None,
         executed_at=None,
         test_case_id=TestCaseID(id=test_case_id),
@@ -676,16 +686,16 @@ def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlin
         test_plan_id, test_plan_execution_id, test_plan_execution_id, test_run_id, test_run_id
     ]
 
-    scores = {"bleu": 0.5}
+    results = {"BLEU": TestTypeResult(passed=True, score=0.5, detail=None)}
     created_at = datetime.now().astimezone()
     executed_at = datetime.now().astimezone()
     snapshot_at = datetime.now().astimezone()
 
     row = SimpleNamespace(
-        status=TestStatus.completed,
+        status=TestStatus.green,
         created_at=created_at,
         test_set_entry_id=test_set_entry_id,
-        scores=scores,
+        results=results,
         error=None,
         executed_at=executed_at,
         test_id=test_case_id,
@@ -717,4 +727,4 @@ def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlin
 
     assert response.test_set_entry_id == TestSetEntryID(id=test_set_entry_id)
     assert response.test_set_id is None
-    assert response.scores == scores
+    assert response.results == results

@@ -36,8 +36,9 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                 "This endpoint only enqueues the runs — it does not call the "
                 "model, score anything, or write back results. Every created "
                 "run's `status` is `Pending`; a separate, later mechanism "
-                "promotes each one to `Running`, `Completed`, or `Failed` "
-                "once it actually executes."
+                "promotes each one to `Running`, then a terminal outcome "
+                "(`Green`, `Amber`, `Red`, or `NotRan`) once it actually "
+                "executes."
             ),
             "content": {
                 "application/json": {
@@ -171,8 +172,8 @@ async def run_live_test_plan_entries(
                 "only enqueues the runs — it does not call the model, score "
                 "anything, or write back results. Every created run's "
                 "`status` is `Pending`; a separate, later mechanism promotes "
-                "each one to `Running`, `Completed`, or `Failed` once it "
-                "actually executes."
+                "each one to `Running`, then a terminal outcome (`Green`, "
+                "`Amber`, `Red`, or `NotRan`) once it actually executes."
             ),
             "content": {
                 "application/json": {
@@ -383,7 +384,7 @@ async def get_test_plan_execution_metadata(
                         "items": [
                             {
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-                                "status": "Completed",
+                                "status": "Green",
                                 "created_at": "2026-07-18T11:05:55.163355",
                                 "test_set_entry_id": {
                                     "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
@@ -487,20 +488,21 @@ async def get_test_plan_execution_run_metadata(
         200: {
             "description": (
                 "Full details for the run, including the snapshotted test set "
-                "entry it ran against and its post-execution results. `scores`, "
+                "entry it ran against and its post-execution results. `results`, "
                 "`error`, and `executed_at` are null until the run reaches a "
-                "terminal status (`Completed` or `Failed`) — this example shows "
-                "a completed run with scores populated. `test_set_id` reflects "
-                "the entry's *current* test set and is null if the entry has "
-                "since been unlinked from it (`PATCH /test-sets/{test_set_id}"
-                "/entries`) — it does not affect whether this run's own detail "
-                "is reachable, only this one field."
+                "terminal status (`Green`, `Amber`, `Red`, or `NotRan`) — this "
+                "example shows a run where every assigned test type passed. "
+                "`test_set_id` reflects the entry's *current* test set and is "
+                "null if the entry has since been unlinked from it (`PATCH "
+                "/test-sets/{test_set_id}/entries`) — it does not affect "
+                "whether this run's own detail is reachable, only this one "
+                "field."
             ),
             "content": {
                 "application/json": {
                     "example": {
                         "id": "f1a2b3c4-d5e6-7890-fabc-234567890123",
-                        "status": "Completed",
+                        "status": "Green",
                         "created_at": "2026-07-20T09:12:04.221310",
                         "test_set_entry_id": {
                             "id": "a2b3c4d5-e6f7-8901-abcd-345678901234"
@@ -508,9 +510,9 @@ async def get_test_plan_execution_run_metadata(
                         "test_plan_execution_id": {
                             "id": "b3c4d5e6-f7a8-9012-bcde-456789012345"
                         },
-                        "scores": {
-                            "exact_match": 1.0,
-                            "bleu": 0.37
+                        "results": {
+                            "Exact Match": {"passed": True, "score": 1.0, "detail": None},
+                            "BLEU": {"passed": True, "score": 0.37, "detail": None},
                         },
                         "error": None,
                         "executed_at": "2026-07-20T09:12:08.554021",
@@ -619,10 +621,11 @@ async def get_test_plan_execution_run_details(
       of execution Y through execution Z's URL.
 
     Returns the run's `id`, `status`, `created_at`, `test_set_entry_id`, and
-    `test_plan_execution_id`, plus `scores`, `error`, and `executed_at` — the
+    `test_plan_execution_id`, plus `results`, `error`, and `executed_at` — the
     latter three are null until the run reaches a terminal status
-    (`Completed` or `Failed`), and `scores`/`error` are mutually exclusive
-    even then: a run either scores successfully or fails, never both.
+    (`Green`, `Amber`, `Red`, or `NotRan`), and `results`/`error` are
+    mutually exclusive even then: `error` is only ever set for `NotRan`,
+    `results` for the other three.
     Also returns the snapshotted test set entry the run executed against —
     `test_case_id` (the live test it was originally snapshotted from),
     `name`, `input`, `expected_output`, `model_output`, `test_type_assignments`,

@@ -43,7 +43,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                             },
                             {
                                 "id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
-                                "status": "Completed",
+                                "status": "Green",
                                 "created_at": "2026-07-14T18:03:21.123456",
                                 "origin": "TestSet",
                                 "test_case_id": None,
@@ -57,7 +57,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                             },
                             {
                                 "id": "a7b8c9d0-1234-5abc-def6-789012345bcd",
-                                "status": "Failed",
+                                "status": "NotRan",
                                 "created_at": "2026-07-13T11:47:02.556213",
                                 "origin": "TestPlan",
                                 "test_case_id": None,

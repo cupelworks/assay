@@ -36,7 +36,8 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                 "the runs — it does not call the model, score anything, or "
                 "write back results. Every created run's `status` is "
                 "`Pending`; a separate, later mechanism promotes each one to "
-                "`Running`, `Completed`, or `Failed` once it actually executes."
+                "`Running`, then a terminal outcome (`Green`, `Amber`, `Red`, "
+                "or `NotRan`) once it actually executes."
             ),
             "content": {
                 "application/json": {
@@ -153,7 +154,8 @@ async def run_live_test_set_entries(
                 "does not call the model, score anything, or write back "
                 "results. Every created run's `status` is `Pending`; a "
                 "separate, later mechanism promotes each one to `Running`, "
-                "`Completed`, or `Failed` once it actually executes."
+                "then a terminal outcome (`Green`, `Amber`, `Red`, or "
+                "`NotRan`) once it actually executes."
             ),
             "content": {
                 "application/json": {
@@ -363,7 +365,7 @@ async def get_test_set_execution_metadata(
                         "items": [
                             {
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-                                "status": "Completed",
+                                "status": "Green",
                                 "created_at": "2026-07-15T16:44:30.163355",
                                 "test_set_entry_id": {
                                     "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
@@ -466,16 +468,16 @@ async def get_test_set_execution_run_metadata(
         200: {
             "description": (
                 "Full details for the run, including the snapshotted test set "
-                "entry it ran against and its post-execution results. `scores`, "
+                "entry it ran against and its post-execution results. `results`, "
                 "`error`, and `executed_at` are null until the run reaches a "
-                "terminal status (`Completed` or `Failed`) — this example shows "
-                "a completed run with scores populated."
+                "terminal status (`Green`, `Amber`, `Red`, or `NotRan`) — this "
+                "example shows a run where every assigned test type passed."
             ),
             "content": {
                 "application/json": {
                     "example": {
                         "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-                        "status": "Completed",
+                        "status": "Green",
                         "created_at": "2026-07-15T16:44:30.163355",
                         "test_set_entry_id": {
                             "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
@@ -483,9 +485,9 @@ async def get_test_set_execution_run_metadata(
                         "test_set_execution_id": {
                             "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12"
                         },
-                        "scores": {
-                            "exact_match": 1.0,
-                            "bleu": 0.42
+                        "results": {
+                            "Exact Match": {"passed": True, "score": 1.0, "detail": None},
+                            "BLEU": {"passed": True, "score": 0.42, "detail": None},
                         },
                         "error": None,
                         "executed_at": "2026-07-15T16:44:33.981022",
@@ -591,10 +593,11 @@ async def get_test_set_execution_run_details(
       of execution Y through execution Z's URL.
 
     Returns the run's `id`, `status`, `created_at`, `test_set_entry_id`, and
-    `test_set_execution_id`, plus `scores`, `error`, and `executed_at` — the
+    `test_set_execution_id`, plus `results`, `error`, and `executed_at` — the
     latter three are null until the run reaches a terminal status
-    (`Completed` or `Failed`), and `scores`/`error` are mutually exclusive
-    even then: a run either scores successfully or fails, never both.
+    (`Green`, `Amber`, `Red`, or `NotRan`), and `results`/`error` are
+    mutually exclusive even then: `error` is only ever set for `NotRan`,
+    `results` for the other three.
     Also returns the snapshotted test set entry the run executed against —
     `test_case_id` (the live test it was originally snapshotted from),
     `name`, `input`, `expected_output`, `model_output`, `test_type_assignments`,

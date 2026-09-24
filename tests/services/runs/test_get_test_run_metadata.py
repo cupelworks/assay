@@ -153,7 +153,7 @@ def test_get_run_metadata_all_runs_happy_path():
         ),
         MagicMock(
             id=uuid.uuid4(),
-            status=TestStatus.completed,
+            status=TestStatus.green,
             created_at=datetime.now().astimezone(),
             test_id=None,
             test_set_entry_id=test_set_entry_id,
@@ -162,7 +162,7 @@ def test_get_run_metadata_all_runs_happy_path():
         ),
         MagicMock(
             id=uuid.uuid4(),
-            status=TestStatus.failed,
+            status=TestStatus.not_ran,
             created_at=datetime.now().astimezone(),
             test_id=None,
             test_set_entry_id=test_plan_entry_id,
@@ -666,7 +666,7 @@ def test_get_test_set_execution_run_metadata_all_runs_happy_path():
     returned_rows = [
         MagicMock(
             id=uuid.uuid4(),
-            status=TestStatus.completed,
+            status=TestStatus.green,
             created_at=datetime.now().astimezone(),
             test_set_entry_id=uuid.uuid4(),
         ),
@@ -823,7 +823,7 @@ def test_get_test_plan_execution_run_metadata_all_runs_happy_path():
     returned_rows = [
         MagicMock(
             id=uuid.uuid4(),
-            status=TestStatus.completed,
+            status=TestStatus.green,
             created_at=datetime.now().astimezone(),
             test_set_entry_id=uuid.uuid4(),
         ),
