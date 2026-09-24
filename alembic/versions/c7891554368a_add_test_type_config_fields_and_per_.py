@@ -61,7 +61,7 @@ def _seed_config_fields() -> None:
     ]
     threshold_field = [
         {"key": "threshold", "label": "Minimum score to pass",
-         "kind": "numeric", "required": True}
+         "kind": "numeric", "required": True, "min": 0.0, "max": 1.0}
     ]
 
     config_fields_by_name = {

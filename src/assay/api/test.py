@@ -59,7 +59,17 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                     "label": "Reference text",
                                     "kind": "reference",
                                     "required": True,
-                                }
+                                    "min": None,
+                                    "max": None,
+                                },
+                                {
+                                    "key": "threshold",
+                                    "label": "Minimum score to pass",
+                                    "kind": "numeric",
+                                    "required": True,
+                                    "min": 0.0,
+                                    "max": 1.0,
+                                },
                             ],
                         },
                         {
@@ -82,7 +92,17 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                     "label": "Reference text",
                                     "kind": "reference",
                                     "required": True,
-                                }
+                                    "min": None,
+                                    "max": None,
+                                },
+                                {
+                                    "key": "threshold",
+                                    "label": "Minimum score to pass",
+                                    "kind": "numeric",
+                                    "required": True,
+                                    "min": 0.0,
+                                    "max": 1.0,
+                                },
                             ],
                         },
                     ]

@@ -193,10 +193,13 @@ class TestTypesModel(Base):
     cost: Mapped[TestTypesCost | None] = mapped_column(SAEnum(TestTypesCost), nullable=True)
     limitations: Mapped[str] = mapped_column(Text, nullable=True)
     # Seeded server-side only, never user-editable through the API. Each item:
-    # {"key": str, "label": str, "kind": str, "required": bool}. kind "reference"
-    # is reserved — it never gets its own storage, it always resolves to the
-    # test case's own expected_output (see docs/test_type_config/dev_notes.md).
-    # Empty list for a self-contained type that needs no extra input.
+    # {"key": str, "label": str, "kind": str, "required": bool, "min": float |
+    # None, "max": float | None}. kind "reference" is reserved — it never gets
+    # its own storage, it always resolves to the test case's own
+    # expected_output (see docs/test_type_config/dev_notes.md). min/max are
+    # only ever set for kind "numeric" (advisory bounds, not enforced by the
+    # API — see note 8); omitted (→ None) for every other kind. Empty list for
+    # a self-contained type that needs no extra input.
     config_fields: Mapped[list[dict]] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(

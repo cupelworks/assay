@@ -33,7 +33,9 @@ def test_correct_mapping_of_test_type_fields():
     mock_test_type.cost = TestTypesCost.fast
     mock_test_type.limitations = "Doesn't account for semantic meaning."
     mock_test_type.config_fields = [
-        {"key": "reference", "label": "Reference text", "kind": "reference", "required": True}
+        {"key": "reference", "label": "Reference text", "kind": "reference", "required": True},
+        {"key": "threshold", "label": "Minimum score to pass", "kind": "numeric",
+         "required": True, "min": 0.0, "max": 1.0},
     ]
 
     session = AsyncMock()
@@ -54,8 +56,16 @@ def test_correct_mapping_of_test_type_fields():
     assert returned.limitations == mock_test_type.limitations
     assert returned.config_fields == [
         ConfigFieldDescriptor(key="reference", label="Reference text",
-                              kind="reference", required=True)
+                              kind="reference", required=True),
+        ConfigFieldDescriptor(key="threshold", label="Minimum score to pass",
+                              kind="numeric", required=True, min=0.0, max=1.0),
     ]
+    # min/max must round-trip, not silently drop
+    assert returned.config_fields[1].min == 0.0
+    assert returned.config_fields[1].max == 1.0
+    # a non-numeric field's min/max must default to None, not 0
+    assert returned.config_fields[0].min is None
+    assert returned.config_fields[0].max is None
 
 
 def test_nullable_fields_pass_through_as_none():
