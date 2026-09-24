@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./assay.db"
     # comma-separated in the env, e.g. ASSAY_CORS_ALLOWED_ORIGINS=http://localhost:3000,https://app.example.com
     cors_allowed_origins: list[str] = ["http://localhost:4200"]
+    # Redis, used both as Celery's broker (task queue) and result backend. Only
+    # read by the worker process (assay.worker) — the API process never imports
+    # celery and works fine with these unset/unreachable.
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/0"
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod

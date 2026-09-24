@@ -31,6 +31,9 @@ anthropic = [
 openai = [
     "openai>=1.35",  # OpenAI Chat Completions client (used by OpenAIClient in llm.py)
 ]
+worker = [
+    "celery[redis]>=5.4",  # Task queue that promotes a pending TestRunModel to a terminal outcome
+]
 
 [build-system]
 requires = ["hatchling"]
