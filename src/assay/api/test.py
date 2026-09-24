@@ -53,7 +53,14 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                             "cost": "fast",
                             "limitations": "Doesn't account for semantic meaning; "
                                            "penalizes valid paraphrases.",
-                            "required_reference": True,
+                            "config_fields": [
+                                {
+                                    "key": "reference",
+                                    "label": "Reference text",
+                                    "kind": "reference",
+                                    "required": True,
+                                }
+                            ],
                         },
                         {
                             "id": "ede3f4b9-1f31-4296-90ca-f34e6e3adb1f",
@@ -69,7 +76,14 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                             "cost": "fast",
                             "limitations": "More complex to compute than BLEU/ROUGE; "
                                            "language support varies.",
-                            "required_reference": True,
+                            "config_fields": [
+                                {
+                                    "key": "reference",
+                                    "label": "Reference text",
+                                    "kind": "reference",
+                                    "required": True,
+                                }
+                            ],
                         },
                     ]
                 }
@@ -118,8 +132,8 @@ async def get_test_types(
 
     Each test type describes a supported way to evaluate a test's output —
     what it measures, what it's best suited for, its relative cost, its
-    known limitations, and whether it requires an `expected_output` to work
-    (`required_reference`). These are the names accepted as `test_type_names`
+    known limitations, and what config it needs when assigned, if any
+    (`config_fields`). These are the names accepted in `test_type_assignments`
     when creating or updating a test case or test set entry (e.g. `"ROUGE"`,
     `"BERTScore"`).
 
@@ -152,7 +166,10 @@ async def get_test_types(
                         "input": "Summarise this article in one sentence.",
                         "expected_output": "A concise one-sentence summary.",
                         "model_output": "A concise one-sentence summary.",
-                        "test_type_names": ["ROUGE", "BERTScore"],
+                        "test_type_assignments": [
+                            {"name": "ROUGE", "config": None},
+                            {"name": "BERTScore", "config": None},
+                        ],
                     }
                 }
             },
@@ -170,7 +187,8 @@ async def get_test_types(
         422: {
             "description": (
                 "Validation error — either an unknown field was sent in the request body, "
-                "or one or more test type names are not in the catalogue."
+                "one or more test type names are not in the catalogue, or an assignment "
+                "is missing a required config field."
             ),
             "content": {
                 "application/json": {
@@ -189,7 +207,7 @@ async def get_test_types(
                         },
                         "unknown_test_type": {
                             "summary": "Unknown test type name",
-                            "value": {"detail": "Unknown test types: {'Invalid Type'}"},
+                            "value": {"detail": "Unknown test types: ['Invalid Type']"},
                         },
                     }
                 }
@@ -206,8 +224,8 @@ async def update_test(
     """Partially update a test case by ID.
 
     Only the fields included in the request body are updated — omitted fields are left unchanged.
-    `test_type_names: null` leaves type assignments untouched;
-    `test_type_names: []` removes all assignments.
+    `test_type_assignments: null` leaves type assignments untouched;
+    `test_type_assignments: []` removes all assignments.
 
     Unknown body fields are rejected with a 422 — the schema uses `extra="forbid"` to
     prevent silently ignoring misplaced fields such as `id`.
@@ -233,7 +251,10 @@ async def update_test(
                         "input": "Summarise this article in one sentence.",
                         "expected_output": "A concise one-sentence summary.",
                         "model_output": "A concise one-sentence summary.",
-                        "test_type_names": ["ROUGE", "BERTScore"],
+                        "test_type_assignments": [
+                            {"name": "ROUGE", "config": None},
+                            {"name": "BERTScore", "config": None},
+                        ],
                     }
                 }
             },
@@ -257,7 +278,7 @@ async def get_specific_test(
 ) -> CreateTestCaseResponse: # pragma: no cover
     """Retrieve a single test case by ID.
 
-    Returns the test case with all fields and its assigned test type names.
+    Returns the test case with all fields and its assigned test type assignments.
 
     Returns a 404 if no test case with the given ID exists.
     """
@@ -279,7 +300,10 @@ async def get_specific_test(
                                 "input": "Summarise this article in one sentence.",
                                 "expected_output": "A concise one-sentence summary.",
                                 "model_output": "A concise one-sentence summary.",
-                                "test_type_names": ["ROUGE", "BERTScore"],
+                                "test_type_assignments": [
+                                    {"name": "ROUGE", "config": None},
+                                    {"name": "BERTScore", "config": None},
+                                ],
                             }
                         ],
                         "total": 1,
@@ -319,17 +343,21 @@ async def get_all_tests(
                         "input": "Summarise this article in one sentence.",
                         "expected_output": "A concise one-sentence summary.",
                         "model_output": None,
-                        "test_type_names": ["ROUGE", "BERTScore"],
+                        "test_type_assignments": [
+                            {"name": "ROUGE", "config": None},
+                            {"name": "BERTScore", "config": None},
+                        ],
                     }
                 }
             },
         },
         422: {
-            "description": "One or more test type names are not in the catalogue.",
+            "description": "One or more test type names are not in the catalogue, "
+                           "or an assignment is missing a required config field.",
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Unknown test types: {'Invalid Type'}"
+                        "detail": "Unknown test types: ['Invalid Type']"
                     }
                 }
             },
@@ -350,8 +378,9 @@ async def create_test_manually(
     LLM-as-judge). Leave it `null` for deterministic checks that do not need one.
     `model_output` can be pre-populated if the model response is already known;
     otherwise leave it `null` and it will be filled in when the test is run.
-    `test_type_names` is an optional list of evaluation strategies to assign. Each name must exist
-    in the test types catalogue — a 422 is returned if any name is unrecognized.
+    `test_type_assignments` is an optional list of evaluation strategies to assign, each with
+    any config it needs. Each name must exist in the test types catalogue and satisfy that
+    type's required config fields — a 422 is returned otherwise.
 
     On success, returns the created test case with its generated `id` and all input fields.
     """
@@ -404,11 +433,12 @@ async def create_test_manually(
             },
         },
         422: {
-            "description": "One or more test type names are not in the catalogue.",
+            "description": "One or more test type names are not in the catalogue, "
+                           "or an assignment is missing a required config field.",
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Unknown test types: {'Invalid Type'}"
+                        "detail": "Unknown test types: ['Invalid Type']"
                     }
                 }
             },
@@ -422,10 +452,11 @@ async def create_test_from_dataset(
     """Create test cases in bulk from all rows of an existing dataset.
 
     Each row in the dataset becomes a separate test case. All created tests share
-    the same optional list of evaluation strategies (`test_type_names`).
+    the same optional list of evaluation strategies (`test_type_assignments`).
 
-    `test_type_names` is an optional list of evaluation strategies to assign. Each name must exist
-    in the test types catalogue — a 422 is returned if any name is unrecognized.
+    `test_type_assignments` is an optional list of evaluation strategies to assign, each with
+    any config it needs. Each name must exist in the test types catalogue and satisfy that
+    type's required config fields — a 422 is returned otherwise.
 
     Returns a 404 if the dataset does not exist or has no rows.
 

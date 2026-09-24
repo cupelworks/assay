@@ -111,7 +111,7 @@ async def get_run_details_by_test_set_execution_and_run_id(
         test_set_execution_id, plus scores, error, and executed_at (null
         until the run reaches a terminal status), plus the snapshotted
         entry it ran against — test_case_id, name, input, expected_output,
-        model_output, test_type_names, and test_case_snapshot_at. The
+        model_output, test_type_assignments, and test_case_snapshot_at. The
         entry is resolved via test_set_entry_id alone, not scoped to the
         entry's current test_set_id, so a run's detail stays reachable
         even after its entry has been unlinked from the set (test_set_id
@@ -145,7 +145,7 @@ async def get_run_details_by_test_set_execution_and_run_id(
             TestSetEntryModel.input,
             TestSetEntryModel.expected_output,
             TestSetEntryModel.model_output,
-            TestSetEntryModel.test_type_names,
+            TestSetEntryModel.test_type_assignments,
             TestSetEntryModel.snapshot_at,
         )
         .join(
@@ -170,7 +170,7 @@ async def get_run_details_by_test_set_execution_and_run_id(
         input=test_run.input,
         expected_output=test_run.expected_output,
         model_output=test_run.model_output,
-        test_type_names=test_run.test_type_names,
+        test_type_assignments=test_run.test_type_assignments,
         test_case_snapshot_at=TestCaseSnapshotDate(snapshot_at=test_run.snapshot_at),
         test_set_id=TestSetID(id=test_set_id),
     )
@@ -207,7 +207,7 @@ async def get_run_details_by_test_plan_execution_and_run_id(
         test_plan_execution_id, plus scores, error, and executed_at (null
         until the run reaches a terminal status), plus the snapshotted
         entry it ran against — test_case_id, name, input, expected_output,
-        model_output, test_type_names, and test_case_snapshot_at — and
+        model_output, test_type_assignments, and test_case_snapshot_at — and
         test_plan_id (the validated path parameter) and test_set_id.
         test_set_id is nullable and, unlike its counterpart in
         get_run_details_by_test_set_execution_and_run_id, isn't a
@@ -251,7 +251,7 @@ async def get_run_details_by_test_plan_execution_and_run_id(
             TestSetEntryModel.input,
             TestSetEntryModel.expected_output,
             TestSetEntryModel.model_output,
-            TestSetEntryModel.test_type_names,
+            TestSetEntryModel.test_type_assignments,
             TestSetEntryModel.snapshot_at,
         )
         .join(
@@ -276,7 +276,7 @@ async def get_run_details_by_test_plan_execution_and_run_id(
         input=test_run.input,
         expected_output=test_run.expected_output,
         model_output=test_run.model_output,
-        test_type_names=test_run.test_type_names,
+        test_type_assignments=test_run.test_type_assignments,
         test_case_snapshot_at=TestCaseSnapshotDate(snapshot_at=test_run.snapshot_at),
         test_set_id=TestSetID(id=test_run.test_set_id) if test_run.test_set_id else None,
         test_plan_id=TestPlanID(id=test_plan_id),

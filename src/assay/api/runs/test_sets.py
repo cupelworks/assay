@@ -496,7 +496,10 @@ async def get_test_set_execution_run_metadata(
                         "input": "Say hello to Alice.",
                         "expected_output": "Hello, Alice!",
                         "model_output": "Hello, Alice!",
-                        "test_type_names": ["exact_match", "bleu"],
+                        "test_type_assignments": [
+                            {"name": "Exact Match", "config": None},
+                            {"name": "BLEU", "config": None},
+                        ],
                         "test_case_snapshot_at": {
                             "snapshot_at": "2026-07-15T16:40:02.552210"
                         },
@@ -594,7 +597,7 @@ async def get_test_set_execution_run_details(
     even then: a run either scores successfully or fails, never both.
     Also returns the snapshotted test set entry the run executed against —
     `test_case_id` (the live test it was originally snapshotted from),
-    `name`, `input`, `expected_output`, `model_output`, `test_type_names`,
+    `name`, `input`, `expected_output`, `model_output`, `test_type_assignments`,
     and `test_case_snapshot_at` — frozen at the moment the entry was added
     to the test set, and never updated by later edits to the live test.
     This stays reachable even if the entry has since been unlinked from

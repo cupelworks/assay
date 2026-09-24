@@ -6,14 +6,22 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from assay.schemas import CreateTestCaseRequest
+from assay.schemas import CreateTestCaseRequest, TestTypeAssignment
 from assay.services import create_new_test, create_new_test_from_dataset
-from assay.services.tests._common import _validate_test_type_name
+from assay.services.tests._common import _validate_test_type_assignments
 
 name = "Test Name"
 model_input = "My Input"
 model_output = "The model output"
 expected_output = "The expected model output"
+
+
+def _catalogue_row(type_name, config_fields):
+    row = MagicMock()
+    row.name = type_name
+    row.config_fields = config_fields
+    return row
+
 
 def test_create_new_test_without_name():
     request = CreateTestCaseRequest(
@@ -22,7 +30,7 @@ def test_create_new_test_without_name():
         expected_output=expected_output
     )
     uuid.UUID(request.name)
-    
+
     mock_session = AsyncMock()
 
     response = asyncio.run(create_new_test(request, mock_session))
@@ -68,42 +76,103 @@ def test_create_new_test_without_model_expected_output():
     mock_session.commit.assert_called_once()
     assert response.model_output is None
     assert response.expected_output is None
-    
-    
+
+
 def test_create_new_test_with_test_names():
     request = CreateTestCaseRequest(
         input=model_input,
         model_output=model_output,
         expected_output=expected_output,
-        test_type_names=["ROUGE", "BERTScore"],
+        test_type_assignments=[
+            TestTypeAssignment(name="ROUGE"),
+            TestTypeAssignment(name="BERTScore"),
+        ],
     )
 
     mock_session = AsyncMock()
 
     with patch(
-            "assay.services.tests.create_new_test._validate_test_type_name",
+            "assay.services.tests.create_new_test._validate_test_type_assignments",
             new=AsyncMock()
     ):
         response = asyncio.run(create_new_test(request, mock_session))
 
     mock_session.commit.assert_called_once()
-    assert response.test_type_names == ["ROUGE", "BERTScore"]
+    assert response.test_type_assignments == [
+        TestTypeAssignment(name="ROUGE"),
+        TestTypeAssignment(name="BERTScore"),
+    ]
 
 
 def test_validate_raises_for_unknown_name():
     mock_session = AsyncMock()
-    mock_session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
+    mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
 
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(_validate_test_type_name(mock_session, ["ROUGE"]))
+        asyncio.run(_validate_test_type_assignments(
+            mock_session, [TestTypeAssignment(name="ROUGE")]
+        ))
     assert exc.value.status_code == 422
 
 
-def test_validate_passes_for_known_name():
+def test_validate_passes_for_known_name_no_config_needed():
     mock_session = AsyncMock()
-    mock_session.scalars.return_value = MagicMock(all=MagicMock(return_value=["ROUGE"]))
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("ROUGE", [
+            {"key": "reference", "label": "Reference text", "kind": "reference", "required": True}
+        ])])
+    )
 
-    asyncio.run(_validate_test_type_name(mock_session, ["ROUGE"]))  # no raise
+    # ROUGE's only field is kind "reference" — never checked against config, so
+    # a bare assignment with no config passes.
+    asyncio.run(_validate_test_type_assignments(
+        mock_session, [TestTypeAssignment(name="ROUGE")]
+    ))  # no raise
+
+
+def test_validate_raises_for_missing_required_config():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("Regex Match", [
+            {"key": "pattern", "label": "Regex pattern", "kind": "multiline", "required": True}
+        ])])
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_validate_test_type_assignments(
+            mock_session, [TestTypeAssignment(name="Regex Match")]
+        ))
+    assert exc.value.status_code == 422
+    assert "pattern" in str(exc.value.detail)
+
+
+def test_validate_passes_with_required_config_provided():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("Regex Match", [
+            {"key": "pattern", "label": "Regex pattern", "kind": "multiline", "required": True}
+        ])])
+    )
+
+    asyncio.run(_validate_test_type_assignments(
+        mock_session,
+        [TestTypeAssignment(name="Regex Match", config={"pattern": "^\\d+$"})],
+    ))  # no raise
+
+
+def test_validate_passes_for_optional_config_omitted():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("Toxicity", [
+            {"key": "rubric", "label": "Custom toxicity rubric (optional)",
+             "kind": "rubric", "required": False}
+        ])])
+    )
+
+    # rubric is optional — omitting config entirely still passes.
+    asyncio.run(_validate_test_type_assignments(
+        mock_session, [TestTypeAssignment(name="Toxicity")]
+    ))  # no raise
 
 
 # -- create_new_test_from_dataset
@@ -122,8 +191,8 @@ def _patch_rows(*rows):
     )
 
 
-def _patch_validate_test_type_name():
-    return patch("assay.services.tests.create_new_test._validate_test_type_name")
+def _patch_validate_test_type_assignments():
+    return patch("assay.services.tests.create_new_test._validate_test_type_assignments")
 
 
 def _get_rows():
@@ -132,20 +201,20 @@ def _get_rows():
         input="second", expected_output="y", model_output="z", id=uuid.uuid4()), MagicMock(
         input="third", expected_output="y", model_output="z", id=uuid.uuid4()),
 
-def test_row_exist_no_test_type_names():
+def test_row_exist_no_test_type_assignments():
     mock_request, mock_request_id = _get_mock_request_with_id()
-    # [] is falsy, so the `if request.test_type_names:` branch is skipped entirely
-    mock_request.test_type_names = []
+    # [] is falsy, so the `if request.test_type_assignments:` branch is skipped entirely
+    mock_request.test_type_assignments = []
 
     mock_session = AsyncMock()
 
-    # _patch_validate_test_type_name is captured so we can assert it was never called
+    # _patch_validate_test_type_assignments is captured so we can assert it was never called
     with _patch_rows(*_get_rows()), \
-            _patch_validate_test_type_name() as mock_validate_test_type_name:
+            _patch_validate_test_type_assignments() as mock_validate_test_type_assignments:
         result = asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
-    # validation must be skipped when no test type names are provided
-    mock_validate_test_type_name.assert_not_called()
+    # validation must be skipped when no test type assignments are provided
+    mock_validate_test_type_assignments.assert_not_called()
     mock_session.commit.assert_called_once()
     # the response must carry back the original dataset id
     assert result.id == UUID(mock_request_id)
@@ -153,24 +222,27 @@ def test_row_exist_no_test_type_names():
     assert len(result.test_cases) == 3
     # add_all is called twice: first for tests, then for test_types.
     # [1] = second call, [0] = positional args tuple, [0] = the list passed in.
-    # with no test_type_names, no TestTypeAssignmentModels should be created.
+    # with no test_type_assignments, no TestTypeAssignmentModels should be created.
     assert mock_session.add_all.call_args_list[1][0][0] == []
 
 
 def test_correct_number_of_test_type_assignments():
     mock_request, mock_request_id = _get_mock_request_with_id()
     # 2 test types will be assigned to each test
-    mock_request.test_type_names = ["ROUGE", "BERTScore"]
+    mock_request.test_type_assignments = [
+        TestTypeAssignment(name="ROUGE"),
+        TestTypeAssignment(name="BERTScore"),
+    ]
 
     mock_session = AsyncMock()
 
     # 3 rows → 3 TestModels, each assigned 2 test types → 6 TestTypeAssignmentModels
-    with _patch_rows(*_get_rows()), _patch_validate_test_type_name():
+    with _patch_rows(*_get_rows()), _patch_validate_test_type_assignments():
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     # first add_all call is for tests: one per row
     assert len(mock_session.add_all.call_args_list[0][0][0]) == 3
-    # second add_all call is for test_types: cartesian product of tests × type names (3 × 2)
+    # second add_all call is for test_types: cartesian product of tests × assignments (3 × 2)
     assert len(mock_session.add_all.call_args_list[1][0][0]) == 6
 
 
@@ -179,7 +251,7 @@ def test_correct_mapping():
 
     mock_session = AsyncMock()
 
-    with _patch_rows(*_get_rows()), _patch_validate_test_type_name():
+    with _patch_rows(*_get_rows()), _patch_validate_test_type_assignments():
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     # mapping is the same for every row, so checking one is enough.
@@ -224,23 +296,18 @@ def test_no_dataset_rows():
 
 def test_unknown_test_type_name():
     mock_session = AsyncMock()
-    # simulate the test types catalogue returning no matches — _validate_test_type_name
+    # simulate the test types catalogue returning no matches — _validate_test_type_assignments
     # computes the difference between requested names and found names, and raises 422 if non-empty
-    mock_session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
+    mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
 
     mock_request, _ = _get_mock_request_with_id()
-    mock_request.test_type_names = ["SHOULD FAIL"]
+    mock_request.test_type_assignments = [TestTypeAssignment(name="SHOULD FAIL")]
 
     # _get_dataset_or_404 is patched as a safety net (AsyncMock is always truthy)
-    # _patch_rows lets execution reach _validate_test_type_name, which is where the 422 is raised
+    # _patch_rows lets execution reach _validate_test_type_assignments, where the 422 is raised
     with patch("assay.services.tests.create_new_test._get_dataset_or_404"), \
             _patch_rows(*_get_rows()), \
             pytest.raises(HTTPException) as exc:
         asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
 
     assert exc.value.status_code == 422
-
-
-
-
-

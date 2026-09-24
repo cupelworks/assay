@@ -11,7 +11,7 @@ from assay.schemas import (
     TestCaseID,
 )
 from assay.services.datasets._common import _get_all_rows_or_404, _get_dataset_or_404
-from assay.services.tests._common import _validate_test_type_name
+from assay.services.tests._common import _validate_test_type_assignments
 
 
 async def create_new_test(
@@ -19,19 +19,20 @@ async def create_new_test(
         session: AsyncSession) -> CreateTestCaseResponse:
     """Orchestrates test case creation: persists the model and returns the result.
 
-    Validates test type names against the catalogue before inserting. Raises
-    HTTP 422 if any name is not found in test_types.
+    Validates test type assignments against the catalogue before inserting.
+    Raises HTTP 422 if any name is unknown or a required config field is
+    missing.
 
     Args:
         request: Request containing the test name, input, optional expected/model outputs,
-            and optional list of test type names to assign.
+            and optional list of test type assignments.
         session: Async SQLAlchemy session injected by FastAPI.
 
     Returns:
         The created test case with its generated ID and all input fields.
     """
-    if request.test_type_names:
-        await _validate_test_type_name(session, request.test_type_names)
+    if request.test_type_assignments:
+        await _validate_test_type_assignments(session, request.test_type_assignments)
 
     test = TestModel(
         id=uuid.uuid4(),
@@ -44,9 +45,10 @@ async def create_new_test(
     test_types = [
         TestTypeAssignmentModel(
             test_id=test.id,
-            test_type_name=test_type_name
+            test_type_name=assignment.name,
+            config=assignment.config,
         )
-        for test_type_name in request.test_type_names
+        for assignment in request.test_type_assignments
     ]
 
     session.add(test)
@@ -59,7 +61,7 @@ async def create_new_test(
         input=test.input,
         model_output=test.model_output,
         expected_output=test.expected_output,
-        test_type_names=request.test_type_names,
+        test_type_assignments=request.test_type_assignments,
     )
 
 
@@ -69,7 +71,7 @@ async def create_new_test_from_dataset(
     """Create test cases in bulk from all rows of an existing dataset.
 
     Args:
-        request: Dataset ID and optional list of test type names to assign.
+        request: Dataset ID and optional list of test type assignments.
         session: Active async database session.
 
     Returns:
@@ -77,14 +79,15 @@ async def create_new_test_from_dataset(
 
     Raises:
         HTTPException: 404 if the dataset or its rows are not found.
-        HTTPException: 422 if any test type name is not in the catalogue.
+        HTTPException: 422 if any test type name is unknown or a required
+            config field is missing.
     """
     await _get_dataset_or_404(request.id, session)
     rows = await _get_all_rows_or_404(request.id, session)
-    
-    if request.test_type_names:
-        await _validate_test_type_name(session, request.test_type_names)
-        
+
+    if request.test_type_assignments:
+        await _validate_test_type_assignments(session, request.test_type_assignments)
+
     tests = [
         TestModel(
             id=uuid.uuid4(),
@@ -100,9 +103,10 @@ async def create_new_test_from_dataset(
     test_types = [
         TestTypeAssignmentModel(
             test_id=test.id,
-            test_type_name=test_type_name
+            test_type_name=assignment.name,
+            config=assignment.config,
         )
-        for test in tests for test_type_name in request.test_type_names
+        for test in tests for assignment in request.test_type_assignments
     ]
 
     session.add_all(tests)

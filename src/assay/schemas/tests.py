@@ -3,8 +3,27 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from assay.models import TestTypes, TestTypesCost
+from assay.models import ConfigFieldKind, TestTypes, TestTypesCost
 from assay.schemas import DataSetID, Pagination
+
+
+class TestTypeAssignment(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"name": "Regex Match", "config": {"pattern": "^\\d{3}-\\d{4}$"}}
+        }
+    )
+    name: str = Field(
+        ...,
+        description="Name of the test type to assign (must exist in test_types table).",
+        examples=["Regex Match"],
+    )
+    config: dict[str, str] | None = Field(
+        None,
+        description="Per-field config values, keyed by the type's config_fields[].key. "
+                    "Omit or null if the type has no non-reference config fields.",
+        examples=[{"pattern": "^\\d{3}-\\d{4}$"}],
+    )
 
 
 class CreateTestCaseRequest(BaseModel):
@@ -24,18 +43,18 @@ class CreateTestCaseRequest(BaseModel):
         None,
         description="The real output of the model",
     )
-    test_type_names: list[str] = Field(
+    test_type_assignments: list[TestTypeAssignment] = Field(
         default_factory=list,
-        description="Names of test types to assign to "
-                    "this test case (must exist in test_types table).",
+        description="Test types to assign to this test case, with any config "
+                    "each one needs.",
     )
 
 
 class CreateTestCaseFromDatasetRequest(DataSetID):
-    test_type_names: list[str] = Field(
+    test_type_assignments: list[TestTypeAssignment] = Field(
         default_factory=list,
-        description="Names of test types to assign to "
-        "this test case (must exist in test_types table).",
+        description="Test types to assign to this test case, with any config "
+                    "each one needs.",
     )
 
 
@@ -72,10 +91,11 @@ class ModifyTestCaseRequest(BaseModel):
         None,
         description="The real output of the model",
     )
-    test_type_names: list[str] | None = Field(
+    test_type_assignments: list[TestTypeAssignment] | None = Field(
         None,
-        description="Names of test types to assign to "
-                    "this test case (must exist in test_types table).",
+        description="Test types to assign to this test case, with any config "
+                    "each one needs. Replaces the full assignment list — not merged "
+                    "with what's already assigned.",
     )
 
 
@@ -91,13 +111,30 @@ class PaginatedTestCases(Pagination):
     test_cases: list[CreateTestCaseResponse]
 
 
+class ConfigFieldDescriptor(BaseModel):
+    key: str = Field(
+        description="Property name this field's value is stored/read under."
+    )
+    label: str = Field(
+        description="Human-readable label for this field."
+    )
+    kind: ConfigFieldKind = Field(
+        description="What kind of value this field holds. `reference` is reserved — "
+                    "it resolves to the test case's own expected_output rather than "
+                    "being stored per assignment."
+    )
+    required: bool = Field(
+        description="Whether this field must be filled in when the type is assigned."
+    )
+
+
 class TestTypesSchema(BaseModel):
     id: uuid.UUID = Field(
         description="Unique identifier of the test type catalogue entry."
     )
     name: str = Field(
         description="Unique, stable name used to reference this test type "
-                    "(e.g. in test_type_names) when assigning it to a test."
+                    "(e.g. in test_type_assignments) when assigning it to a test."
     )
     category: TestTypes = Field(
         description="Broad classification of the evaluation strategy: "
@@ -125,7 +162,7 @@ class TestTypesSchema(BaseModel):
         description="Known weaknesses or caveats to keep in mind when relying "
                     "on this test type."
     )
-    required_reference: bool | None = Field(
-        description="Whether this test type requires an expected_output to "
-                    "function correctly."
+    config_fields: list[ConfigFieldDescriptor] = Field(
+        description="Config fields this test type needs when assigned, if any. "
+                    "Empty for a self-contained type that needs no extra input."
     )

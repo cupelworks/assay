@@ -3,8 +3,8 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestModel, TestSetEntryModel, TestTypeAssignmentModel
-from assay.schemas import CreateTestCaseResponse, ModifyTestCaseRequest
-from assay.services.tests._common import _find_test_by_id_or_404, _validate_test_type_name
+from assay.schemas import CreateTestCaseResponse, ModifyTestCaseRequest, TestTypeAssignment
+from assay.services.tests._common import _find_test_by_id_or_404, _validate_test_type_assignments
 
 
 def _apply_scalar_updates(
@@ -29,7 +29,7 @@ def _apply_scalar_updates(
         found.model_output = request.model_output
 
 
-async def _apply_test_type_names_update(
+async def _apply_test_type_assignments_update(
         found: TestModel,
         request: ModifyTestCaseRequest,
         session: AsyncSession,
@@ -44,13 +44,18 @@ async def _apply_test_type_names_update(
         session: Active async database session.
 
     Raises:
-        HTTPException: 422 if any provided test type name is not in the catalogue.
+        HTTPException: 422 if any provided test type name is unknown or a
+            required config field is missing.
     """
-    if request.test_type_names is not None:
-        await _validate_test_type_name(session, request.test_type_names)
+    if request.test_type_assignments is not None:
+        await _validate_test_type_assignments(session, request.test_type_assignments)
         found.test_type_assignments = [
-            TestTypeAssignmentModel(test_id=found.id, test_type_name=name)
-            for name in request.test_type_names
+            TestTypeAssignmentModel(
+                test_id=found.id,
+                test_type_name=assignment.name,
+                config=assignment.config,
+            )
+            for assignment in request.test_type_assignments
         ]
 
 
@@ -62,13 +67,13 @@ async def modify_test_by_id(
     """Partially update a test case and return the full updated record.
 
     Only fields explicitly set in the request are written — omitted fields (None) are left
-    unchanged. For test_type_names specifically: None leaves assignments untouched,
+    unchanged. For test_type_assignments specifically: None leaves assignments untouched,
     while [] removes all existing assignments.
 
     Args:
         test_case_id: UUID of the test case to update.
         request: Partial update payload — any combination of name, input, expected_output,
-            model_output, and test_type_names.
+            model_output, and test_type_assignments.
         session: Active async database session.
 
     Returns:
@@ -76,12 +81,13 @@ async def modify_test_by_id(
 
     Raises:
         HTTPException: 404 if no test case with the given ID exists.
-        HTTPException: 422 if any provided test type name is not in the catalogue.
+        HTTPException: 422 if any provided test type name is unknown or a
+            required config field is missing.
     """
     found = await _find_test_by_id_or_404(test_case_id, session)
 
     _apply_scalar_updates(found, request)
-    await _apply_test_type_names_update(found, request, session)
+    await _apply_test_type_assignments_update(found, request, session)
 
     await session.commit()
 
@@ -91,5 +97,8 @@ async def modify_test_by_id(
         input=found.input,
         model_output=found.model_output,
         expected_output=found.expected_output,
-        test_type_names=[a.test_type_name for a in found.test_type_assignments],
+        test_type_assignments=[
+            TestTypeAssignment(name=a.test_type_name, config=a.config)
+            for a in found.test_type_assignments
+        ],
     )

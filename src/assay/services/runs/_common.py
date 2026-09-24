@@ -145,18 +145,18 @@ async def _check_test_set_entries_have_test_types_or_409(
         test_set_entry_ids: list[uuid.UUID],
         session: AsyncSession,
 ) -> None:
-    """Raise 409 if any given test set entry has zero test type names.
+    """Raise 409 if any given test set entry has zero test type assignments.
 
     A run against an entry with nothing to measure it against would be
     created only to sit pending forever with no way to ever produce a
     score. Every offending entry is reported together in one 409 rather
     than failing on the first one found.
 
-    test_type_names is a plain JSON column snapshotted onto the entry at
-    inclusion time (see TestSetEntryModel), not a relationship — so unlike
-    the TestModel equivalent, this needs no selectinload or join, just the
-    two columns actually used. Callers pass the specific entry IDs to
-    check; this does not check whether the entries' test sets themselves
+    test_type_assignments is a plain JSON column snapshotted onto the entry
+    at inclusion time (see TestSetEntryModel), not a relationship — so
+    unlike the TestModel equivalent, this needs no selectinload or join,
+    just the two columns actually used. Callers pass the specific entry IDs
+    to check; this does not check whether the entries' test sets themselves
     exist or are non-empty — callers are expected to have run that check first.
 
     Args:
@@ -164,14 +164,14 @@ async def _check_test_set_entries_have_test_types_or_409(
         session: Active async database session.
 
     Raises:
-        HTTPException: 409 if any given entry has zero test type names.
+        HTTPException: 409 if any given entry has zero test type assignments.
     """
     found = (await session.execute(
-        select(TestSetEntryModel.id, TestSetEntryModel.test_type_names)
+        select(TestSetEntryModel.id, TestSetEntryModel.test_type_assignments)
         .where(TestSetEntryModel.id.in_(test_set_entry_ids))
     )).all()
 
-    no_test_type_assignments = [row.id for row in found if not row.test_type_names]
+    no_test_type_assignments = [row.id for row in found if not row.test_type_assignments]
 
     if len(no_test_type_assignments) > 0:
         raise HTTPException(

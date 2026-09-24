@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 #   2. TEST SET (TestSetModel + TestSetEntryModel)
 #      A named, ordered collection of tests. When a test is added to a test set,
 #      a snapshot (TestSetEntryModel) is created at that exact moment — copying
-#      input, expected_output, and test_type_names from the live TestModel. From
+#      input, expected_output, and test_type_assignments from the live TestModel. From
 #      that point on, changes to the live test do NOT propagate into the set —
 #      this mirrors the behavior of test management tools like Jira/Zephyr, where
 #      a test set represents a stable, auditable baseline. The snapshot itself
@@ -152,6 +152,20 @@ class TestTypesCost(StrEnum):
     expensive = "expensive"
 
 
+class ConfigFieldKind(StrEnum):
+    """What kind of value a TestTypesModel.config_fields entry holds.
+
+    "reference" is reserved: a field of this kind is never stored per
+    assignment, it always resolves to the test case's own expected_output
+    (see docs/test_type_config/dev_notes.md). Every other kind is
+    per-assignment free text, stored under TestTypeAssignmentModel.config /
+    TestSetEntryModel.test_type_assignments, keyed by the field's own key.
+    """
+    reference = "reference"
+    multiline = "multiline"
+    rubric = "rubric"
+
+
 class TestTypesModel(Base):
     """
     A catalogue entry describing a supported evaluation method.
@@ -159,8 +173,8 @@ class TestTypesModel(Base):
     TestTypesModel is a reference table populated at setup time (e.g. via
     seed data). It describes the available evaluation strategies — deterministic
     checks, NLP metrics, or LLM-as-judge — along with metadata that helps the
-    user choose the right one (cost, limitations, whether a reference output is
-    required).
+    user choose the right one (cost, limitations, what config it needs when
+    assigned — see config_fields).
 
     Tests assign test types via TestTypeAssignmentModel, a junction table that
     references this model by name rather than UUID. This keeps assignments
@@ -177,8 +191,12 @@ class TestTypesModel(Base):
     best_for: Mapped[str] = mapped_column(Text, nullable=True)
     cost: Mapped[TestTypesCost | None] = mapped_column(SAEnum(TestTypesCost), nullable=True)
     limitations: Mapped[str] = mapped_column(Text, nullable=True)
-    # If True, the test type requires an expected_output to function correctly.
-    required_reference: Mapped[bool] = mapped_column(Boolean, nullable=True)
+    # Seeded server-side only, never user-editable through the API. Each item:
+    # {"key": str, "label": str, "kind": str, "required": bool}. kind "reference"
+    # is reserved — it never gets its own storage, it always resolves to the
+    # test case's own expected_output (see docs/test_type_config/dev_notes.md).
+    # Empty list for a self-contained type that needs no extra input.
+    config_fields: Mapped[list[dict]] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=True, default=lambda: datetime.now().astimezone()
@@ -283,6 +301,11 @@ class TestTypeAssignmentModel(Base):
                                                primary_key=True,)
     # References TestTypesModel.name — stable, human-readable, unique.
     test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), primary_key=True)
+    # Per-assignment config values, keyed by the test type's config_fields[].key.
+    # Null if the type has no non-reference config fields. A "reference"-kind
+    # field is never stored here — it always resolves to the live test's own
+    # expected_output (see docs/test_type_config/dev_notes.md).
+    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     test: Mapped["TestModel"] = relationship(back_populates="test_type_assignments",
                                              overlaps="test_types")
@@ -365,18 +388,19 @@ class TestSetEntryModel(Base):
     A snapshot of a TestModel at the moment it was added to a TestSetModel.
 
     This is the record that test set executions run against. It captures input,
-    expected_output, and test_type_names exactly as they were at snapshot time.
-    Subsequent edits to the originating TestModel never propagate here.
+    expected_output, and test_type_assignments exactly as they were at snapshot
+    time. Subsequent edits to the originating TestModel never propagate here.
 
     The entry itself is directly editable (PATCH) until it has been referenced
     by at least one TestRunModel — at that point it freezes and further edits
     are rejected with a 409, so a run's record of what it executed against
     always stays accurate.
 
-    Test type names (not UUIDs) are stored as a JSON list of strings. This keeps
-    the snapshot self-contained and human-readable, and consistent with the
-    name-based FK used in TestTypeAssignmentModel. The service layer populates
-    this by copying [tt.name for tt in test.test_types] at snapshot time.
+    Test type assignments are stored as a JSON list of {name, config} objects,
+    keyed by name (not UUID) for human-readability and resilience against
+    table rebuilds — consistent with the name-based FK used in
+    TestTypeAssignmentModel, which is where each assignment's config is
+    copied from at snapshot time.
 
     The test_id FK is kept for traceability — it allows navigating from a
     snapshot back to the current live test — but it is never used to pull or
@@ -405,9 +429,13 @@ class TestSetEntryModel(Base):
     expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_output: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Snapshot of test type names at inclusion time — stored as strings, not
-    # UUIDs, for human-readability and resilience against table rebuilds.
-    test_type_names: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Snapshot of test type assignments at inclusion time. Each item:
+    # {"name": str, "config": dict | null} — name (not UUID) for
+    # human-readability and resilience against table rebuilds, config copied
+    # from the live TestTypeAssignmentModel.config at snapshot time. A
+    # "reference"-kind field needs no entry here — it resolves from this
+    # entry's own expected_output above, already frozen.
+    test_type_assignments: Mapped[list[dict]] = mapped_column(JSON, default=list)
     snapshot_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )

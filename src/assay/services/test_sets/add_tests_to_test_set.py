@@ -24,8 +24,9 @@ async def add_tests_to_test_set_by_test_id(
     2. All requested test IDs must exist (404 otherwise).
     3. None of the requested tests may already be in the set (409 otherwise).
 
-    Each snapshot copies name, input, expected_output, model_output, and test_type_names
-    from the live test at the moment of this call. Subsequent edits to the originating
+    Each snapshot copies name, input, expected_output, model_output, and
+    test_type_assignments (including each assignment's config) from the live
+    test at the moment of this call. Subsequent edits to the originating
     test have no effect on the entry, though the entry itself can still be edited
     directly until it has been run at least once, after which it freezes. Duplicate
     test IDs in the request are silently deduplicated by the SQL IN clause — each test
@@ -59,7 +60,10 @@ async def add_tests_to_test_set_by_test_id(
             input=test.input,
             expected_output=test.expected_output,
             model_output=test.model_output,
-            test_type_names=[test_type.test_type_name for test_type in test.test_type_assignments],
+            test_type_assignments=[
+                {"name": ta.test_type_name, "config": ta.config}
+                for ta in test.test_type_assignments
+            ],
             snapshot_at=datetime.now(),
         )
         for test in found_tests

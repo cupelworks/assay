@@ -8,7 +8,7 @@ from assay.services.test_sets._common import (
     _find_test_set_entry_in_specific_test_set_or_404,
     _find_test_set_or_404,
 )
-from assay.services.tests._common import _validate_test_type_name
+from assay.services.tests._common import _validate_test_type_assignments
 from assay.services.tests.update_test import _apply_scalar_updates
 
 
@@ -27,14 +27,14 @@ async def modify_entry_by_id(
     snapshot time; test_case_id keeps pointing at the live test regardless.
 
     Only fields explicitly set in the request are written — omitted fields (None)
-    are left unchanged. For test_type_names specifically: None leaves the snapshot
-    list untouched, while [] clears it.
+    are left unchanged. For test_type_assignments specifically: None leaves the
+    snapshot list untouched, while [] clears it.
 
     Args:
         test_set_id: UUID of the test set the entry belongs to.
         entry_id: UUID of the entry to update.
         request: Partial update payload — any combination of name, input,
-            expected_output, model_output, and test_type_names.
+            expected_output, model_output, and test_type_assignments.
         session: Active async database session.
 
     Returns:
@@ -44,7 +44,8 @@ async def modify_entry_by_id(
         HTTPException: 404 if the test set does not exist, or no entry with that
             ID exists in it.
         HTTPException: 409 if the entry has already been executed at least once.
-        HTTPException: 422 if any provided test type name is not in the catalogue.
+        HTTPException: 422 if any provided test type name is unknown or a
+            required config field is missing.
     """
     await _find_test_set_or_404(test_set_id, session)
     found = await _find_test_set_entry_in_specific_test_set_or_404(test_set_id, entry_id, session)
@@ -52,9 +53,12 @@ async def modify_entry_by_id(
 
     _apply_scalar_updates(found, request)
 
-    if request.test_type_names is not None:
-        await _validate_test_type_name(session, request.test_type_names)
-        found.test_type_names = request.test_type_names
+    if request.test_type_assignments is not None:
+        await _validate_test_type_assignments(session, request.test_type_assignments)
+        found.test_type_assignments = [
+            {"name": assignment.name, "config": assignment.config}
+            for assignment in request.test_type_assignments
+        ]
 
     await session.commit()
 
@@ -65,5 +69,5 @@ async def modify_entry_by_id(
         input=found.input,
         expected_output=found.expected_output,
         model_output=found.model_output,
-        test_type_names=found.test_type_names,
+        test_type_assignments=found.test_type_assignments,
     )

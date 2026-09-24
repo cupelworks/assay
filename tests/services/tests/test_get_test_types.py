@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from assay.models import TestTypes, TestTypesCost
+from assay.schemas import ConfigFieldDescriptor
 from assay.services import get_test_types_by_category
 
 # --- get_test_types_by_category ---
@@ -31,7 +32,9 @@ def test_correct_mapping_of_test_type_fields():
     mock_test_type.best_for = "Summarization tasks."
     mock_test_type.cost = TestTypesCost.fast
     mock_test_type.limitations = "Doesn't account for semantic meaning."
-    mock_test_type.required_reference = True
+    mock_test_type.config_fields = [
+        {"key": "reference", "label": "Reference text", "kind": "reference", "required": True}
+    ]
 
     session = AsyncMock()
     session.scalars.return_value = [mock_test_type]
@@ -49,7 +52,10 @@ def test_correct_mapping_of_test_type_fields():
     assert returned.best_for == mock_test_type.best_for
     assert returned.cost == TestTypesCost.fast
     assert returned.limitations == mock_test_type.limitations
-    assert returned.required_reference is True
+    assert returned.config_fields == [
+        ConfigFieldDescriptor(key="reference", label="Reference text",
+                              kind="reference", required=True)
+    ]
 
 
 def test_nullable_fields_pass_through_as_none():
@@ -63,7 +69,9 @@ def test_nullable_fields_pass_through_as_none():
     mock_test_type.best_for = None
     mock_test_type.cost = None
     mock_test_type.limitations = None
-    mock_test_type.required_reference = None
+    # config_fields is never null at the model level (NOT NULL, default=list) —
+    # unlike the other fields checked here, there's no nullable case to cover for it.
+    mock_test_type.config_fields = []
 
     session = AsyncMock()
     session.scalars.return_value = [mock_test_type]
@@ -76,7 +84,7 @@ def test_nullable_fields_pass_through_as_none():
     assert returned.best_for is None
     assert returned.cost is None
     assert returned.limitations is None
-    assert returned.required_reference is None
+    assert returned.config_fields == []
 
 
 def _mock_test_type(name: str) -> MagicMock:
@@ -85,7 +93,7 @@ def _mock_test_type(name: str) -> MagicMock:
     mock_test_type = MagicMock(
         id=uuid.uuid4(), category=TestTypes.nlp_metric,
         description=None, is_active=True, created_at=None,
-        best_for=None, cost=TestTypesCost.fast, limitations=None, required_reference=True,
+        best_for=None, cost=TestTypesCost.fast, limitations=None, config_fields=[],
     )
     mock_test_type.name = name
     return mock_test_type

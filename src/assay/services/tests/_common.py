@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
 
-from assay.models import TestModel, TestTypesModel
+from assay.models import ConfigFieldKind, TestModel, TestTypesModel
+from assay.schemas import TestTypeAssignment
 
 
 def _check_difference_between_found_tests_and_requested_tests(
@@ -115,26 +116,62 @@ async def _find_test_by_id_or_404(
     return found
 
 
-async def _validate_test_type_name(
+async def _validate_test_type_assignments(
         session: AsyncSession,
-        test_type_names: list[str]) -> None:
-    """Checks that all requested test type names exist in the test_types catalogue.
+        assignments: list[TestTypeAssignment]) -> None:
+    """Checks that every assigned test type exists in the catalogue and that
+    each assignment supplies a value for every required config field its
+    type declares.
+
+    A config_fields entry of kind "reference" is never checked here — it
+    resolves from the test case's own expected_output, not from an
+    assignment's config (see docs/test_type_config/dev_notes.md).
 
     Args:
         session: Async SQLAlchemy session.
-        test_type_names: Names to validate against the catalogue.
+        assignments: Test type assignments to validate — each carries the
+            type's name and any per-field config values supplied for it.
 
     Raises:
-        HTTPException: 422 if any name is not found in test_types.
+        HTTPException: 422 listing unknown test type names and/or
+            assignments missing a required (non-reference) config field,
+            if either problem is found. Both are reported together in one
+            exception rather than failing on whichever is found first.
     """
-    found = await session.scalars(
-        select(TestTypesModel.name)
-        .where(TestTypesModel.name.in_(test_type_names))
-    )
+    requested_names = [assignment.name for assignment in assignments]
 
-    difference_set = set(test_type_names) - set(found.all())
-    if difference_set:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Unknown test types: {difference_set}"
-        )
+    found = (await session.execute(
+        select(TestTypesModel.name, TestTypesModel.config_fields)
+        .where(TestTypesModel.name.in_(requested_names))
+    )).all()
+    config_fields_by_name = {row.name: row.config_fields for row in found}
+
+    unknown_names = set(requested_names) - set(config_fields_by_name)
+
+    missing_required_fields = []
+    for assignment in assignments:
+        config_fields = config_fields_by_name.get(assignment.name)
+        if config_fields is None:
+            continue  # already reported via unknown_names
+
+        config = assignment.config or {}
+        for field in config_fields:
+            if field["kind"] == ConfigFieldKind.reference or not field["required"]:
+                continue
+            if not config.get(field["key"]):
+                missing_required_fields.append(
+                    f"'{assignment.name}' is missing required config field '{field['key']}'"
+                )
+
+    if not unknown_names and not missing_required_fields:
+        return
+
+    problems = []
+    if unknown_names:
+        problems.append(f"Unknown test types: {sorted(unknown_names)}")
+    problems.extend(missing_required_fields)
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="; ".join(problems),
+    )

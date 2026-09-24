@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from assay.schemas import ModifyTestCaseRequest
+from assay.schemas import ModifyTestCaseRequest, TestTypeAssignment
 from assay.services import modify_test_by_id
 
 
@@ -46,7 +46,7 @@ def test_modify_name_only():
     assert response.input == mock_test.input
     assert response.model_output == mock_test.model_output
     assert response.expected_output == mock_test.expected_output
-    assert response.test_type_names == []
+    assert response.test_type_assignments == []
 
 
 def test_modify_multiple_fields():
@@ -64,7 +64,7 @@ def test_modify_multiple_fields():
     assert response.input == mock_request.input
     assert response.model_output == mock_request.model_output
     assert response.expected_output == mock_request.expected_output
-    assert response.test_type_names == []
+    assert response.test_type_assignments == []
 
 
 def test_modify_raises_404_if_test_not_found():
@@ -86,11 +86,19 @@ def test_modify_raises_422_for_unknown_test_type():
 
     mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
     mock_request = ModifyTestCaseRequest(
-        test_type_names=["Testing Name", "ROUGE"],
+        test_type_assignments=[
+            TestTypeAssignment(name="Testing Name"),
+            TestTypeAssignment(name="ROUGE"),
+        ],
     ) # noqa
     session = _get_session(mock_test)
-    session.scalars.return_value = MagicMock(
-        all=MagicMock(return_value=["ROUGE"])
+    catalogue_row = MagicMock()
+    catalogue_row.name = "ROUGE"
+    catalogue_row.config_fields = [
+        {"key": "reference", "label": "Reference text", "kind": "reference", "required": True}
+    ]
+    session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[catalogue_row])
     )
 
     with pytest.raises(HTTPException) as e:
@@ -101,36 +109,37 @@ def test_modify_raises_422_for_unknown_test_type():
     assert "Testing Name" in str(e.value.detail)
 
 
-def test_modify_test_type_names_empty_removes_all_assignments():
+def test_modify_test_type_assignments_empty_removes_all_assignments():
     mock_test_id = uuid.uuid4()
 
     mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
     mock_test.test_type_assignments = ["ROUGE"]
     mock_request = ModifyTestCaseRequest(
-        test_type_names=[],
+        test_type_assignments=[],
     ) # noqa
     session = _get_session(mock_test)
 
     with patch(
-            "assay.services.tests.update_test._validate_test_type_name"):
+            "assay.services.tests.update_test._validate_test_type_assignments"):
         response = _call_api_orchestrator(mock_test_id, mock_request, session)
 
     session.commit.assert_called_once()
-    assert response.test_type_names == []
+    assert response.test_type_assignments == []
 
 
-def test_modify_test_type_names_none_leaves_assignments_untouched():
+def test_modify_test_type_assignments_none_leaves_assignments_untouched():
     mock_test_id = uuid.uuid4()
 
     mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
     mock_assignment = MagicMock()
     mock_assignment.test_type_name = "ROUGE"
+    mock_assignment.config = None
     mock_test.test_type_assignments = [mock_assignment]
     mock_request = ModifyTestCaseRequest()  # noqa
     session = _get_session(mock_test)
 
-    with patch("assay.services.tests.update_test._validate_test_type_name"):
+    with patch("assay.services.tests.update_test._validate_test_type_assignments"):
         response = _call_api_orchestrator(mock_test_id, mock_request, session)
 
     session.commit.assert_called_once()
-    assert response.test_type_names == ["ROUGE"]
+    assert response.test_type_assignments == [TestTypeAssignment(name="ROUGE", config=None)]

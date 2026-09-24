@@ -146,7 +146,7 @@ def test_new_live_test_set_run_entries_missing_test_types():
     entry_id = uuid.uuid4()
     session.scalars.return_value = MagicMock(all=MagicMock(return_value=[entry_id]))
     session.execute.return_value = MagicMock(all=MagicMock(
-        return_value=[MagicMock(id=entry_id, test_type_names=[])]))
+        return_value=[MagicMock(id=entry_id, test_type_assignments=[])]))
 
     with pytest.raises(HTTPException) as e:
         asyncio.run(create_new_live_test_set_run(test_set_id, session))
@@ -178,7 +178,7 @@ def test_new_live_test_set_run_happy_path():
         return_value=[entry.id for entry in available_test_set_entry_models]))
     session.execute.return_value = MagicMock(all=MagicMock(
         return_value=[
-            MagicMock(id=entry.id, test_type_names=["bleu"])
+            MagicMock(id=entry.id, test_type_assignments=["bleu"])
             for entry in available_test_set_entry_models
         ]))
 
@@ -433,7 +433,7 @@ def test_new_live_test_plan_run_entries_missing_test_types():
         MagicMock(all=MagicMock(
             return_value=[MagicMock(id=entry_id, test_set_id=test_set_id)])),
         MagicMock(all=MagicMock(
-            return_value=[MagicMock(id=entry_id, test_type_names=[])])),
+            return_value=[MagicMock(id=entry_id, test_type_assignments=[])])),
     ]
 
     with pytest.raises(HTTPException) as e:
@@ -464,7 +464,7 @@ def test_new_live_test_plan_run_happy_path():
             for i, entry_id in enumerate(available_entry_ids)
         ])),
         MagicMock(all=MagicMock(return_value=[
-            MagicMock(id=entry_id, test_type_names=["bleu"])
+            MagicMock(id=entry_id, test_type_assignments=["bleu"])
             for entry_id in available_entry_ids
         ])),
     ]

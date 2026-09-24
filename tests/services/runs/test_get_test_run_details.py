@@ -269,7 +269,9 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output="Hello, Alice!",
-        test_type_names=["exact_match", "bleu"],
+        test_type_assignments=[
+            {"name": "exact_match", "config": None}, {"name": "bleu", "config": None}
+        ],
         snapshot_at=snapshot_at,
     )
     result = MagicMock()
@@ -296,7 +298,9 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output="Hello, Alice!",
-        test_type_names=["exact_match", "bleu"],
+        test_type_assignments=[
+            {"name": "exact_match", "config": None}, {"name": "bleu", "config": None}
+        ],
         test_case_snapshot_at=TestCaseSnapshotDate(snapshot_at=snapshot_at),
         test_set_id=TestSetID(id=test_set_id),
     )
@@ -342,7 +346,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_reachable_after_unlink
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output="Hello, Alice!",
-        test_type_names=["bleu"],
+        test_type_assignments=[{"name": "bleu", "config": None}],
         snapshot_at=snapshot_at,
     )
     result = MagicMock()
@@ -388,7 +392,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_termina
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output=None,
-        test_type_names=["exact_match"],
+        test_type_assignments=[{"name": "exact_match", "config": None}],
         snapshot_at=snapshot_at,
     )
     result = MagicMock()
@@ -414,7 +418,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_termina
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output=None,
-        test_type_names=["exact_match"],
+        test_type_assignments=[{"name": "exact_match", "config": None}],
         test_case_snapshot_at=TestCaseSnapshotDate(snapshot_at=snapshot_at),
         test_set_id=TestSetID(id=test_set_id),
     )
@@ -546,7 +550,9 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path():
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output="Hello, Alice!",
-        test_type_names=["exact_match", "bleu"],
+        test_type_assignments=[
+            {"name": "exact_match", "config": None}, {"name": "bleu", "config": None}
+        ],
         snapshot_at=snapshot_at,
     )
     result = MagicMock()
@@ -573,7 +579,9 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path():
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output="Hello, Alice!",
-        test_type_names=["exact_match", "bleu"],
+        test_type_assignments=[
+            {"name": "exact_match", "config": None}, {"name": "bleu", "config": None}
+        ],
         test_case_snapshot_at=TestCaseSnapshotDate(snapshot_at=snapshot_at),
         test_set_id=TestSetID(id=test_set_id),
         test_plan_id=TestPlanID(id=test_plan_id),
@@ -609,7 +617,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output=None,
-        test_type_names=["exact_match"],
+        test_type_assignments=[{"name": "exact_match", "config": None}],
         snapshot_at=snapshot_at,
     )
     result = MagicMock()
@@ -635,7 +643,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output=None,
-        test_type_names=["exact_match"],
+        test_type_assignments=[{"name": "exact_match", "config": None}],
         test_case_snapshot_at=TestCaseSnapshotDate(snapshot_at=snapshot_at),
         test_set_id=TestSetID(id=test_set_id),
         test_plan_id=TestPlanID(id=test_plan_id),
@@ -686,7 +694,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlin
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
         model_output="Hello, Alice!",
-        test_type_names=["bleu"],
+        test_type_assignments=[{"name": "bleu", "config": None}],
         snapshot_at=snapshot_at,
     )
     result = MagicMock()

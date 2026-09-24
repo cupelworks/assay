@@ -367,7 +367,13 @@ async def delete_a_test_set(
                                             "order #4471.",
                         "model_output": "Your refund for order #4471 has been "
                                          "issued.",
-                        "test_type_names": ["semantic_similarity", "toxicity"],
+                        "test_type_assignments": [
+                            {"name": "Cosine Similarity", "config": None},
+                            {
+                                "name": "Toxicity",
+                                "config": {"rubric": "Flag anything that could read as rude."},
+                            },
+                        ],
                     }
                 }
             },
@@ -412,11 +418,12 @@ async def delete_a_test_set(
             },
         },
         422: {
-            "description": "One or more test type names are not in the catalogue.",
+            "description": "One or more test type names are not in the catalogue, "
+                           "or an assignment is missing a required config field.",
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": "Unknown test types: {'Invalid Type'}"
+                        "detail": "Unknown test types: ['Invalid Type']"
                     }
                 }
             },
@@ -439,9 +446,10 @@ async def update_a_test_set_entry(
     at the live test regardless.
 
     Only fields explicitly set in the request body are written — omitted fields are
-    left unchanged. For `test_type_names` specifically, omitting it leaves the
+    left unchanged. For `test_type_assignments` specifically, omitting it leaves the
     snapshot list untouched, while `[]` clears it. Each provided name must exist in
-    the test types catalogue — a 422 is returned if any name is unrecognized.
+    the test types catalogue and satisfy that type's required config fields — a 422
+    is returned otherwise.
 
     Returns the full updated entry, so no follow-up GET is needed.
     """
@@ -466,7 +474,13 @@ async def update_a_test_set_entry(
                                             "order #4471.",
                         "model_output": "Your refund for order #4471 has been "
                                          "issued.",
-                        "test_type_names": ["semantic_similarity", "toxicity"],
+                        "test_type_assignments": [
+                            {"name": "Cosine Similarity", "config": None},
+                            {
+                                "name": "Toxicity",
+                                "config": {"rubric": "Flag anything that could read as rude."},
+                            },
+                        ],
                     }
                 }
             },
@@ -507,7 +521,7 @@ async def get_single_test_set_entry(
     """Retrieve a single entry from a test set by its ID.
 
     Returns the entry's snapshot data (`name`, `input`, `expected_output`,
-    `model_output`, `test_type_names`) as it was at the moment the test was added to
+    `model_output`, `test_type_assignments`) as it was at the moment the test was added to
     the set — or as it was last edited via `PATCH`, if it has been edited and has no
     runs yet — along with `test_case_id`, which traces the entry back to the live
     test it was created from.
@@ -539,7 +553,13 @@ async def get_single_test_set_entry(
                                                     "order #4471.",
                                 "model_output": "Your refund for order #4471 has been "
                                                  "issued.",
-                                "test_type_names": ["semantic_similarity", "toxicity"],
+                                "test_type_assignments": [
+                                    {"name": "Cosine Similarity", "config": None},
+                                    {
+                                        "name": "Toxicity",
+                                        "config": {"rubric": "Flag anything rude."},
+                                    },
+                                ],
                             },
                             {
                                 "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
@@ -552,7 +572,9 @@ async def get_single_test_set_entry(
                                                     "the email used at checkout?",
                                 "model_output": "I'm sorry, I can't process refunds "
                                                  "without an order number.",
-                                "test_type_names": ["semantic_similarity"],
+                                "test_type_assignments": [
+                                    {"name": "Cosine Similarity", "config": None},
+                                ],
                             },
                         ],
                     }
@@ -590,7 +612,7 @@ async def get_all_test_set_entries(
 
     Each entry is a snapshot captured at the moment a test was added to the set via
     `POST /test-sets/{test_set_id}/entries` — `input`, `expected_output`,
-    `model_output`, and `test_type_names` reflect the test's state at that time, not
+    `model_output`, and `test_type_assignments` reflect the test's state at that time, not
     its current live state, and never re-sync from it. The entry itself can still be
     edited directly via `PATCH /test-sets/{test_set_id}/entries/{entry_id}` until it
     has been run at least once, after which it freezes. `test_case_id` traces the
@@ -670,7 +692,7 @@ async def add_tests_to_test_set(
     """Snapshot one or more tests into a test set.
 
     Each test in the request body is copied into an entry that captures `name`,
-    `input`, `expected_output`, `model_output`, and `test_type_names` at the
+    `input`, `expected_output`, `model_output`, and `test_type_assignments` at the
     moment this endpoint is called. Subsequent edits to the originating test have
     no effect on the entry — but the entry itself can still be edited directly via
     `PATCH /test-sets/{test_set_id}/entries/{entry_id}` until it has been run at

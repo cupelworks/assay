@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from assay.models import TestSetEntryModel, TestSetModel
+from assay.schemas import TestTypeAssignment
 from assay.services import modify_entry_by_id
 
 _PATCH_FIND_TEST_SET_OR_404 = "assay.services.test_sets.update_entry._find_test_set_or_404"
@@ -83,12 +84,17 @@ def test_test_set_entry_has_runs():
     assert session.scalar.call_count == 3
 
 
-def test_invalid_test_type_names():
+def test_invalid_test_type_assignment():
     request = MagicMock()
-    request.test_type_names = ["Testing wrong name"]
+    request.test_type_assignments = [TestTypeAssignment(name="Testing wrong name")]
 
     session = AsyncMock()
-    session.scalars.return_value = MagicMock(all=MagicMock(return_value=["ROUGE"]))
+    catalogue_row = MagicMock()
+    catalogue_row.name = "ROUGE"
+    catalogue_row.config_fields = [
+        {"key": "reference", "label": "Reference text", "kind": "reference", "required": True}
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[catalogue_row]))
 
     with patch(_PATCH_FIND_TEST_SET_OR_404), \
             patch(_PATCH_FIND_TEST_SET_ENTRY_IN_SPECIFIC_TEST_SET_OR_404), \
@@ -102,24 +108,24 @@ def test_invalid_test_type_names():
         )
 
     assert e.value.status_code == 422
-    assert request.test_type_names[0] in str(e.value.detail)
+    assert request.test_type_assignments[0].name in str(e.value.detail)
 
 
-def test_clearing_test_type_names():
+def test_clearing_test_type_assignments():
     request = MagicMock()
-    request.test_type_names = []
+    request.test_type_assignments = []
 
     session = AsyncMock()
     session.scalar.return_value = TestSetEntryModel(
         id=uuid.uuid4(),
         test_id=uuid.uuid4(),
-        test_type_names=["ROUGE"],
+        test_type_assignments=[{"name": "ROUGE", "config": None}],
         name="",
         input="",
         expected_output="",
         model_output="",
     )
-    session.scalars.return_value = MagicMock(all=MagicMock(return_value=["ROUGE"]))
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
 
     with patch(_PATCH_FIND_TEST_SET_OR_404), \
             patch(_PATCH_CHECK_TEST_SET_ENTRY_HAS_NO_RUNS_OR_409), \
@@ -130,15 +136,15 @@ def test_clearing_test_type_names():
             )
         )
 
-    assert response.test_type_names == []
+    assert response.test_type_assignments == []
     session.commit.assert_called_once()
 
 
-def test_general_happy_path_with_test_type_names_on_none():
+def test_general_happy_path_with_test_type_assignments_on_none():
     entry_id = uuid.uuid4()
 
     request = MagicMock()
-    request.test_type_names = None
+    request.test_type_assignments = None
     request.name = "New name"
     request.input = "New input"
     request.expected_output = None
@@ -148,7 +154,7 @@ def test_general_happy_path_with_test_type_names_on_none():
     session.scalar.return_value = TestSetEntryModel(
         id=entry_id,
         test_id=uuid.uuid4(),
-        test_type_names=["ROUGE"],
+        test_type_assignments=[{"name": "ROUGE", "config": None}],
         name="Old name",
         input="Old input",
         expected_output="Old expected output",
@@ -164,10 +170,10 @@ def test_general_happy_path_with_test_type_names_on_none():
         )
 
     assert response.id == entry_id
-    assert response.test_type_names == ["ROUGE"]
+    assert response.test_type_assignments == [TestTypeAssignment(name="ROUGE", config=None)]
     assert response.name == request.name
     assert response.input == request.input
     assert response.model_output == "Old model output"
     assert response.expected_output == "Old expected output"
     session.commit.assert_called_once()
-    session.scalars.assert_not_called()
+    session.execute.assert_not_called()

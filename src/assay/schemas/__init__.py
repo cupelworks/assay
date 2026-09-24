@@ -39,6 +39,7 @@ from assay.schemas.test_sets import (
     TestSetName,
 )
 from assay.schemas.tests import (
+    ConfigFieldDescriptor,
     CreateTestCaseFromDatasetRequest,
     CreateTestCaseFromDatasetResponse,
     CreateTestCaseRequest,
@@ -47,6 +48,7 @@ from assay.schemas.tests import (
     PaginatedTestCases,
     TestCaseID,
     TestCaseSnapshotDate,
+    TestTypeAssignment,
     TestTypesSchema,
 )
 
@@ -101,6 +103,7 @@ from assay.schemas.runs import (
 __all__ = [
     "ZTestRequest",
     "ZTestResult",
+    "ConfigFieldDescriptor",
     "CreateTestCaseRequest",
     "CreateTestCaseResponse",
     "PaginatedTestCases",
@@ -178,5 +181,6 @@ __all__ = [
     "TestSetCreationResponse",
     "TestSetReplayedExecutionCreationMetadata",
     "TestSetReplayedExecutionID",
+    "TestTypeAssignment",
     "TestTypesSchema",
 ]

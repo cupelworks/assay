@@ -4,6 +4,7 @@ from assay.models.base import Base
 from assay.models.datasets import DatasetModel, DatasetRowModel
 from assay.models.stats import StatisticalVerificationModel
 from assay.models.test import (
+    ConfigFieldKind,
     TestModel,
     TestPlanEntryModel,
     TestPlanExecutionModel,
@@ -21,6 +22,7 @@ from assay.models.test import (
 
 __all__ = [
     "Base",
+    "ConfigFieldKind",
     "DatasetModel",
     "DatasetRowModel",
     "StatisticalVerificationModel",
