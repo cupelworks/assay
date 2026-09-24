@@ -94,11 +94,19 @@ async def get_standalone_run_metadata_all_test_runs(
     )
 
 
+_ORIGIN_FK_COLUMN = {
+    RunOrigin.standalone: TestRunModel.test_id,
+    RunOrigin.test_set: TestRunModel.test_set_execution_id,
+    RunOrigin.test_plan: TestRunModel.test_plan_execution_id,
+}
+
+
 async def get_run_metadata_all_runs(
         session: AsyncSession,
         offset: int = 0,
         limit: int = 100,
         status: TestStatus | None = None,
+        origin: RunOrigin | None = None,
 ) -> PaginatedRunMetadata:
     """Orchestrates run listing across the entire system, regardless of
     origin: counts every TestRunModel row in scope, fetches the requested
@@ -106,12 +114,14 @@ async def get_run_metadata_all_runs(
     from TestRunModel's own mode invariant.
 
     Unlike every other listing in this module, this has no parent resource
-    to validate — no guard runs first — and no origin-specific filter: every
-    run is in scope, whether it was created standalone, via a test set
-    execution, or via a test plan execution. A single query over
+    to validate — no guard runs first. With neither `status` nor `origin`
+    given, every run is in scope, whether it was created standalone, via a
+    test set execution, or via a test plan execution. A single query over
     TestRunModel covers all three, since the mode a row belongs to is
     already fully determined by which of its own FK columns is set (see
-    TestRunModel's docstring) — no join needed to tell them apart.
+    TestRunModel's docstring) — no join needed to tell them apart, and
+    filtering by `origin` is just an IS NOT NULL check on the one FK column
+    that mode implies, same reasoning.
 
     Args:
         session: Async SQLAlchemy session injected by FastAPI.
@@ -121,6 +131,11 @@ async def get_run_metadata_all_runs(
             currently at this status (e.g. `Pending`, to see what's still
             queued). `None` (the default) returns every run regardless of
             status, the original unfiltered behavior.
+        origin: If given, restricts both the count and the page to runs
+            created this way (`Standalone`, `TestSet`, or `TestPlan`).
+            `None` (the default) returns every run regardless of origin.
+            Combines with `status` — both filters apply together when both
+            are given.
 
     Returns:
         A paginated response with each run's ID, status, created_at,
@@ -142,6 +157,10 @@ async def get_run_metadata_all_runs(
     if status is not None:
         count_stmt = count_stmt.where(TestRunModel.status == status)
         found_stmt = found_stmt.where(TestRunModel.status == status)
+    if origin is not None:
+        fk_column = _ORIGIN_FK_COLUMN[origin]
+        count_stmt = count_stmt.where(fk_column.is_not(None))
+        found_stmt = found_stmt.where(fk_column.is_not(None))
 
     total = await session.scalar(count_stmt) or 0
 

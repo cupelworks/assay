@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
 from assay.models import TestStatus
-from assay.schemas import PaginatedExecutionMetadata, PaginatedRunMetadata
+from assay.schemas import PaginatedExecutionMetadata, PaginatedRunMetadata, RunOrigin
 from assay.services import get_execution_metadata_all_executions, get_run_metadata_all_runs
 
 router = APIRouter(tags=["run (all)"])
@@ -93,6 +93,17 @@ async def get_all_run_metadata(
                 ),
             ),
         ] = None,
+        origin: Annotated[
+            RunOrigin | None,
+            Query(
+                description=(
+                    "If given, restricts the list to runs created this way "
+                    "(`Standalone`, `TestSet`, or `TestPlan`). Omit to see every "
+                    "run regardless of origin. Combines with `status` — both "
+                    "filters apply together when both are given."
+                ),
+            ),
+        ] = None,
 ) -> PaginatedRunMetadata: # pragma: no cover
     """List every run ever created, across every test, test set, and test
     plan, newest first.
@@ -121,8 +132,13 @@ async def get_all_run_metadata(
     `Running`, `Green`, `Amber`, `Red`, or `NotRan`) — both `total` and the
     returned page are scoped to it. Omit it to see every run regardless of
     status, the endpoint's original behavior.
+
+    Pass `origin` to restrict the feed to one origin at a time (`Standalone`,
+    `TestSet`, or `TestPlan`) the same way — an IS NOT NULL check on
+    whichever FK column that origin implies, no join needed. Combines with
+    `status`: passing both filters on their intersection.
     """
-    return await get_run_metadata_all_runs(session, offset, limit, status)
+    return await get_run_metadata_all_runs(session, offset, limit, status, origin)
 
 
 @router.get(

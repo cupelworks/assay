@@ -242,6 +242,60 @@ def test_get_run_metadata_all_runs_no_status_filter_when_omitted():
     assert found_stmt.whereclause is None
 
 
+@pytest.mark.parametrize(
+    "origin,expected_column",
+    [
+        (RunOrigin.standalone, "test_runs.test_id"),
+        (RunOrigin.test_set, "test_runs.test_set_execution_id"),
+        (RunOrigin.test_plan, "test_runs.test_plan_execution_id"),
+    ],
+)
+def test_get_run_metadata_all_runs_filters_by_origin_when_given(origin, expected_column):
+    session = AsyncMock()
+    session.scalar.return_value = 1
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    asyncio.run(get_run_metadata_all_runs(session, origin=origin))
+
+    count_stmt = session.scalar.call_args[0][0]
+    found_stmt = session.execute.call_args[0][0]
+    count_sql = str(count_stmt.compile(compile_kwargs={"literal_binds": True}))
+    found_sql = str(found_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert f"{expected_column} IS NOT NULL" in count_sql
+    assert f"{expected_column} IS NOT NULL" in found_sql
+
+
+def test_get_run_metadata_all_runs_no_origin_filter_when_omitted():
+    session = AsyncMock()
+    session.scalar.return_value = 0
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    asyncio.run(get_run_metadata_all_runs(session))
+
+    count_stmt = session.scalar.call_args[0][0]
+    found_stmt = session.execute.call_args[0][0]
+    assert count_stmt.whereclause is None
+    assert found_stmt.whereclause is None
+
+
+def test_get_run_metadata_all_runs_status_and_origin_filters_combine():
+    session = AsyncMock()
+    session.scalar.return_value = 1
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    asyncio.run(get_run_metadata_all_runs(
+        session, status=TestStatus.pending, origin=RunOrigin.test_set
+    ))
+
+    count_stmt = session.scalar.call_args[0][0]
+    found_stmt = session.execute.call_args[0][0]
+    count_sql = str(count_stmt.compile(compile_kwargs={"literal_binds": True}))
+    found_sql = str(found_stmt.compile(compile_kwargs={"literal_binds": True}))
+    for sql in (count_sql, found_sql):
+        assert "test_runs.status = 'pending'" in sql
+        assert "test_runs.test_set_execution_id IS NOT NULL" in sql
+
+
 # --- get_test_set_execution_metadata_all_executions() ---
 
 def test_get_test_set_execution_metadata_all_executions_test_set_not_found():
