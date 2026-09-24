@@ -164,6 +164,7 @@ class ConfigFieldKind(StrEnum):
     reference = "reference"
     multiline = "multiline"
     rubric = "rubric"
+    numeric = "numeric"
 
 
 class TestTypesModel(Base):

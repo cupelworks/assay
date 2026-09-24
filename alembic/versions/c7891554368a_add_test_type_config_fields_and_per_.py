@@ -45,9 +45,10 @@ def _seed_config_fields() -> None:
     """Populate config_fields for every seeded test type.
 
     Values exactly as tabulated in docs/test_type_config/dev_notes.md note
-    2/7 — kind "reference" resolves to expected_output rather than being
+    2/7/8 — kind "reference" resolves to expected_output rather than being
     stored per-assignment; "rubric" fields are optional on every
-    llm_as_judge type.
+    llm_as_judge type; "threshold" fields are required on every nlp_metric
+    type, unvalidated by the API (note 8 — that's on the FE to catch).
     """
     test_types_table = sa.table(
         "test_types",
@@ -57,6 +58,10 @@ def _seed_config_fields() -> None:
 
     reference_field = [
         {"key": "reference", "label": "Reference text", "kind": "reference", "required": True}
+    ]
+    threshold_field = [
+        {"key": "threshold", "label": "Minimum score to pass",
+         "kind": "numeric", "required": True}
     ]
 
     config_fields_by_name = {
@@ -70,11 +75,11 @@ def _seed_config_fields() -> None:
             {"key": "substring", "label": "Required substring",
              "kind": "multiline", "required": True},
         ],
-        "ROUGE": reference_field,
-        "BERTScore": reference_field,
-        "BLEU": reference_field,
-        "METEOR": reference_field,
-        "Cosine Similarity": reference_field,
+        "ROUGE": [*reference_field, *threshold_field],
+        "BERTScore": [*reference_field, *threshold_field],
+        "BLEU": [*reference_field, *threshold_field],
+        "METEOR": [*reference_field, *threshold_field],
+        "Cosine Similarity": [*reference_field, *threshold_field],
         "Correctness": [
             *reference_field,
             {"key": "rubric", "label": "Custom correctness rubric",

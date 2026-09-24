@@ -175,6 +175,44 @@ def test_validate_passes_for_optional_config_omitted():
     ))  # no raise
 
 
+def test_validate_raises_for_missing_required_threshold():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("ROUGE", [
+            {"key": "reference", "label": "Reference text",
+             "kind": "reference", "required": True},
+            {"key": "threshold", "label": "Minimum score to pass",
+             "kind": "numeric", "required": True},
+        ])])
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_validate_test_type_assignments(
+            mock_session, [TestTypeAssignment(name="ROUGE")]
+        ))
+    assert exc.value.status_code == 422
+    assert "threshold" in str(exc.value.detail)
+
+
+def test_validate_does_not_check_threshold_format():
+    mock_session = AsyncMock()
+    mock_session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("ROUGE", [
+            {"key": "reference", "label": "Reference text",
+             "kind": "reference", "required": True},
+            {"key": "threshold", "label": "Minimum score to pass",
+             "kind": "numeric", "required": True},
+        ])])
+    )
+
+    # note 8: the API only checks presence, never format — a non-numeric
+    # string is the FE's problem to catch, not the API's.
+    asyncio.run(_validate_test_type_assignments(
+        mock_session,
+        [TestTypeAssignment(name="ROUGE", config={"threshold": "not a number"})],
+    ))  # no raise
+
+
 # -- create_new_test_from_dataset
 
 def _get_mock_request_with_id():
