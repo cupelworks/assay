@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
+from assay.models import TestStatus
 from assay.schemas import PaginatedExecutionMetadata, PaginatedRunMetadata
 from assay.services import get_execution_metadata_all_executions, get_run_metadata_all_runs
 
@@ -81,7 +82,17 @@ async def get_all_run_metadata(
         session: SessionDep,
         offset: int = Query(default=0, description="Number of records to skip for pagination."),
         limit: int = Query(default=100, description="Maximum number of records to "
-                                                    "return for pagination.")
+                                                    "return for pagination."),
+        status: Annotated[
+            TestStatus | None,
+            Query(
+                description=(
+                    "If given, restricts the list to runs currently at this status "
+                    "(e.g. `Pending`, to see what's still queued). Omit to see "
+                    "every run regardless of status."
+                ),
+            ),
+        ] = None,
 ) -> PaginatedRunMetadata: # pragma: no cover
     """List every run ever created, across every test, test set, and test
     plan, newest first.
@@ -105,8 +116,13 @@ async def get_all_run_metadata(
     rest are always null on that item. Results are ordered by `created_at`
     descending (ties broken by `id` descending), plus the usual `total`,
     `offset`, and `limit`.
+
+    Pass `status` to restrict the feed to one status at a time (`Pending`,
+    `Running`, `Green`, `Amber`, `Red`, or `NotRan`) — both `total` and the
+    returned page are scoped to it. Omit it to see every run regardless of
+    status, the endpoint's original behavior.
     """
-    return await get_run_metadata_all_runs(session, offset, limit)
+    return await get_run_metadata_all_runs(session, offset, limit, status)
 
 
 @router.get(

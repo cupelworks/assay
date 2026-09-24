@@ -214,6 +214,34 @@ def test_get_run_metadata_all_runs_happy_path():
     ]
 
 
+def test_get_run_metadata_all_runs_filters_by_status_when_given():
+    session = AsyncMock()
+    session.scalar.return_value = 1
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    asyncio.run(get_run_metadata_all_runs(session, status=TestStatus.pending))
+
+    count_stmt = session.scalar.call_args[0][0]
+    found_stmt = session.execute.call_args[0][0]
+    count_sql = str(count_stmt.compile(compile_kwargs={"literal_binds": True}))
+    found_sql = str(found_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "test_runs.status = 'pending'" in count_sql
+    assert "test_runs.status = 'pending'" in found_sql
+
+
+def test_get_run_metadata_all_runs_no_status_filter_when_omitted():
+    session = AsyncMock()
+    session.scalar.return_value = 0
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    asyncio.run(get_run_metadata_all_runs(session))
+
+    count_stmt = session.scalar.call_args[0][0]
+    found_stmt = session.execute.call_args[0][0]
+    assert count_stmt.whereclause is None
+    assert found_stmt.whereclause is None
+
+
 # --- get_test_set_execution_metadata_all_executions() ---
 
 def test_get_test_set_execution_metadata_all_executions_test_set_not_found():

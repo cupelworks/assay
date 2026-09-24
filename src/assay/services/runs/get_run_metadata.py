@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import TestPlanExecutionModel, TestRunModel, TestSetExecutionModel
+from assay.models import TestPlanExecutionModel, TestRunModel, TestSetExecutionModel, TestStatus
 from assay.schemas import (
     ExecutionMetadata,
     ExecutionOrigin,
@@ -98,16 +98,17 @@ async def get_run_metadata_all_runs(
         session: AsyncSession,
         offset: int = 0,
         limit: int = 100,
+        status: TestStatus | None = None,
 ) -> PaginatedRunMetadata:
     """Orchestrates run listing across the entire system, regardless of
-    origin: counts every TestRunModel row that exists, fetches the requested
+    origin: counts every TestRunModel row in scope, fetches the requested
     page, and returns a paginated response with each row's origin resolved
     from TestRunModel's own mode invariant.
 
     Unlike every other listing in this module, this has no parent resource
     to validate — no guard runs first — and no origin-specific filter: every
     run is in scope, whether it was created standalone, via a test set
-    execution, or via a test plan execution. A single unfiltered query over
+    execution, or via a test plan execution. A single query over
     TestRunModel covers all three, since the mode a row belongs to is
     already fully determined by which of its own FK columns is set (see
     TestRunModel's docstring) — no join needed to tell them apart.
@@ -116,6 +117,10 @@ async def get_run_metadata_all_runs(
         session: Async SQLAlchemy session injected by FastAPI.
         offset: Number of records to skip.
         limit: Maximum number of records to return.
+        status: If given, restricts both the count and the page to runs
+            currently at this status (e.g. `Pending`, to see what's still
+            queued). `None` (the default) returns every run regardless of
+            status, the original unfiltered behavior.
 
     Returns:
         A paginated response with each run's ID, status, created_at,
@@ -124,18 +129,24 @@ async def get_run_metadata_all_runs(
         `test_set_execution_id`/`test_plan_execution_id` pair, is non-null
         per item), plus total count, offset, and limit.
     """
-    total = await session.scalar(select(func.count(TestRunModel.id))) or 0
+    count_stmt = select(func.count(TestRunModel.id))
+    found_stmt = select(
+        TestRunModel.id,
+        TestRunModel.status,
+        TestRunModel.created_at,
+        TestRunModel.test_id,
+        TestRunModel.test_set_entry_id,
+        TestRunModel.test_set_execution_id,
+        TestRunModel.test_plan_execution_id,
+    )
+    if status is not None:
+        count_stmt = count_stmt.where(TestRunModel.status == status)
+        found_stmt = found_stmt.where(TestRunModel.status == status)
+
+    total = await session.scalar(count_stmt) or 0
 
     found = (await session.execute(
-        select(
-            TestRunModel.id,
-            TestRunModel.status,
-            TestRunModel.created_at,
-            TestRunModel.test_id,
-            TestRunModel.test_set_entry_id,
-            TestRunModel.test_set_execution_id,
-            TestRunModel.test_plan_execution_id,
-        )
+        found_stmt
         .order_by(TestRunModel.created_at.desc(), TestRunModel.id.desc())
         .offset(offset)
         .limit(limit)
