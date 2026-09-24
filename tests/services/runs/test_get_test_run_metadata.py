@@ -138,8 +138,10 @@ def test_get_run_metadata_all_runs_happy_path():
     standalone_test_id = uuid.uuid4()
     test_set_entry_id = uuid.uuid4()
     test_set_execution_id = uuid.uuid4()
+    test_set_id = uuid.uuid4()
     test_plan_entry_id = uuid.uuid4()
     test_plan_execution_id = uuid.uuid4()
+    test_plan_id = uuid.uuid4()
 
     returned_rows = [
         MagicMock(
@@ -150,6 +152,8 @@ def test_get_run_metadata_all_runs_happy_path():
             test_set_entry_id=None,
             test_set_execution_id=None,
             test_plan_execution_id=None,
+            test_set_id=None,
+            test_plan_id=None,
         ),
         MagicMock(
             id=uuid.uuid4(),
@@ -159,6 +163,8 @@ def test_get_run_metadata_all_runs_happy_path():
             test_set_entry_id=test_set_entry_id,
             test_set_execution_id=test_set_execution_id,
             test_plan_execution_id=None,
+            test_set_id=test_set_id,
+            test_plan_id=None,
         ),
         MagicMock(
             id=uuid.uuid4(),
@@ -168,6 +174,8 @@ def test_get_run_metadata_all_runs_happy_path():
             test_set_entry_id=test_plan_entry_id,
             test_set_execution_id=None,
             test_plan_execution_id=test_plan_execution_id,
+            test_set_id=None,
+            test_plan_id=test_plan_id,
         ),
     ]
     session.execute.return_value = MagicMock(all=MagicMock(return_value=returned_rows))
@@ -190,6 +198,8 @@ def test_get_run_metadata_all_runs_happy_path():
             test_set_entry_id=None,
             test_set_execution_id=None,
             test_plan_execution_id=None,
+            test_set_id=None,
+            test_plan_id=None,
         ),
         RunMetadata(
             id=returned_rows[1].id,
@@ -200,6 +210,8 @@ def test_get_run_metadata_all_runs_happy_path():
             test_set_entry_id=TestSetEntryID(id=test_set_entry_id),
             test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
             test_plan_execution_id=None,
+            test_set_id=TestSetID(id=test_set_id),
+            test_plan_id=None,
         ),
         RunMetadata(
             id=returned_rows[2].id,
@@ -210,6 +222,8 @@ def test_get_run_metadata_all_runs_happy_path():
             test_set_entry_id=TestSetEntryID(id=test_plan_entry_id),
             test_set_execution_id=None,
             test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
+            test_set_id=None,
+            test_plan_id=TestPlanID(id=test_plan_id),
         ),
     ]
 

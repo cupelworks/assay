@@ -41,6 +41,8 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                 "test_set_entry_id": None,
                                 "test_set_execution_id": None,
                                 "test_plan_execution_id": None,
+                                "test_set_id": None,
+                                "test_plan_id": None,
                             },
                             {
                                 "id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
@@ -55,6 +57,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                     "id": "f6a7b8c9-0123-def4-5678-9012345abcde"
                                 },
                                 "test_plan_execution_id": None,
+                                "test_set_id": {
+                                    "id": "11111111-1111-1111-1111-111111111111"
+                                },
+                                "test_plan_id": None,
                             },
                             {
                                 "id": "a7b8c9d0-1234-5abc-def6-789012345bcd",
@@ -68,6 +74,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                 "test_set_execution_id": None,
                                 "test_plan_execution_id": {
                                     "id": "c9d0e1f2-3456-7abc-def8-9012345defab"
+                                },
+                                "test_set_id": None,
+                                "test_plan_id": {
+                                    "id": "22222222-2222-2222-2222-222222222222"
                                 },
                             },
                         ],
@@ -122,11 +132,14 @@ async def get_all_run_metadata(
     Each item carries `origin` (`Standalone`, `TestSet`, or `TestPlan`)
     alongside `id`, `status`, and `created_at`. Only the ID field(s) that
     origin implies are non-null — `test_case_id` for `Standalone`;
-    `test_set_entry_id` and `test_set_execution_id` for `TestSet`;
-    `test_set_entry_id` and `test_plan_execution_id` for `TestPlan` — the
-    rest are always null on that item. Results are ordered by `created_at`
-    descending (ties broken by `id` descending), plus the usual `total`,
-    `offset`, and `limit`.
+    `test_set_entry_id`, `test_set_execution_id`, and `test_set_id` for
+    `TestSet`; `test_set_entry_id`, `test_plan_execution_id`, and
+    `test_plan_id` for `TestPlan` — the rest are always null on that item.
+    `test_set_id`/`test_plan_id` are resolved server-side specifically so a
+    caller can deep-link a row (e.g. to that test set's/test plan's own
+    detail page) without a separate lookup from the execution ID alone.
+    Results are ordered by `created_at` descending (ties broken by `id`
+    descending), plus the usual `total`, `offset`, and `limit`.
 
     Pass `status` to restrict the feed to one status at a time (`Pending`,
     `Running`, `Green`, `Amber`, `Red`, or `NotRan`) — both `total` and the

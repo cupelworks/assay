@@ -393,6 +393,24 @@ class RunMetadata(RunID, RunStatus, RunCreationDate):
             'if `origin` is `TestPlan`; null otherwise.'
         ),
     )
+    test_set_id: TestSetID | None = Field(
+        ...,
+        description=(
+            'ID of the test set the producing execution belongs to. Set only '
+            'if `origin` is `TestSet`; null otherwise. Lets a caller deep-link '
+            'to the test set without a separate lookup from '
+            '`test_set_execution_id`.'
+        ),
+    )
+    test_plan_id: TestPlanID | None = Field(
+        ...,
+        description=(
+            'ID of the test plan the producing execution belongs to. Set '
+            'only if `origin` is `TestPlan`; null otherwise. Lets a caller '
+            'deep-link to the test plan without a separate lookup from '
+            '`test_plan_execution_id`.'
+        ),
+    )
 
 
 class PaginatedRunMetadata(Pagination):

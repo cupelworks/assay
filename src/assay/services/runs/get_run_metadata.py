@@ -117,11 +117,16 @@ async def get_run_metadata_all_runs(
     to validate — no guard runs first. With neither `status` nor `origin`
     given, every run is in scope, whether it was created standalone, via a
     test set execution, or via a test plan execution. A single query over
-    TestRunModel covers all three, since the mode a row belongs to is
+    TestRunModel covers all three, since which mode a row belongs to is
     already fully determined by which of its own FK columns is set (see
     TestRunModel's docstring) — no join needed to tell them apart, and
     filtering by `origin` is just an IS NOT NULL check on the one FK column
-    that mode implies, same reasoning.
+    that mode implies, same reasoning. The one place this does join:
+    resolving `test_set_id`/`test_plan_id` (so a caller can deep-link a row
+    without first resolving its execution ID) needs two LEFT OUTER JOINs
+    against TestSetExecutionModel/TestPlanExecutionModel, since neither ID
+    lives on TestRunModel itself — harmless per row since at most one side
+    ever matches, same mode invariant.
 
     Args:
         session: Async SQLAlchemy session injected by FastAPI.
@@ -141,8 +146,9 @@ async def get_run_metadata_all_runs(
         A paginated response with each run's ID, status, created_at,
         origin, and the origin-specific ID(s) that follow from it (exactly
         one of `test_case_id`, or the `test_set_entry_id` +
-        `test_set_execution_id`/`test_plan_execution_id` pair, is non-null
-        per item), plus total count, offset, and limit.
+        `test_set_execution_id`/`test_set_id` pair, or the
+        `test_set_entry_id` + `test_plan_execution_id`/`test_plan_id`
+        pair, is non-null per item), plus total count, offset, and limit.
     """
     count_stmt = select(func.count(TestRunModel.id))
     found_stmt = select(
@@ -153,6 +159,14 @@ async def get_run_metadata_all_runs(
         TestRunModel.test_set_entry_id,
         TestRunModel.test_set_execution_id,
         TestRunModel.test_plan_execution_id,
+        TestSetExecutionModel.test_set_id,
+        TestPlanExecutionModel.test_plan_id,
+    ).outerjoin(
+        TestSetExecutionModel,
+        TestRunModel.test_set_execution_id == TestSetExecutionModel.id,
+    ).outerjoin(
+        TestPlanExecutionModel,
+        TestRunModel.test_plan_execution_id == TestPlanExecutionModel.id,
     )
     if status is not None:
         count_stmt = count_stmt.where(TestRunModel.status == status)
@@ -190,8 +204,10 @@ def _run_metadata_from_row(row: Row) -> RunMetadata:
 
     Args:
         row: A result row carrying id, status, created_at, test_id,
-            test_set_entry_id, test_set_execution_id, and
-            test_plan_execution_id.
+            test_set_entry_id, test_set_execution_id,
+            test_plan_execution_id, test_set_id (from the
+            TestSetExecutionModel join), and test_plan_id (from the
+            TestPlanExecutionModel join).
 
     Returns:
         The row's RunMetadata, with `origin` and only the ID field(s) that
@@ -207,6 +223,8 @@ def _run_metadata_from_row(row: Row) -> RunMetadata:
             test_set_entry_id=None,
             test_set_execution_id=None,
             test_plan_execution_id=None,
+            test_set_id=None,
+            test_plan_id=None,
         )
 
     if row.test_set_execution_id is not None:
@@ -219,6 +237,8 @@ def _run_metadata_from_row(row: Row) -> RunMetadata:
             test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
             test_set_execution_id=TestSetExecutionID(id=row.test_set_execution_id),
             test_plan_execution_id=None,
+            test_set_id=TestSetID(id=row.test_set_id),
+            test_plan_id=None,
         )
 
     return RunMetadata(
@@ -230,6 +250,8 @@ def _run_metadata_from_row(row: Row) -> RunMetadata:
         test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
         test_set_execution_id=None,
         test_plan_execution_id=TestPlanExecutionID(id=row.test_plan_execution_id),
+        test_set_id=None,
+        test_plan_id=TestPlanID(id=row.test_plan_id),
     )
 
 
