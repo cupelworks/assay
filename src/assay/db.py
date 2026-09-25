@@ -14,11 +14,14 @@ engine = create_async_engine(
 
 
 # SQLite does not enforce foreign keys by default — this enables ON DELETE CASCADE.
-@event.listens_for(engine.sync_engine, "connect")
-def set_sqlite_pragma(dbapi_connection, _connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+# Guarded to SQLite only: PRAGMA is SQLite-specific syntax and would error
+# outright the first time it ran against a real Postgres connection.
+if engine.dialect.name == "sqlite":
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 # expire_on_commit=False keeps ORM objects usable after a commit without re-querying.
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
