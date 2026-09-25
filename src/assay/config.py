@@ -1,8 +1,10 @@
 # pydantic-settings extends pydantic for app configuration: reads values from
 # environment variables and .env files, then validates and coerces their types.
 # Distinct from pydantic's use in schemas.py, which validates API request/response bodies.
+from typing import Annotated
+
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -19,15 +21,21 @@ class Settings(BaseSettings):
     # sqlite+aiosqlite locally; postgresql+asyncpg in production
     database_url: str = "sqlite+aiosqlite:///./assay.db"
     # comma-separated in the env, e.g. ASSAY_CORS_ALLOWED_ORIGINS=http://localhost:3000,https://app.example.com
-    cors_allowed_origins: list[str] = ["http://localhost:4200"]
+    # NoDecode: pydantic-settings otherwise tries to JSON-decode any list-typed
+    # field read from the environment/.env before _split_cors_origins ever
+    # runs, and a plain comma-separated string isn't valid JSON — raises
+    # SettingsError instead of falling back to the string validator below.
+    cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:4200"]
     # Celery's broker (task queue) and result backend. Only read by the worker
     # process (assay.worker) — the API process never imports celery and works
-    # fine with these unset/unreachable. Local default is SQLite-backed — no
-    # separate service to run, same "zero setup locally" story as
-    # database_url above; swap both to Redis (or a managed rediss:// instance
-    # in production — see README) by overriding the env vars, no code change.
-    celery_broker_url: str = "sqla+sqlite:///./celery_broker.sqlite"
-    celery_result_backend: str = "db+sqlite:///./celery_results.sqlite"
+    # fine with these unset/unreachable. Local default is Redis (brew install
+    # redis && brew services start redis on macOS); swap to a managed
+    # rediss:// instance in production (see README) by overriding the env
+    # vars, no code change. A SQLite-backed alternative needing no separate
+    # service at all is documented in README/.env.example for anyone who'd
+    # rather not install Redis locally.
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/0"
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod

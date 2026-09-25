@@ -53,8 +53,8 @@ Copy `.env.example` to `.env` to configure the app locally. Every variable is op
 | `ASSAY_LLM_MODEL` | *(unset)* | Reserved for the LLM-as-judge evaluator's model selection. Same caveat as `ASSAY_LLM_PROVIDER` |
 | `ANTHROPIC_API_KEY` | *(unset)* | Will be needed once the Anthropic LLM-as-judge evaluator ships. Install the optional extra ahead of time with `pip install -e ".[anthropic]"` (or `uv sync --extra anthropic`) |
 | `OPENAI_API_KEY` | *(unset)* | Will be needed once the OpenAI LLM-as-judge evaluator ships. Install with the `openai` extra, same pattern as above |
-| `ASSAY_CELERY_BROKER_URL` | `sqla+sqlite:///./celery_broker.sqlite` | Only read by the worker process (`assay.worker`), never the API — see [Worker](#worker) for the full set of options (local SQLite, local Redis, production Azure Cache for Redis) |
-| `ASSAY_CELERY_RESULT_BACKEND` | `db+sqlite:///./celery_results.sqlite` | Same scope as `ASSAY_CELERY_BROKER_URL`, see [Worker](#worker) |
+| `ASSAY_CELERY_BROKER_URL` | `redis://localhost:6379/0` | Only read by the worker process (`assay.worker`), never the API — see [Worker](#worker) for the full set of options (local Redis, local SQLite with nothing to install, production Azure Cache for Redis) |
+| `ASSAY_CELERY_RESULT_BACKEND` | `redis://localhost:6379/0` | Same scope as `ASSAY_CELERY_BROKER_URL`, see [Worker](#worker) |
 
 ## Project layout
 
@@ -279,13 +279,13 @@ Broker and result backend are controlled by `ASSAY_CELERY_BROKER_URL`/`ASSAY_CEL
 
 | Environment | Broker URL | Result backend URL |
 |-------------|-----------|---------------------|
-| Local (default) | `sqla+sqlite:///./celery_broker.sqlite` | `db+sqlite:///./celery_results.sqlite` |
-| Local, closer to prod | `redis://localhost:6379/0` | `redis://localhost:6379/0` |
+| Local (default) | `redis://localhost:6379/0` | `redis://localhost:6379/0` |
+| Local, nothing to install | `sqla+sqlite:///./celery_broker.sqlite` | `db+sqlite:///./celery_results.sqlite` |
 | Production (Azure Cache for Redis, or any TLS-only managed Redis) | `rediss://:<access-key>@<name>.redis.cache.windows.net:6380/0` | same, `rediss://...` |
 
-**Local default — no separate service.** SQLite-backed, via Kombu's SQLAlchemy transport (broker) and Celery's own SQLAlchemy result backend — both files are created automatically next to the project root, gitignored the same way `assay.db` is. This is a real separate worker process with a real queue, not `task_always_eager` (which skips the worker entirely and runs tasks synchronously in-process) — it just avoids needing Redis installed for everyday local development.
+**Local default — real Redis.** `brew install redis && brew services start redis` on macOS (or `docker run -p 6379:6379 redis`) — free for local dev, no license or cost concern (Redis 8+ is AGPLv3). This runs the same broker technology production uses, not a stand-in for it.
 
-**Local Redis.** Swap both URLs to `redis://localhost:6379/0` (e.g. `docker run -p 6379:6379 redis`) when you want to test against the same broker technology production uses, without needing a cloud resource.
+**Local, no separate service.** If you'd rather not install Redis, swap both URLs to the SQLite-backed alternative — Kombu's SQLAlchemy transport (broker) and Celery's own SQLAlchemy result backend, both files created automatically next to the project root, gitignored the same way `assay.db` is. Still a real separate worker process with a real queue, not `task_always_eager` (which skips the worker entirely and runs tasks synchronously in-process) — it just trades "same tech as prod" for "nothing to install."
 
 **Production / Azure Cache for Redis.** Note the scheme and port: `rediss://`, not `redis://` — Azure Cache for Redis requires TLS by default — and port `6380`, not `6379`. The `rediss://` scheme alone is enough; `assay.worker.celery_app` detects it and turns on certificate verification (`ssl_cert_reqs=CERT_REQUIRED`) automatically — Kombu's own default for `rediss://` is `CERT_NONE` (TLS with no verification at all), which this deliberately overrides. A plain `redis://` URL is left untouched.
 
