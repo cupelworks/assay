@@ -21,7 +21,7 @@ from celery import Celery
 from assay.config import settings
 
 
-def _use_ssl_if_rediss(url: str) -> dict | None:
+def _use_ssl_if_redis(url: str) -> dict | None:
     """kombu's redis transport recognizes a rediss:// URL and switches to TLS
     on its own, but its default ssl_cert_reqs is CERT_NONE — TLS with no
     certificate verification, which defeats most of the point (e.g. a
@@ -46,6 +46,6 @@ app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
-    broker_use_ssl=_use_ssl_if_rediss(settings.celery_broker_url),
-    redis_backend_use_ssl=_use_ssl_if_rediss(settings.celery_result_backend),
+    broker_use_ssl=_use_ssl_if_redis(settings.celery_broker_url),
+    redis_backend_use_ssl=_use_ssl_if_redis(settings.celery_result_backend),
 )
