@@ -16,6 +16,7 @@ Active development. Dataset CRUD operations, the z-test, test case management (c
 - **aiosqlite** — async SQLite driver (local dev)
 - **asyncpg** — async PostgreSQL driver (production)
 - **Prometheus FastAPI Instrumentator** — request metrics at `GET /metrics`
+- **Celery** — task queue for the run-execution worker (optional `worker` extra; infra only for now, no tasks yet — see [Worker](#worker))
 
 ## Quickstart
 
@@ -52,6 +53,8 @@ Copy `.env.example` to `.env` to configure the app locally. Every variable is op
 | `ASSAY_LLM_MODEL` | *(unset)* | Reserved for the LLM-as-judge evaluator's model selection. Same caveat as `ASSAY_LLM_PROVIDER` |
 | `ANTHROPIC_API_KEY` | *(unset)* | Will be needed once the Anthropic LLM-as-judge evaluator ships. Install the optional extra ahead of time with `pip install -e ".[anthropic]"` (or `uv sync --extra anthropic`) |
 | `OPENAI_API_KEY` | *(unset)* | Will be needed once the OpenAI LLM-as-judge evaluator ships. Install with the `openai` extra, same pattern as above |
+| `ASSAY_CELERY_BROKER_URL` | `sqla+sqlite:///./celery_broker.sqlite` | Only read by the worker process (`assay.worker`), never the API — see [Worker](#worker) for the full set of options (local SQLite, local Redis, production Azure Cache for Redis) |
+| `ASSAY_CELERY_RESULT_BACKEND` | `db+sqlite:///./celery_results.sqlite` | Same scope as `ASSAY_CELERY_BROKER_URL`, see [Worker](#worker) |
 
 ## Project layout
 
@@ -126,14 +129,17 @@ src/assay/
 │   │   ├── get_run_metadata.py         # Paginated listing of every standalone run created for a test, every execution triggered for a test set or test plan, or every run a specific test-set/test-plan execution produced
 │   │   └── get_run_details.py          # Full detail for a single standalone run or a single test-set-execution run, including results/error/executed_at once populated
 │   └── stats.py         # run_z_test
-└── models/              # SQLAlchemy ORM models — database table definitions
-    ├── __init__.py
-    ├── base.py          # Shared DeclarativeBase
-    ├── datasets.py      # DatasetModel, DatasetRowModel
-    ├── stats.py         # StatisticalVerificationModel
-    └── test.py          # TestModel, TestSetModel, TestSetEntryModel, TestSetExecutionModel,
-                         # TestPlanModel, TestPlanEntryModel, TestPlanExecutionModel,
-                         # TestRunModel, and related junction tables
+├── models/              # SQLAlchemy ORM models — database table definitions
+│   ├── __init__.py
+│   ├── base.py          # Shared DeclarativeBase
+│   ├── datasets.py      # DatasetModel, DatasetRowModel
+│   ├── stats.py         # StatisticalVerificationModel
+│   └── test.py          # TestModel, TestSetModel, TestSetEntryModel, TestSetExecutionModel,
+│                        # TestPlanModel, TestPlanEntryModel, TestPlanExecutionModel,
+│                        # TestRunModel, and related junction tables
+└── worker/              # Celery app — infra only, no tasks registered yet (see Worker below)
+    ├── __init__.py      # Re-exports `app` so `celery -A assay.worker worker` resolves it
+    └── celery_app.py    # Celery() instance, broker/backend from settings, rediss:// TLS handling
 alembic/                 # Alembic migration environment
 alembic.ini              # Alembic configuration (URL is read from ASSAY_DATABASE_URL at runtime)
 tests/                   # Pytest suite mirroring src/assay/services/
@@ -258,6 +264,33 @@ alembic revision --autogenerate -m "describe the change"
 alembic downgrade -1
 ```
 
+## Worker
+
+`assay.worker` is a separate Celery process from the API — it exists so a future background task can promote a `Pending` `TestRunModel` to `Running` and then a terminal outcome (`Green`/`Amber`/`Red`/`NotRan`; see the Runs section above for what those mean). Right now it's infrastructure only: the Celery app is fully configured and runnable, but no task is registered, so nothing actually happens yet.
+
+It's an optional piece — the API never imports `celery` and runs fine whether or not the worker is set up at all.
+
+```bash
+uv sync --extra worker
+uv run celery -A assay.worker worker --loglevel=info
+```
+
+Broker and result backend are controlled by `ASSAY_CELERY_BROKER_URL`/`ASSAY_CELERY_RESULT_BACKEND` — same "no code changes, only the URL changes" story as the database. Three environments, in order of how close each gets to what production actually runs:
+
+| Environment | Broker URL | Result backend URL |
+|-------------|-----------|---------------------|
+| Local (default) | `sqla+sqlite:///./celery_broker.sqlite` | `db+sqlite:///./celery_results.sqlite` |
+| Local, closer to prod | `redis://localhost:6379/0` | `redis://localhost:6379/0` |
+| Production (Azure Cache for Redis, or any TLS-only managed Redis) | `rediss://:<access-key>@<name>.redis.cache.windows.net:6380/0` | same, `rediss://...` |
+
+**Local default — no separate service.** SQLite-backed, via Kombu's SQLAlchemy transport (broker) and Celery's own SQLAlchemy result backend — both files are created automatically next to the project root, gitignored the same way `assay.db` is. This is a real separate worker process with a real queue, not `task_always_eager` (which skips the worker entirely and runs tasks synchronously in-process) — it just avoids needing Redis installed for everyday local development.
+
+**Local Redis.** Swap both URLs to `redis://localhost:6379/0` (e.g. `docker run -p 6379:6379 redis`) when you want to test against the same broker technology production uses, without needing a cloud resource.
+
+**Production / Azure Cache for Redis.** Note the scheme and port: `rediss://`, not `redis://` — Azure Cache for Redis requires TLS by default — and port `6380`, not `6379`. The `rediss://` scheme alone is enough; `assay.worker.celery_app` detects it and turns on certificate verification (`ssl_cert_reqs=CERT_REQUIRED`) automatically — Kombu's own default for `rediss://` is `CERT_NONE` (TLS with no verification at all), which this deliberately overrides. A plain `redis://` URL is left untouched.
+
+**Note on hosting.** An Azure Web App is a good fit for the API (it's a standard containerized HTTP service — this repo already has a `Dockerfile`), but not for the worker: Web Apps are built around serving HTTP traffic, and a Celery worker just polls its broker forever without binding a port. [Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/overview) (no ingress) or a continuous [WebJob](https://learn.microsoft.com/en-us/azure/app-service/webjobs-create) are the more natural fit for a long-running background process like this one.
+
 ## Observability
 
 Assay exposes a Prometheus-compatible scrape endpoint at `GET /metrics`. It is not listed in the OpenAPI docs (`/docs`) because it returns plain text rather than JSON, but it is active on every running instance.
@@ -300,5 +333,5 @@ With this in place, `uv run pytest` will fail with a non-zero exit code if cover
 ## TODOs
 
 - Test plans — triggering a live execution (`POST /runs/test-plans/{test_plan_id}`) and replaying a specific past plan execution (`POST /runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}`) are both now implemented. Create, list, get, rename, delete, listing a plan's test sets, linking test sets to a plan, and unlinking test sets from a plan are all implemented too.
-- Test runs — creation is fully implemented for every mode: standalone (`POST /runs/standalone/{test_id}`), live and replay for test sets (`POST /runs/test-sets/{test_set_id}`, `POST /runs/test-sets/{test_set_id}/executions/{test_set_execution_id}`), and live and replay for test plans (`POST /runs/test-plans/{test_plan_id}`, `POST /runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}`). A standalone run's own state can now be read back too (`GET /runs/standalone/{test_id}/test-runs`, `GET /runs/standalone/{test_id}/test-runs/{test_run_id}`), and so can a test set's and a test plan's past executions (`GET /runs/test-sets/{test_set_id}/executions`, `GET /runs/test-plans/{test_plan_id}/executions`), each with its `run_count` and `replayed_execution_id`. The audit trail goes further now: the runs a specific execution produced can be listed for both test sets and test plans (`GET /runs/test-sets/{test_set_id}/executions/{test_set_execution_id}/test-runs`, `GET /runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}/test-runs`), and a single run's full detail — including the frozen entry it ran against — can now be read back for both test sets (`GET /runs/test-sets/{test_set_id}/executions/{test_set_execution_id}/test-runs/{test_run_id}`) and test plans (`GET /runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}/test-runs/{test_run_id}`). The audit trail for both test sets and test plans is now complete end to end. A system-wide, origin-agnostic view now exists too: `GET /runs` paginates every run ever created regardless of how it was triggered — standalone, test-set-triggered, or test-plan-triggered alike — so a caller doesn't have to loop over every test, test set, and test plan individually to see what's running or recently ran. `GET /runs/executions` does the same for executions specifically — test set and test plan executions only, since a standalone run has no execution wrapper to aggregate — so a caller doesn't have to fan out one `GET /runs/{test-sets,test-plans}/{id}/executions` call per test set and test plan either. Still missing, independent of any of the above: nothing promotes a `pending` run to `running` or a terminal outcome (`green`/`amber`/`red`/`not_ran`), since there's no worker or background mechanism yet that actually calls a model, scores it, and writes back `results`/`error`/`executed_at`.
+- Test runs — creation is fully implemented for every mode: standalone (`POST /runs/standalone/{test_id}`), live and replay for test sets (`POST /runs/test-sets/{test_set_id}`, `POST /runs/test-sets/{test_set_id}/executions/{test_set_execution_id}`), and live and replay for test plans (`POST /runs/test-plans/{test_plan_id}`, `POST /runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}`). A standalone run's own state can now be read back too (`GET /runs/standalone/{test_id}/test-runs`, `GET /runs/standalone/{test_id}/test-runs/{test_run_id}`), and so can a test set's and a test plan's past executions (`GET /runs/test-sets/{test_set_id}/executions`, `GET /runs/test-plans/{test_plan_id}/executions`), each with its `run_count` and `replayed_execution_id`. The audit trail goes further now: the runs a specific execution produced can be listed for both test sets and test plans (`GET /runs/test-sets/{test_set_id}/executions/{test_set_execution_id}/test-runs`, `GET /runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}/test-runs`), and a single run's full detail — including the frozen entry it ran against — can now be read back for both test sets (`GET /runs/test-sets/{test_set_id}/executions/{test_set_execution_id}/test-runs/{test_run_id}`) and test plans (`GET /runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}/test-runs/{test_run_id}`). The audit trail for both test sets and test plans is now complete end to end. A system-wide, origin-agnostic view now exists too: `GET /runs` paginates every run ever created regardless of how it was triggered — standalone, test-set-triggered, or test-plan-triggered alike — so a caller doesn't have to loop over every test, test set, and test plan individually to see what's running or recently ran. `GET /runs/executions` does the same for executions specifically — test set and test plan executions only, since a standalone run has no execution wrapper to aggregate — so a caller doesn't have to fan out one `GET /runs/{test-sets,test-plans}/{id}/executions` call per test set and test plan either. Still missing, independent of any of the above: nothing promotes a `pending` run to `running` or a terminal outcome (`green`/`amber`/`red`/`not_ran`). A worker process exists now (`assay.worker`, see [Worker](#worker)) but has no task registered yet — nothing calls a model, scores it, or writes back `results`/`error`/`executed_at`.
 - LLM-as-judge evaluators and the broader statistics engine are stubbed.
