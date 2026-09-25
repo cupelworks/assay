@@ -291,6 +291,21 @@ Broker and result backend are controlled by `ASSAY_CELERY_BROKER_URL`/`ASSAY_CEL
 
 **Note on hosting.** An Azure Web App is a good fit for the API (it's a standard containerized HTTP service — this repo already has a `Dockerfile`), but not for the worker: Web Apps are built around serving HTTP traffic, and a Celery worker just polls its broker forever without binding a port. [Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/overview) (no ingress) or a continuous [WebJob](https://learn.microsoft.com/en-us/azure/app-service/webjobs-create) are the more natural fit for a long-running background process like this one.
 
+### Task history — Flower
+
+The app's own audit trail (`GET /runs` and friends — see [Runs](#runs)) is the real history of what happened to a *run*: it persists in the database regardless of whether Celery or Redis are even still running, and it's what a client should actually read. [Flower](https://flower.readthedocs.io/) is a separate, worker-level view on top of that — a web dashboard over the queue itself: every task's args, state, runtime, which worker handled it, retries, and the raw traceback if the task process itself failed (distinct from a run merely scoring badly). Useful for debugging the worker, not a replacement for the app's own history.
+
+Included in the `dev` extra:
+
+```bash
+uv sync --extra dev --extra worker
+uv run celery -A assay.worker flower --port=5555
+```
+
+Then open <http://localhost:5555>. By default Flower only keeps history in memory for as long as it's running — add `--persistent=True --db=flower.db` to keep it across restarts.
+
+There's nothing to see here until a task actually exists — right now `assay.worker` has none registered (see above), so Flower's task list stays empty regardless of how many runs the API creates.
+
 ## Observability
 
 Assay exposes a Prometheus-compatible scrape endpoint at `GET /metrics`. It is not listed in the OpenAPI docs (`/docs`) because it returns plain text rather than JSON, but it is active on every running instance.

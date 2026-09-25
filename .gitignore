@@ -34,6 +34,11 @@ htmlcov/
 # Local Celery SQLite broker/result backend (worker's local default)
 celery_broker.sqlite
 celery_results.sqlite
+# Celery's default beat schedule file — created as a side effect of running
+# the worker/Flower locally
+celerybeat-schedule*
+# Flower's own persistent task-history DB, if run with --persistent=True
+flower.db
 
 # Env
 .env
