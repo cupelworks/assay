@@ -1,8 +1,6 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from assay.models import (
     TestModel,
     TestRunModel,
@@ -17,56 +15,37 @@ from assay.worker.services.execute_run import _resolve_content, execute_run
 _PATCH_RESOLVE_CONTENT = "assay.worker.services.execute_run._resolve_content"
 _PATCH_EVALUATE = "assay.worker.evaluators.evaluate"
 
+
+def _mock_successful_claim(session: MagicMock, run: TestRunModel) -> None:
+    """Simulates the atomic claim UPDATE matching exactly one row, and the
+    follow-up fetch returning that same run.
+    """
+    session.execute.return_value.rowcount = 1
+    session.scalar.return_value = run
+
+
 # --- execute_run() ---
 
 
-def test_run_not_found_is_a_no_op():
+def test_claim_not_matching_any_row_is_a_no_op():
     session = MagicMock()
-    session.scalar.return_value = None
-
-    execute_run(uuid.uuid4(), session)
-
-    session.commit.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    "status", [TestStatus.green, TestStatus.amber, TestStatus.red, TestStatus.not_ran]
-)
-def test_already_terminal_run_is_a_no_op(status):
-    run_id = uuid.uuid4()
-    session = MagicMock()
-    session.scalar.return_value = TestRunModel(id=run_id, status=status)
+    session.execute.return_value.rowcount = 0
 
     with patch(_PATCH_EVALUATE) as mock_evaluate:
-        execute_run(run_id, session)
+        execute_run(uuid.uuid4(), session)
 
+    # covers run_id not existing, and every non-pending status (running,
+    # already claimed by someone else, or already terminal) uniformly - the
+    # claim's WHERE clause is what tells them apart, not Python here
     mock_evaluate.assert_not_called()
-    session.commit.assert_not_called()
-
-
-def test_pending_run_is_promoted_to_running_before_evaluation_starts():
-    run_id = uuid.uuid4()
-    run = TestRunModel(id=run_id, status=TestStatus.pending)
-    session = MagicMock()
-    session.scalar.return_value = run
-
-    def _assert_running_and_raise(*_args, **_kwargs):
-        assert run.status == TestStatus.running
-        raise RuntimeError("stop here — only checking the pre-resolution state")
-
-    with patch(_PATCH_RESOLVE_CONTENT, side_effect=_assert_running_and_raise):
-        execute_run(run_id, session)
-
-    # confirms the RuntimeError above was actually raised (not swallowed
-    # elsewhere) and handled by the NotRan path, not silently skipped
-    assert run.status == TestStatus.not_ran
+    session.scalar.assert_not_called()
 
 
 def test_content_resolution_failure_marks_not_ran():
     run_id = uuid.uuid4()
-    run = TestRunModel(id=run_id, status=TestStatus.pending)
+    run = TestRunModel(id=run_id, status=TestStatus.running)
     session = MagicMock()
-    session.scalar.return_value = run
+    _mock_successful_claim(session, run)
 
     with patch(_PATCH_RESOLVE_CONTENT, side_effect=RuntimeError("entry vanished")):
         execute_run(run_id, session)
@@ -79,9 +58,9 @@ def test_content_resolution_failure_marks_not_ran():
 
 def test_every_type_passing_rolls_up_to_green():
     run_id = uuid.uuid4()
-    run = TestRunModel(id=run_id, status=TestStatus.pending)
+    run = TestRunModel(id=run_id, status=TestStatus.running)
     session = MagicMock()
-    session.scalar.return_value = run
+    _mock_successful_claim(session, run)
 
     assignment_a = TestTypeAssignment(name="Exact Match")
     assignment_b = TestTypeAssignment(name="Toxicity")
@@ -98,14 +77,14 @@ def test_every_type_passing_rolls_up_to_green():
         "Toxicity": {"passed": True, "score": None, "detail": None},
     }
     assert run.executed_at is not None
-    assert session.commit.call_count == 2  # once for `running`, once for the final write-back
+    assert session.commit.call_count == 2  # once for the claim, once for the final write-back
 
 
 def test_every_type_failing_rolls_up_to_red():
     run_id = uuid.uuid4()
-    run = TestRunModel(id=run_id, status=TestStatus.pending)
+    run = TestRunModel(id=run_id, status=TestStatus.running)
     session = MagicMock()
-    session.scalar.return_value = run
+    _mock_successful_claim(session, run)
 
     assignment = TestTypeAssignment(name="Exact Match")
     failing_result = TestTypeResult(passed=False, score=None, detail=None)
@@ -120,9 +99,9 @@ def test_every_type_failing_rolls_up_to_red():
 
 def test_mixed_pass_fail_rolls_up_to_amber():
     run_id = uuid.uuid4()
-    run = TestRunModel(id=run_id, status=TestStatus.pending)
+    run = TestRunModel(id=run_id, status=TestStatus.running)
     session = MagicMock()
-    session.scalar.return_value = run
+    _mock_successful_claim(session, run)
 
     assignment_a = TestTypeAssignment(name="Exact Match")
     assignment_b = TestTypeAssignment(name="Toxicity")
@@ -143,9 +122,9 @@ def test_mixed_pass_fail_rolls_up_to_amber():
 
 def test_one_assignments_own_evaluator_failure_does_not_fail_the_whole_run():
     run_id = uuid.uuid4()
-    run = TestRunModel(id=run_id, status=TestStatus.pending)
+    run = TestRunModel(id=run_id, status=TestStatus.running)
     session = MagicMock()
-    session.scalar.return_value = run
+    _mock_successful_claim(session, run)
 
     assignment_a = TestTypeAssignment(name="Exact Match")
     assignment_b = TestTypeAssignment(name="Toxicity")

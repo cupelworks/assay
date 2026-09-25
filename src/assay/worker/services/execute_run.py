@@ -1,17 +1,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from assay.models import TERMINAL_STATUSES, TestRunModel, TestStatus, TestTypesModel
+from assay.models import TestRunModel, TestStatus, TestTypesModel
 from assay.schemas import TestTypeAssignment, TestTypeResult
 from assay.worker import evaluators
 
 
 def execute_run(run_id: uuid.UUID, session: Session) -> None:
-    """Orchestrates one run's execution: fetch, resolve content, evaluate
-    every assigned test type, roll up the outcome, write it back.
+    """Orchestrates one run's execution: claim it, fetch, resolve content,
+    evaluate every assigned test type, roll up the outcome, write it back.
 
     session is a plain parameter here, not acquired internally, so this can
     be unit tested with a fake session the same way every service function
@@ -22,17 +22,20 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         run_id: UUID of the TestRunModel to execute.
         session: Active sync SQLAlchemy session (assay.worker.db).
     """
-    run = session.scalar(
-        select(TestRunModel).where(TestRunModel.id == run_id)
+    claim = session.execute(
+        update(TestRunModel)
+        .where(TestRunModel.id == run_id, TestRunModel.status == TestStatus.pending)
+        .values(status=TestStatus.running)
     )
-    if run is None or run.status in TERMINAL_STATUSES:
-        # Nothing to do: the run was deleted, or this run_id was already
-        # processed - a basic guard against double dispatch, not the full
-        # idempotency answer docs/run_execution/next_move.md leaves open.
+    session.commit()
+    if claim.rowcount == 0:
+        # Nothing matched: run_id doesn't exist, or its status was already
+        # something other than pending (already claimed by another worker,
+        # already running, or already terminal) - this call has nothing to
+        # do either way.
         return
 
-    run.status = TestStatus.running
-    session.commit()
+    run = session.scalar(select(TestRunModel).where(TestRunModel.id == run_id))
 
     try:
         entry, resolved = _resolve_content(run, session)
@@ -74,7 +77,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
 
 
 def _resolve_content(
-        run: TestRunModel, session: Session
+        run: TestRunModel | None, session: Session
 ) -> tuple[object, list[tuple[TestTypeAssignment, str]]]:
     """Two cases, not three. Standalone reads the live TestModel plus a
     join to the test_type_assignments table for category; test-set- and
@@ -89,7 +92,7 @@ def _resolve_content(
     the function already knows its own category, so it isn't data the
     assignment itself needs to carry.
     """
-    if run.test_id is not None:
+    if run is not None and run.test_id is not None:
         entry = run.test
         return entry, [
             (
