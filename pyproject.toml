@@ -33,7 +33,11 @@ openai = [
     "openai>=1.35",  # OpenAI Chat Completions client (used by OpenAIClient in llm.py)
 ]
 worker = [
-    "celery[redis]>=5.4",  # Task queue that promotes a pending TestRunModel to a terminal outcome
+    "celery[redis]>=5.4",    # Task queue that promotes a pending TestRunModel to a terminal outcome
+    "psycopg2-binary>=2.9",  # Sync PostgreSQL driver for assay.worker.db — the worker's tasks use a
+                             # sync SQLAlchemy session (see docs/run_execution/dev_notes.md note 4),
+                             # never asyncpg. Only needed against production Postgres; SQLite's sync
+                             # driver is the stdlib, nothing extra to install for local dev.
 ]
 
 [build-system]

@@ -139,7 +139,12 @@ src/assay/
 │                        # TestRunModel, and related junction tables
 └── worker/              # Celery app — infra only, no tasks registered yet (see Worker below)
     ├── __init__.py      # Re-exports `app` so `celery -A assay.worker worker` resolves it
-    └── celery_app.py    # Celery() instance, broker/backend from settings, rediss:// TLS handling
+    ├── celery_app.py    # Celery() instance, broker/backend from settings, rediss:// TLS handling
+    ├── db.py            # Sync SQLAlchemy engine/session for tasks — separate from assay/db.py's
+    │                    # async one (docs/run_execution/dev_notes.md note 4); fork-safe via a
+    │                    # worker_process_init signal that disposes the engine per child process
+    ├── tasks/           # Thin @app.task wrappers (Celery plumbing only) — empty so far
+    └── evaluators/      # Per-category scoring logic a task calls into — empty so far
 alembic/                 # Alembic migration environment
 alembic.ini              # Alembic configuration (URL is read from ASSAY_DATABASE_URL at runtime)
 tests/                   # Pytest suite mirroring src/assay/services/
