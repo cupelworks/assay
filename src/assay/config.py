@@ -1,16 +1,25 @@
 # pydantic-settings extends pydantic for app configuration: reads values from
 # environment variables and .env files, then validates and coerces their types.
 # Distinct from pydantic's use in schemas.py, which validates API request/response bodies.
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+# Anchored to this file's own location, not the process's working directory:
+# a bare "./.env" is resolved relative to CWD, which silently finds nothing
+# (pydantic-settings treats a missing env_file as "no overrides", not an
+# error) the moment something runs from anywhere but the project root —
+# every *_url default below then falls back to its own relative-path form,
+# for the exact same reason. Three parents: config.py -> assay/ -> src/ -> root.
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="ASSAY_",  # e.g. ASSAY_HOST overrides host
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )

@@ -25,6 +25,9 @@ htmlcov/
 .idea/
 .vscode/
 
+# Local scratch/debug scripts — not part of the project
+/scratch/
+
 # Database
 *.db
 *.db-shm

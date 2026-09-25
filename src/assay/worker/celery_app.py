@@ -1,12 +1,13 @@
 """Celery application for the run-execution worker.
 
-This is infrastructure only — the Celery app itself, configured against
-Redis as both broker and result backend, imported from the same settings
-the API process already uses. No tasks are registered yet: what a task
-actually does (call a model, resolve config_fields per test type, write
-back TestRunModel.results/error/status) depends on the evaluator design
-in docs/run_execution/dev_notes.md, which isn't decided yet. Task modules
-land here once that is.
+The Celery app itself, configured against Redis (or the local SQLite
+alternative) as broker and result backend, imported from the same
+settings the API process already uses. `execute_run` (tasks/execute_run.py)
+is the one task registered so far — what it actually does (resolving a
+run's content and assigned test types, calling the right evaluator per
+type, writing back results/error/status) is still stubbed; see
+docs/run_execution/dev_notes.md notes 4/5 for what's decided and what
+isn't yet.
 
 Entirely separate from the API process — assay.main never imports this,
 and this never imports assay.main. Run with:
@@ -38,6 +39,13 @@ app = Celery(
     "assay",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
+    # Every task module the worker needs to import to register its tasks —
+    # a task only exists on `app` once its @app.task()-decorated module has
+    # actually been imported. New task modules join this list, not just
+    # tasks/__init__.py's own __all__ (that re-export is for ergonomic
+    # access to assay.worker.tasks.execute_run, it doesn't by itself make
+    # Celery import anything at worker startup).
+    include=["assay.worker.tasks.execute_run"],
 )
 
 app.conf.update(

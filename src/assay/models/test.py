@@ -142,6 +142,18 @@ class TestStatus(StrEnum):
     not_ran = "NotRan"
 
 
+# The four values a run doesn't move on from — every other status
+# (pending, running) still has work ahead of it. Kept next to TestStatus
+# itself so anything needing "is this run done" checks the same set,
+# rather than each caller re-deriving its own idea of which values count.
+TERMINAL_STATUSES = frozenset({
+    TestStatus.green,
+    TestStatus.amber,
+    TestStatus.red,
+    TestStatus.not_ran,
+})
+
+
 class TestTypes(StrEnum):
     deterministic = "deterministic"
     nlp_metric = "nlp_metric"

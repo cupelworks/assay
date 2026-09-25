@@ -40,7 +40,7 @@ Then open <http://127.0.0.1:8000/docs> for the interactive OpenAPI UI.
 
 ## Configuration
 
-Copy `.env.example` to `.env` to configure the app locally. Every variable is optional — all have working defaults except the database URL in production (see [Database](#database)).
+Copy `.env.example` to `.env` (in the project root) to configure the app locally. Every variable is optional — all have working defaults except the database URL in production (see [Database](#database)). `.env` is found by its location relative to `config.py`, not the process's working directory, so it's picked up correctly regardless of where a script or debugger happens to run from.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -137,14 +137,22 @@ src/assay/
 │   └── test.py          # TestModel, TestSetModel, TestSetEntryModel, TestSetExecutionModel,
 │                        # TestPlanModel, TestPlanEntryModel, TestPlanExecutionModel,
 │                        # TestRunModel, and related junction tables
-└── worker/              # Celery app — infra only, no tasks registered yet (see Worker below)
+└── worker/              # Celery app — see Worker below
     ├── __init__.py      # Re-exports `app` so `celery -A assay.worker worker` resolves it
-    ├── celery_app.py    # Celery() instance, broker/backend from settings, rediss:// TLS handling
+    ├── celery_app.py    # Celery() instance, broker/backend from settings, rediss:// TLS handling,
+    │                    # include=[...] listing every task module to import at startup
     ├── db.py            # Sync SQLAlchemy engine/session for tasks — separate from assay/db.py's
-    │                    # async one (docs/run_execution/dev_notes.md note 4); fork-safe via a
-    │                    # worker_process_init signal that disposes the engine per child process
-    ├── tasks/           # Thin @app.task wrappers (Celery plumbing only) — empty so far
-    └── evaluators/      # Per-category scoring logic a task calls into — empty so far
+    │                    # async one; fork-safe via a worker_process_init signal that disposes
+    │                    # the engine per child process
+    ├── tasks/           # Thin @app.task wrappers (Celery plumbing only)
+    │   └── execute_run.py   # The one registered task — fetch, resolve content, evaluate every
+    │                        # assigned type, roll up, write back. Nothing calls .delay() on it yet
+    └── evaluators/      # Per-category scoring logic a task calls into
+        ├── dispatch.py       # evaluate(assignment, category, entry) — routes to the module below
+        │                     # matching category
+        ├── deterministic.py, nlp_metric.py, llm_as_judge.py  # one per category, still stubs —
+        │                     # each returns one fixed TestTypeResult regardless of input
+        └── _common.py        # shared helpers (empty so far)
 alembic/                 # Alembic migration environment
 alembic.ini              # Alembic configuration (URL is read from ASSAY_DATABASE_URL at runtime)
 tests/                   # Pytest suite mirroring src/assay/services/
@@ -271,7 +279,7 @@ alembic downgrade -1
 
 ## Worker
 
-`assay.worker` is a separate Celery process from the API — it exists so a future background task can promote a `Pending` `TestRunModel` to `Running` and then a terminal outcome (`Green`/`Amber`/`Red`/`NotRan`; see the Runs section above for what those mean). Right now it's infrastructure only: the Celery app is fully configured and runnable, but no task is registered, so nothing actually happens yet.
+`assay.worker` is a separate Celery process from the API — it promotes a `Pending` `TestRunModel` to `Running` and then a terminal outcome (`Green`/`Amber`/`Red`/`NotRan`; see the Runs section above for what those mean). `execute_run`, its one registered task, does exactly that — fetches the run, evaluates every assigned test type, rolls up the outcome, writes it back — and works when called directly. Two things still keep it from doing anything on its own yet: nothing in the API publishes a run to it (no `.delay()` call anywhere in `services/runs/`), and its per-category evaluators are stubs — each currently returns one fixed result regardless of input, not real scoring.
 
 It's an optional piece — the API never imports `celery` and runs fine whether or not the worker is set up at all.
 
