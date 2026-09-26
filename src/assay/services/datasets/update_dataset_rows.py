@@ -1,7 +1,11 @@
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.schemas import DataRowInfo, DataSetInfo, DataSetRow, DataSetRowUpdatedData
 from assay.services.datasets._common import _get_rows_or_404
+
+logger = logging.getLogger(__name__)
 
 
 async def update_dataset_rows_by_id(
@@ -34,6 +38,10 @@ async def update_dataset_rows_by_id(
 
     await session.commit()
 
+    logger.info(
+        "Updated %d rows in dataset %s", len(row_models), dataset.id,
+        extra={"dataset_id": dataset.id, "row_count": len(row_models)},
+    )
     return DataSetRowUpdatedData(
         dataset=DataSetInfo(id=dataset.id, name=dataset.name),
         updated=DataRowInfo(n=len(row_models), ids=[row.id for row in row_models]),

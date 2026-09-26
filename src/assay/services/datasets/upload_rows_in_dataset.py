@@ -1,8 +1,12 @@
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import DatasetModel, DatasetRowModel
 from assay.schemas import DataRowInfo, DataSetImportedData, DataSetImportingData, DataSetInfo
 from assay.services.datasets._common import _get_dataset_or_404
+
+logger = logging.getLogger(__name__)
 
 
 async def upload_new_rows_in_existing_dataset(
@@ -39,6 +43,10 @@ async def upload_new_rows_in_existing_dataset(
     result = _build_uploaded_dataset_info(dataset, new_rows)
     await session.commit()
 
+    logger.info(
+        "Added %d rows to dataset %s (%r)", len(new_rows), dataset.id, dataset.name,
+        extra={"dataset_id": dataset.id, "row_count": len(new_rows)},
+    )
     return result
 
 

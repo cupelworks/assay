@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy import delete
@@ -10,6 +11,8 @@ from assay.services.test_plans._common import (
     _find_test_plan_entries_or_404,
 )
 from assay.services.test_sets._common import _find_test_sets_or_404
+
+logger = logging.getLogger(__name__)
 
 
 async def remove_test_sets_from_test_plan_by_id(
@@ -59,3 +62,8 @@ async def remove_test_sets_from_test_plan_by_id(
         .where(TestPlanEntryModel.test_set_id.in_(test_sets_ids))
     )
     await session.commit()
+
+    logger.info(
+        "Unlinked %d test sets from test plan %s", len(set(test_sets_ids)), test_plan_id,
+        extra={"test_plan_id": test_plan_id, "test_set_count": len(set(test_sets_ids))},
+    )

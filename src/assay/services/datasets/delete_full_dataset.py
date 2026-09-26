@@ -1,8 +1,12 @@
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import DatasetModel
 from assay.schemas import DataRowInfo, DataSetDeletedData, DataSetID, DataSetInfo
 from assay.services.datasets._common import _get_dataset_or_404
+
+logger = logging.getLogger(__name__)
 
 
 async def delete_dataset_by_id(
@@ -27,7 +31,13 @@ async def delete_dataset_by_id(
     await session.delete(dataset)
     await session.commit()
 
-    return _build_deleted_dataset_info(dataset)
+    result = _build_deleted_dataset_info(dataset)
+    logger.info(
+        "Deleted dataset %s (%r) and its %d rows",
+        result.dataset.id, result.dataset.name, result.deleted.n,
+        extra={"dataset_id": result.dataset.id, "row_count": result.deleted.n},
+    )
+    return result
 
 
 def _build_deleted_dataset_info(dataset: DatasetModel) -> DataSetDeletedData:

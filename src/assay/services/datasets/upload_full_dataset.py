@@ -1,3 +1,4 @@
+import logging
 from io import TextIOWrapper
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from assay.schemas import (
     DataSetRowSchema,
 )
 from assay.services.datasets._common import _check_name_unique
+
+logger = logging.getLogger(__name__)
 
 
 async def upload_dataset_via_path(req: DataSetImportViaPathRequest,
@@ -45,6 +48,11 @@ async def upload_dataset_via_path(req: DataSetImportViaPathRequest,
     dataset = _build_dataset_model(req.dataset_name, rows)
     dataset_id, row_ids = await _persist_dataset(dataset, session)
 
+    logger.info(
+        "Created dataset %s (%r) with %d rows from %s",
+        dataset_id, req.dataset_name, len(rows), req.path,
+        extra={"dataset_id": dataset_id, "row_count": len(rows), "path": req.path},
+    )
     return _build_response(req, rows, dataset_id, row_ids)
 
 

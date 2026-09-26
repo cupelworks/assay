@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy import func, select
@@ -9,6 +10,8 @@ from assay.services.test_plans._common import (
     _check_unique_test_plan_name_or_409,
     _find_test_plan_by_id_or_404,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def update_test_plan_by_id(
@@ -38,13 +41,21 @@ async def update_test_plan_by_id(
     """
     found = await _find_test_plan_by_id_or_404(test_plan_id, session)
 
-    if request.name != found.name and request.name is not None:
+    previous_name = found.name
+    renamed = request.name != previous_name and request.name is not None
+    if renamed:
         await _check_unique_test_plan_name_or_409(
             TestPlanName(name=request.name), session
         )
         found.name = request.name
-        
+
     await session.commit()
+
+    if renamed:
+        logger.info(
+            "Renamed test plan %s from %r to %r", test_plan_id, previous_name, request.name,
+            extra={"test_plan_id": test_plan_id},
+        )
 
     linked_set_count = await session.scalar(
         select(func.count(TestPlanEntryModel.id))

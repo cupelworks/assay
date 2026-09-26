@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 
@@ -33,6 +34,8 @@ from assay.services.runs._common import (
 from assay.services.test_plans._common import _find_test_plan_by_id_or_404
 from assay.services.test_sets._common import _find_test_set_or_404
 from assay.services.tests._common import _find_all_tests_with_details_or_404
+
+logger = logging.getLogger(__name__)
 
 
 async def create_new_standalone_run(
@@ -79,6 +82,10 @@ async def create_new_standalone_run(
     session.add(test_run_model)
     await session.commit()
 
+    logger.info(
+        "Created standalone run %s for test %s", test_run_model.id, found.id,
+        extra={"run_id": test_run_model.id, "test_id": found.id},
+    )
     _dispatch_runs([test_run_model.id])
 
     return StandaloneRunCreationMetadata(
@@ -154,6 +161,15 @@ async def create_new_live_test_set_run(
     session.add_all(test_runs)
     await session.commit()
 
+    logger.info(
+        "Created live execution %s of test set %s with %d runs",
+        test_set_execution_model.id, test_set_id, len(test_runs),
+        extra={
+            "test_set_execution_id": test_set_execution_model.id,
+            "test_set_id": test_set_id,
+            "run_count": len(test_runs),
+        },
+    )
     _dispatch_runs([test_run.id for test_run in test_runs])
 
     return TestSetLiveRunCreationMetadata(
@@ -236,6 +252,16 @@ async def create_new_replay_test_set_run(
     session.add_all(test_runs)
     await session.commit()
 
+    logger.info(
+        "Created execution %s of test set %s replaying execution %s with %d runs",
+        test_set_execution_model.id, test_set_id, test_set_execution_id, len(test_runs),
+        extra={
+            "test_set_execution_id": test_set_execution_model.id,
+            "test_set_id": test_set_id,
+            "replayed_execution_id": test_set_execution_id,
+            "run_count": len(test_runs),
+        },
+    )
     _dispatch_runs([test_run.id for test_run in test_runs])
 
     return TestSetReplayedExecutionCreationMetadata(
@@ -321,6 +347,15 @@ async def create_new_live_test_plan_run(
     session.add_all(test_runs)
     await session.commit()
 
+    logger.info(
+        "Created live execution %s of test plan %s with %d runs",
+        test_plan_execution_model.id, test_plan_id, len(test_runs),
+        extra={
+            "test_plan_execution_id": test_plan_execution_model.id,
+            "test_plan_id": test_plan_id,
+            "run_count": len(test_runs),
+        },
+    )
     _dispatch_runs([test_run.id for test_run in test_runs])
 
     return TestPlanLiveRunCreationMetadata(
@@ -409,6 +444,16 @@ async def create_new_replay_test_plan_run(
     session.add_all(test_runs)
     await session.commit()
 
+    logger.info(
+        "Created execution %s of test plan %s replaying execution %s with %d runs",
+        test_plan_execution_model.id, test_plan_id, test_plan_execution_id, len(test_runs),
+        extra={
+            "test_plan_execution_id": test_plan_execution_model.id,
+            "test_plan_id": test_plan_id,
+            "replayed_execution_id": test_plan_execution_id,
+            "run_count": len(test_runs),
+        },
+    )
     _dispatch_runs([test_run.id for test_run in test_runs])
 
     return TestPlanReplayedExecutionCreationMetadata(

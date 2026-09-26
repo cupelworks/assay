@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 
@@ -18,6 +19,8 @@ from assay.services.tests._common import (
     _check_reference_required_types_have_expected_output_or_422,
     _validate_test_type_assignments,
 )
+
+logger = logging.getLogger(__name__)
 
 _NEW_TEST_NAME_PATTERN = re.compile(r"^New Test (\d+)$")
 
@@ -98,6 +101,11 @@ async def create_new_test(
     session.add_all(test_types)
     await session.commit()
 
+    logger.info(
+        "Created test %s (%r) with %d test type assignments",
+        test.id, test.name, len(test_types),
+        extra={"test_id": test.id, "test_type_count": len(test_types)},
+    )
     return CreateTestCaseResponse(
         id=test.id,
         name=test.name,
@@ -173,6 +181,10 @@ async def create_new_test_from_dataset(
     session.add_all(test_types)
     await session.commit()
 
+    logger.info(
+        "Created %d tests from dataset %s", len(tests), request.id,
+        extra={"dataset_id": request.id, "test_count": len(tests)},
+    )
     return CreateTestCaseFromDatasetResponse(
         test_cases=[
             TestCaseID(

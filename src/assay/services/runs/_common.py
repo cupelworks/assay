@@ -652,6 +652,7 @@ def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:
         run_ids: UUIDs of the already-committed TestRunModel rows to
             dispatch execute_run for.
     """
+    dispatched = 0
     for run_id in run_ids:
         try:
             _celery_app.send_task(
@@ -661,3 +662,11 @@ def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:
             )
         except KombuError:
             logger.exception("Failed to dispatch execute_run for run %s", run_id)
+        else:
+            dispatched += 1
+
+    if run_ids:
+        logger.info(
+            "Dispatched %d of %d runs to the worker", dispatched, len(run_ids),
+            extra={"dispatched": dispatched, "run_count": len(run_ids)},
+        )

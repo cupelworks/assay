@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,8 @@ from assay.services.test_plans._common import (
     _find_test_plan_by_id_or_404,
 )
 from assay.services.test_sets._common import _find_test_sets_or_404
+
+logger = logging.getLogger(__name__)
 
 
 async def add_test_sets_to_test_plan_by_id(
@@ -61,6 +64,10 @@ async def add_test_sets_to_test_plan_by_id(
     session.add_all(test_plan_entry_models)
     await session.commit()
 
+    logger.info(
+        "Linked %d test sets to test plan %s", len(test_plan_entry_models), test_plan_id,
+        extra={"test_plan_id": test_plan_id, "test_set_count": len(test_plan_entry_models)},
+    )
     return [
         TestPlanEntryID(
             id=test_plan_entry.id,

@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,8 @@ from assay.services.tests._common import (
     _validate_test_type_assignments,
 )
 from assay.services.tests.update_test import _apply_scalar_updates
+
+logger = logging.getLogger(__name__)
 
 
 async def modify_entry_by_id(
@@ -83,6 +86,14 @@ async def modify_entry_by_id(
 
     await session.commit()
 
+    changed_fields = sorted(
+        field for field in request.model_fields_set if getattr(request, field) is not None
+    )
+    logger.info(
+        "Updated entry %s in test set %s (fields: %s)",
+        entry_id, test_set_id, ", ".join(changed_fields),
+        extra={"test_set_id": test_set_id, "entry_id": entry_id, "fields": changed_fields},
+    )
     return TestSetEntryDetails(
         id=found.id,
         test_case_id=TestCaseID(id=found.test_id),

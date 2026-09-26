@@ -1,3 +1,4 @@
+import logging
 import math
 from statistics import NormalDist
 from statistics import mean as _mean
@@ -7,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import StatisticalVerificationModel
 from assay.schemas import ZTestRequest, ZTestResult
+
+logger = logging.getLogger(__name__)
 
 # Shared standard normal distribution — used for CDF and inverse CDF lookups.
 _nd = NormalDist()
@@ -33,6 +36,11 @@ async def run_z_test(req: ZTestRequest, session: AsyncSession) -> ZTestResult: #
 
     await _persist_verification(result, req, session)
 
+    logger.info(
+        "Recorded z-test verification: n=%d passed=%s p_value=%s",
+        result.n, result.passed, result.p_value,
+        extra={"n": result.n, "passed": result.passed, "p_value": result.p_value},
+    )
     return result
 
 

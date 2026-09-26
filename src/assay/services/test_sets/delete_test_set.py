@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy import delete, update
@@ -11,6 +12,8 @@ from assay.services.test_sets._common import (
     _find_test_set_entries_in_specific_test_set_or_404,
     _find_test_set_or_404,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def delete_test_set_by_id(
@@ -43,6 +46,11 @@ async def delete_test_set_by_id(
 
     await session.delete(found)
     await session.commit()
+
+    logger.info(
+        "Deleted test set %s (%r) and its entries", test_set_id, found.name,
+        extra={"test_set_id": test_set_id},
+    )
 
 
 async def delete_test_set_entries_by_id(
@@ -86,6 +94,11 @@ async def delete_test_set_entries_by_id(
     )
     await session.commit()
 
+    logger.info(
+        "Deleted %d entries from test set %s", len(found), test_set_id,
+        extra={"test_set_id": test_set_id, "entry_count": len(found)},
+    )
+
 
 async def unlink_test_set_entries_by_id(
         test_set_id: uuid.UUID,
@@ -123,3 +136,8 @@ async def unlink_test_set_entries_by_id(
     )
 
     await session.commit()
+
+    logger.info(
+        "Unlinked %d entries from test set %s", len(found), test_set_id,
+        extra={"test_set_id": test_set_id, "entry_count": len(found)},
+    )

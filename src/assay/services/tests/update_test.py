@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,8 @@ from assay.services.tests._common import (
     _find_test_by_id_or_404,
     _validate_test_type_assignments,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _apply_scalar_updates(
@@ -119,6 +122,15 @@ async def modify_test_by_id(
 
     await session.commit()
 
+    # The fields this request actually applied — sent, and not None — the
+    # same rule _apply_scalar_updates uses to decide what to write.
+    changed_fields = sorted(
+        field for field in request.model_fields_set if getattr(request, field) is not None
+    )
+    logger.info(
+        "Updated test %s (fields: %s)", found.id, ", ".join(changed_fields),
+        extra={"test_id": found.id, "fields": changed_fields},
+    )
     return CreateTestCaseResponse(
         id=found.id,
         name=found.name,

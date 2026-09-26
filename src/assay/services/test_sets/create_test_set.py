@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from assay.models import TestSetModel
 from assay.schemas import TestSetCreationResponse, TestSetName
 from assay.services.test_sets._common import _check_unique_test_set_name_or_409
+
+logger = logging.getLogger(__name__)
 
 
 async def create_new_test_set(
@@ -33,6 +36,10 @@ async def create_new_test_set(
     session.add(test_set_model)
     await session.commit()
 
+    logger.info(
+        "Created test set %s (%r)", new_test_id, request.name,
+        extra={"test_set_id": new_test_id},
+    )
     return TestSetCreationResponse(
         name=request.name,
         id=new_test_id,

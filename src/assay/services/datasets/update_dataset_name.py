@@ -1,8 +1,12 @@
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import DatasetModel
 from assay.schemas import DataSetInfo
 from assay.services.datasets._common import _check_name_unique, _get_dataset_or_404
+
+logger = logging.getLogger(__name__)
 
 
 async def update_dataset_name_by_id(
@@ -22,9 +26,16 @@ async def update_dataset_name_by_id(
         HTTPException 409: A dataset with the new name already exists.
     """
     dataset = await _get_dataset_or_404(request.id, session)
-    if dataset.name != request.name:
+    previous_name = dataset.name
+    renamed = previous_name != request.name
+    if renamed:
         await _check_name_unique(request.name, session)
     await _apply_name_update(dataset, request.name, session)
+    if renamed:
+        logger.info(
+            "Renamed dataset %s from %r to %r", dataset.id, previous_name, request.name,
+            extra={"dataset_id": dataset.id},
+        )
     return _build_dataset_info(dataset)
 
 

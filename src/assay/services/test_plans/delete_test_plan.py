@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +7,8 @@ from assay.services.test_plans._common import (
     _check_test_plan_has_no_runs_or_409,
     _find_test_plan_by_id_or_404,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def delete_test_plan_by_id(
@@ -38,3 +41,8 @@ async def delete_test_plan_by_id(
 
     await session.delete(found)
     await session.commit()
+
+    logger.info(
+        "Deleted test plan %s (%r) and its test set links", test_plan_id, found.name,
+        extra={"test_plan_id": test_plan_id},
+    )
