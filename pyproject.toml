@@ -54,7 +54,9 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+# G / LOG: logging call conventions — %-style lazy formatting (no f-strings),
+# logger.exception() inside except blocks, no logging.getLogger(__file__), ...
+select = ["E", "F", "I", "UP", "B", "SIM", "G", "LOG"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

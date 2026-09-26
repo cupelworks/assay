@@ -46,7 +46,8 @@ Copy `.env.example` to `.env` (in the project root) to configure the app locally
 |----------|---------|-------------|
 | `ASSAY_HOST` | `127.0.0.1` | Host the dev server binds to (`main.py`'s `uvicorn.run`, used when running `python -m assay.main` directly — not consulted when running via the `uvicorn assay.main:app` CLI shown above) |
 | `ASSAY_PORT` | `8000` | Port the dev server binds to, same caveat as `ASSAY_HOST` |
-| `ASSAY_LOG_LEVEL` | `INFO` | Only currently wired to one thing: setting this to `DEBUG` turns on SQLAlchemy engine echo, logging every SQL statement. Not yet a general application log level |
+| `ASSAY_LOG_LEVEL` | `INFO` | Level for the app's own loggers (the `assay.*` namespace); third-party loggers stay at `INFO` regardless. `DEBUG` additionally logs every SQL statement. See [Logging](#logging) |
+| `ASSAY_LOG_FORMAT` | `text` | `text`: one readable line per record, for a terminal. `json`: one JSON object per line with the fields as keys, for a log collector (Azure Monitor, Datadog, ...) — use this in production. See [Logging](#logging) |
 | `ASSAY_DATABASE_URL` | `sqlite+aiosqlite:///./assay.db` | Database connection string — see [Database](#database) for the production format |
 | `ASSAY_CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated list of origins allowed to make cross-origin requests (e.g. `https://app.example.com,https://staging.example.com`). Credentialed requests (cookies, auth headers) are only allowed when the list isn't `*` — browsers reject `Access-Control-Allow-Credentials` paired with a wildcard origin |
 | `ASSAY_LLM_PROVIDER` | *(unset)* | Reserved for the LLM-as-judge evaluator's provider selection (`anthropic` or `openai`). Not yet read anywhere — `Settings` in `config.py` has no field for it yet, since the evaluator itself isn't implemented |
@@ -67,6 +68,9 @@ src/assay/
 ├── main.py              # FastAPI app factory
 ├── config.py            # Pydantic settings (reads ASSAY_* env vars)
 ├── db.py                # Async SQLAlchemy engine, session dependency, SQLite FK pragma
+├── logging_config.py    # configure_logging(): stdout, text/json, request ID on every record — see Logging below
+├── middleware.py        # RequestContextMiddleware: X-Request-ID in/out, one access line per request
+├── exception_handlers.py # JSON 500 with request_id; 4xx/422 keep FastAPI's responses, feed the access line
 ├── api/                 # HTTP routes — one file per domain
 │   ├── datasets.py      # Dataset endpoints
 │   ├── test.py          # Test case endpoints
@@ -333,6 +337,8 @@ Then open <http://localhost:5555>. By default Flower only keeps history in memor
 
 ## Observability
 
+### Metrics
+
 Assay exposes a Prometheus-compatible scrape endpoint at `GET /metrics`. It is not listed in the OpenAPI docs (`/docs`) because it returns plain text rather than JSON, but it is active on every running instance.
 
 ```bash
@@ -340,6 +346,23 @@ curl http://127.0.0.1:8000/metrics
 ```
 
 The endpoint provides request count and latency histograms (`http_requests_total`, `http_request_duration_seconds`) labelled by method, status code, and handler. Point any Prometheus scraper — or a compatible platform like Datadog, Grafana Cloud, or Google Cloud Managed Prometheus — at this URL.
+
+### Logging
+
+The API logs to stdout, one record per line, and lets the platform collect it from there — no log files. `ASSAY_LOG_FORMAT` picks the shape: `text` for a terminal (the default), `json` for a log collector, where every field below becomes a key. `ASSAY_LOG_LEVEL` sets the level for the app's own loggers (`assay.*`); third-party loggers stay at `INFO` whatever it's set to, and `DEBUG` additionally logs every SQL statement (`sqlalchemy.engine`). uvicorn's own output (startup, shutdown, the traceback of any unhandled exception) is routed through the same formatter, so a production log is uniform.
+
+```
+2026-09-26 16:47:18,668 WARNING [fe-abc.123] assay.access: GET /test-sets/00000000-… -> 404 (9.4 ms) error="Test set with ID '00000000-…' not found"
+{"timestamp": "2026-09-26T14:47:19.062+00:00", "level": "WARNING", "logger": "assay.access", "message": "GET /test-sets/00000000-… -> 404 (9.5 ms) error=\"…\"", "request_id": "fe-abc.123", "method": "GET", "path": "/test-sets/00000000-…", "status_code": 404, "duration_ms": 9.5, "route": "/test-sets/{test_set_id}", "client_ip": "10.0.0.7", "error": "Test set with ID '00000000-…' not found"}
+```
+
+**Request IDs.** Every request gets an ID, and every log record written while handling it carries that ID (`[fe-abc.123]` above; `-` outside a request). Send an `X-Request-ID` header to have your own ID reused — handy for correlating a client's logs with the server's — otherwise one is generated; either way it comes back in the response's `X-Request-ID` header (readable cross-origin, it's CORS-exposed). A supplied ID is only honoured if it's 1–128 characters of `A-Z a-z 0-9 . _ : -`; anything else is replaced.
+
+**What one request produces.** Exactly one access line on the `assay.access` logger once the response is done — `INFO` for a success, `WARNING` for a 4xx, `ERROR` for a 5xx, `DEBUG` for the constantly-polled `/health` and `/metrics` — with `method`, `path`, `route` (the template, for aggregating), `status_code`, `duration_ms` and `client_ip`. When the request failed, that same line carries the reason as `error`: the response's `detail` for a 4xx (validation errors are summarised as `location: message`, never echoing the submitted value), the exception for a 500. Plus one `INFO` event from the service layer for every state change (a dataset created with its row count, a test set renamed from/to, an execution created with its run count, runs dispatched, ...) — always IDs, names and counts, never a test's input/output or a dataset row.
+
+**Unhandled errors.** A 500 responds with `{"detail": "Internal server error", "request_id": "<id>"}` and the `X-Request-ID` header — quote the ID when reporting it, it's the key to the access line and the traceback (logged once, by the server, with the same ID). Exceptions the API raises on purpose (404/409/422) keep FastAPI's usual `{"detail": ...}` body.
+
+The worker process is not covered by this yet — it runs under Celery's own logging setup (see the [Worker](#worker) section), and its `ASSAY_LOG_LEVEL=DEBUG` still logs SQL via the engine's `echo`. Its log lines can be correlated with the API's by run/execution ID, which both sides log.
 
 ## Tests
 

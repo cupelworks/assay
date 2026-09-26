@@ -6,11 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from assay.config import settings
 
 # Single engine instance shared across the app — one connection pool for the process.
-engine = create_async_engine(
-    settings.database_url,
-    # Echo SQL to stdout when log level is DEBUG — useful locally, too noisy in prod.
-    echo=settings.log_level == "DEBUG",
-)
+# SQL statement logging is not done with echo=True here: that would add the
+# engine's own stdout handler next to the app's, printing every statement
+# twice. assay/logging_config.py sets the sqlalchemy.engine logger to INFO at
+# ASSAY_LOG_LEVEL=DEBUG instead, which is the same output through one handler.
+engine = create_async_engine(settings.database_url)
 
 
 # SQLite does not enforce foreign keys by default — this enables ON DELETE CASCADE.

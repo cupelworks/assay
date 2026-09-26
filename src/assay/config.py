@@ -1,8 +1,9 @@
 # pydantic-settings extends pydantic for app configuration: reads values from
 # environment variables and .env files, then validates and coerces their types.
 # Distinct from pydantic's use in schemas.py, which validates API request/response bodies.
+import logging
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -24,7 +25,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Level for the app's own loggers (the `assay` namespace); third-party
+    # loggers stay at INFO regardless. DEBUG additionally logs every SQL
+    # statement (sqlalchemy.engine) — see assay/logging_config.py.
     log_level: str = "INFO"
+    # text: one human-readable line per record, for a terminal. json: one JSON
+    # object per line, for a log collector (Azure Monitor, Datadog, ...) that
+    # indexes the fields instead of grepping the text.
+    log_format: Literal["text", "json"] = "text"
     host: str = "127.0.0.1"
     port: int = 8000
     # sqlite+aiosqlite locally; postgresql+asyncpg in production
@@ -65,6 +73,17 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, value: str) -> str:
+        level = value.upper()
+        if level not in logging.getLevelNamesMapping():
+            raise ValueError(
+                f"unknown log level {value!r}; expected one of "
+                f"{', '.join(logging.getLevelNamesMapping())}"
+            )
+        return level
 
 
 # Module-level singleton — imported across the app, read once at startup.
