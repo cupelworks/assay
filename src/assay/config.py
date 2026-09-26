@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # the number for a given environment without a new release to do it.
     worker_db_pool_size: int = 10
     worker_db_max_overflow: int = 10
+    # Celery Beat's reconciliation scan (worker/tasks/reconcile_runs.py) — how
+    # often it runs, and how old a Pending run must be before the scan treats its
+    # original dispatch as lost and re-publishes it. Only read by the worker/Beat.
+    reconciliation_interval_minutes: int = 60
+    reconciliation_pending_threshold_minutes: int = 15
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod

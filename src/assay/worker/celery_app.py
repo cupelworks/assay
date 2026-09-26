@@ -2,19 +2,21 @@
 
 The Celery app itself, configured against Redis (or the local SQLite
 alternative) as broker and result backend, imported from the same
-settings the API process already uses. `execute_run` (tasks/execute_run.py)
-is the one task registered so far — what it actually does (resolving a
-run's content and assigned test types, calling the right evaluator per
-type, writing back results/error/status) is still stubbed; see
-docs/run_execution/dev_notes.md notes 4/5 for what's decided and what
-isn't yet.
+settings the API process already uses. Two tasks are registered:
+`execute_run` (tasks/execute_run.py — runs one TestRunModel end to end; its
+per-category evaluators are still stubs) and `reconcile_runs`
+(tasks/reconcile_runs.py — the Beat-scheduled safety net that re-publishes
+Pending runs whose original dispatch was lost).
 
-Entirely separate from the API process — assay.main never imports this,
-and this never imports assay.main. Run with:
+The API process imports this app only to publish tasks by name
+(services/runs/_common.py's _dispatch_runs); it never imports the task or
+evaluator modules, and this never imports assay.main. Run with:
 
     celery -A assay.worker worker --loglevel=info
+    celery -A assay.worker beat --loglevel=info   # exactly one per environment
 """
 import ssl
+from datetime import timedelta
 from urllib.parse import urlparse
 
 from celery import Celery
@@ -45,7 +47,7 @@ app = Celery(
     # tasks/__init__.py's own __all__ (that re-export is for ergonomic
     # access to assay.worker.tasks.execute_run, it doesn't by itself make
     # Celery import anything at worker startup).
-    include=["assay.worker.tasks.execute_run"],
+    include=["assay.worker.tasks.execute_run", "assay.worker.tasks.reconcile_runs"],
 )
 
 app.conf.update(
@@ -56,4 +58,19 @@ app.conf.update(
     enable_utc=True,
     broker_use_ssl=_use_ssl_if_rediss(settings.celery_broker_url),
     redis_backend_use_ssl=_use_ssl_if_rediss(settings.celery_result_backend),
+    # No task's return value is ever read back — outcomes live in the database.
+    # Ignoring results also keeps .delay() from touching the result store before
+    # publishing, so a publish can only fail with a KombuError (broker/encoding),
+    # never the result store's generic RuntimeError. Note: app.send_task does NOT
+    # read this setting — callers publishing by name must pass ignore_result=True.
+    task_ignore_result=True,
+    # Only read by a Beat process (celery -A assay.worker beat) — exactly one per
+    # environment, or every tick gets published twice. The workers themselves
+    # execute reconcile_runs like any other task.
+    beat_schedule={
+        "reconcile-runs": {
+            "task": "assay.worker.tasks.reconcile_runs.reconcile_runs",
+            "schedule": timedelta(minutes=settings.reconciliation_interval_minutes),
+        },
+    },
 )

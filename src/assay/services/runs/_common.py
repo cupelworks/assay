@@ -2,6 +2,7 @@ import logging
 import uuid
 
 from fastapi import HTTPException
+from kombu.exceptions import KombuError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -635,10 +636,17 @@ def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:
     without importing anything the worker itself depends on.
 
     Publishing is fire-and-forget: each run's send is wrapped in its own
-    try/except, so one run failing to publish (a broker outage, a network
-    blip) never stops the rest of a batch from being attempted, and never
-    raises out of this function at all. A run whose dispatch fails simply
-    stays in its current status, to be picked up some other way later.
+    try/except KombuError, so one run failing to publish (a broker outage, a
+    network blip, an encoding failure) never stops the rest of a batch from
+    being attempted. A run whose dispatch fails simply stays Pending, to be
+    re-published by the reconciliation scan. Anything that isn't a KombuError
+    is a bug, not a publish failure, and propagates.
+
+    ignore_result=True is passed explicitly: send_task doesn't read the app's
+    task_ignore_result setting, and without it send_task subscribes to the
+    result store before publishing — which fails with a generic RuntimeError
+    (and, per Celery, leaves the process needing a restart) whenever the
+    result store is unreachable, even though no result is ever read back.
 
     Args:
         run_ids: UUIDs of the already-committed TestRunModel rows to
@@ -646,6 +654,10 @@ def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:
     """
     for run_id in run_ids:
         try:
-            _celery_app.send_task("assay.worker.tasks.execute_run.execute_run", args=[run_id])
-        except Exception:
+            _celery_app.send_task(
+                "assay.worker.tasks.execute_run.execute_run",
+                args=[run_id],
+                ignore_result=True,
+            )
+        except KombuError:
             logger.exception("Failed to dispatch execute_run for run %s", run_id)
