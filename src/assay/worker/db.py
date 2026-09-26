@@ -27,6 +27,7 @@ var: sqlite+aiosqlite:// becomes sqlite:// (stdlib sqlite3, nothing extra
 to install), postgresql+asyncpg:// becomes postgresql+psycopg2:// (needs
 psycopg2-binary, part of the worker extra).
 """
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -36,6 +37,8 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from assay.config import settings
+
+logger = logging.getLogger(__name__)
 
 _ASYNC_TO_SYNC_DRIVER = {
     "sqlite+aiosqlite": "sqlite",
@@ -54,12 +57,14 @@ def _sync_url() -> URL:
 # time — e.g. an Azure deployment can raise ASSAY_WORKER_DB_POOL_SIZE for a
 # bigger --concurrency without shipping a new build. Defaults (10/10) match
 # what a default-sized local --pool=threads worker needs.
+# No echo=True for SQL logging, same as assay/db.py: echo adds the engine's
+# own stdout handler next to the configured one and prints every statement
+# twice. assay/logging_config.py sets sqlalchemy.engine to INFO at
+# ASSAY_LOG_LEVEL=DEBUG instead.
 engine = create_engine(
     _sync_url(),
     pool_size=settings.worker_db_pool_size,
     max_overflow=settings.worker_db_max_overflow,
-    # Echo SQL to stdout when log level is DEBUG — same convention as assay/db.py.
-    echo=settings.log_level == "DEBUG",
 )
 
 if engine.dialect.name == "sqlite":
@@ -85,6 +90,7 @@ def _reset_engine_after_fork(**_kwargs):
     --pool=threads/solo — there's no fork, so nothing to reset.
     """
     engine.dispose()
+    logger.debug("Worker child process started: dropped DB connections inherited from the fork")
 
 
 # expire_on_commit=False keeps ORM objects usable after a commit without

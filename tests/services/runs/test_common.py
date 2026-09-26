@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 from kombu.exceptions import EncodeError, OperationalError
 
+from assay.logging_config import request_id_var
 from assay.services.runs._common import _dispatch_runs
 
 # --- _dispatch_runs() ---
@@ -83,3 +84,14 @@ def test_dispatch_runs_logs_one_summary_line_per_batch(caplog):
     assert len(summaries) == 1
     assert summaries[0].getMessage() == "Dispatched 2 of 3 runs to the worker"
     assert (summaries[0].dispatched, summaries[0].run_count) == (2, 3)
+
+
+def test_dispatch_runs_carries_the_request_id_in_the_task_message():
+    token = request_id_var.set("req-42")
+    try:
+        with patch("assay.services.runs._common._celery_app") as mock_celery_app:
+            _dispatch_runs([uuid.uuid4()])
+    finally:
+        request_id_var.reset(token)
+
+    assert mock_celery_app.send_task.call_args.kwargs["headers"] == {"request_id": "req-42"}

@@ -1,3 +1,5 @@
+import logging
+import time
 import uuid
 from datetime import datetime
 
@@ -7,6 +9,8 @@ from sqlalchemy.orm import Session
 from assay.models import TestRunModel, TestStatus, TestTypesModel
 from assay.schemas import TestTypeAssignment, TestTypeResult
 from assay.worker import evaluators
+
+logger = logging.getLogger(__name__)
 
 
 def execute_run(run_id: uuid.UUID, session: Session) -> None:
@@ -32,10 +36,13 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         # Nothing matched: run_id doesn't exist, or its status was already
         # something other than pending (already claimed by another worker,
         # already running, or already terminal) - this call has nothing to
-        # do either way.
+        # do either way. Expected for a duplicate delivery, still worth a
+        # line: it's the only visible trace of a reconciliation re-publish.
+        logger.info("Run %s not claimed: missing, already running or already terminal", run_id)
         return
 
     run = session.scalar(select(TestRunModel).where(TestRunModel.id == run_id))
+    started = time.perf_counter()
 
     try:
         entry, resolved = _resolve_content(run, session)
@@ -43,11 +50,18 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         # Nothing could be attempted at all - the entry/assignments
         # themselves couldn't be read. This is exactly what NotRan means:
         # error carries the reason, results stays null.
+        logger.exception("Run %s could not be executed: %s", run_id, exc)
         run.status = TestStatus.not_ran
         run.error = str(exc)
         run.executed_at = datetime.now().astimezone()
         session.commit()
         return
+
+    origin = "standalone" if run.test_id is not None else "test set entry"
+    logger.info(
+        "Executing run %s (%s, %d test types)", run_id, origin, len(resolved),
+        extra={"origin": origin, "test_type_count": len(resolved)},
+    )
 
     # evaluators.evaluate() is expected to return a TestTypeResult - the
     # same schema the API reads results back as (schemas/runs.py), so both
@@ -60,6 +74,11 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         try:
             results[assignment.name] = evaluators.evaluate(assignment, category, entry)
         except Exception as exc:
+            logger.warning(
+                "Evaluator %s (%s) failed for run %s: %s",
+                assignment.name, category, run_id, exc,
+                exc_info=True, extra={"test_type": assignment.name, "category": category},
+            )
             results[assignment.name] = TestTypeResult(passed=False, score=None, detail=str(exc))
 
     passed_flags = [result.passed for result in results.values()]
@@ -74,6 +93,19 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     run.status = status
     run.executed_at = datetime.now().astimezone()
     session.commit()
+
+    passed = sum(passed_flags)
+    duration_ms = round((time.perf_counter() - started) * 1000, 1)
+    logger.info(
+        "Run %s finished: %s (%d/%d passed) in %.1f ms",
+        run_id, status.value, passed, len(passed_flags), duration_ms,
+        extra={
+            "status": status.value,
+            "passed": passed,
+            "test_type_count": len(passed_flags),
+            "duration_ms": duration_ms,
+        },
+    )
 
 
 def _resolve_content(

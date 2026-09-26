@@ -6,6 +6,7 @@ from kombu.exceptions import KombuError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.logging_config import request_id_var
 from assay.models import (
     TestModel,
     TestPlanEntryModel,
@@ -659,6 +660,9 @@ def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:
                 "assay.worker.tasks.execute_run.execute_run",
                 args=[run_id],
                 ignore_result=True,
+                # travels in the task message, so the worker's log lines for
+                # this run carry the same request ID as this request's
+                headers={"request_id": request_id_var.get()},
             )
         except KombuError:
             logger.exception("Failed to dispatch execute_run for run %s", run_id)

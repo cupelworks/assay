@@ -1,3 +1,4 @@
+import logging
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -196,3 +197,92 @@ def test_resolve_content_test_set_entry():
         (TestTypeAssignment(name="ROUGE", config={"threshold": "0.7"}), "nlp_metric"),
         (TestTypeAssignment(name="Toxicity", config=None), "llm_as_judge"),
     ]
+
+
+# --- logging ---
+
+_LOGGER = "assay.worker.services.execute_run"
+
+
+def _records(caplog):
+    return [r for r in caplog.records if r.name == _LOGGER]
+
+
+def test_an_unclaimed_run_is_logged_not_silently_skipped(caplog):
+    run_id = uuid.uuid4()
+    session = MagicMock()
+    session.execute.return_value.rowcount = 0
+
+    with caplog.at_level(logging.INFO, logger=_LOGGER):
+        execute_run(run_id, session)
+
+    assert [r.getMessage() for r in _records(caplog)] == [
+        f"Run {run_id} not claimed: missing, already running or already terminal"
+    ]
+
+
+def test_a_finished_run_logs_what_ran_and_its_outcome(caplog):
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    resolved = (
+        MagicMock(),
+        [(TestTypeAssignment(name="Exact Match"), "deterministic"),
+         (TestTypeAssignment(name="Toxicity"), "llm_as_judge")],
+    )
+
+    def fake_evaluate(assignment, category, entry):
+        return TestTypeResult(passed=assignment.name == "Exact Match", score=None, detail=None)
+
+    with (
+        patch(_PATCH_RESOLVE_CONTENT, return_value=resolved),
+        patch(_PATCH_EVALUATE, side_effect=fake_evaluate),
+        caplog.at_level(logging.INFO, logger=_LOGGER),
+    ):
+        execute_run(run_id, session)
+
+    executing, finished = _records(caplog)
+    assert executing.getMessage() == f"Executing run {run_id} (test set entry, 2 test types)"
+    assert (executing.origin, executing.test_type_count) == ("test set entry", 2)
+    assert finished.getMessage().startswith(f"Run {run_id} finished: Amber (1/2 passed) in ")
+    assert (finished.status, finished.passed, finished.test_type_count) == ("Amber", 1, 2)
+    assert isinstance(finished.duration_ms, float)
+
+
+def test_a_content_resolution_failure_is_an_error_with_the_traceback(caplog):
+    run_id = uuid.uuid4()
+    session = MagicMock()
+    _mock_successful_claim(session, TestRunModel(id=run_id, status=TestStatus.running))
+
+    with (
+        patch(_PATCH_RESOLVE_CONTENT, side_effect=RuntimeError("entry vanished")),
+        caplog.at_level(logging.INFO, logger=_LOGGER),
+    ):
+        execute_run(run_id, session)
+
+    (record,) = _records(caplog)
+    assert record.levelno == logging.ERROR
+    assert record.getMessage() == f"Run {run_id} could not be executed: entry vanished"
+    assert record.exc_info[0] is RuntimeError
+
+
+def test_an_evaluator_failure_is_a_warning_with_the_traceback(caplog):
+    run_id = uuid.uuid4()
+    session = MagicMock()
+    _mock_successful_claim(session, TestRunModel(id=run_id, status=TestStatus.running))
+    resolved = (MagicMock(), [(TestTypeAssignment(name="Toxicity"), "llm_as_judge")])
+
+    with (
+        patch(_PATCH_RESOLVE_CONTENT, return_value=resolved),
+        patch(_PATCH_EVALUATE, side_effect=RuntimeError("judge API timed out")),
+        caplog.at_level(logging.INFO, logger=_LOGGER),
+    ):
+        execute_run(run_id, session)
+
+    warning = next(r for r in _records(caplog) if r.levelno == logging.WARNING)
+    assert warning.getMessage() == (
+        f"Evaluator Toxicity (llm_as_judge) failed for run {run_id}: judge API timed out"
+    )
+    assert warning.exc_info[0] is RuntimeError
+    assert (warning.test_type, warning.category) == ("Toxicity", "llm_as_judge")

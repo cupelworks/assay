@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
@@ -61,6 +62,33 @@ def test_non_kombu_error_propagates():
         reconcile_pending_runs(session, timedelta(minutes=15), publish)
 
     publish.assert_called_once()
+
+
+def test_no_stale_runs_is_logged_at_debug_only(caplog):
+    session = _session_returning([])
+
+    with caplog.at_level(logging.DEBUG, logger="assay.worker"):
+        reconcile_pending_runs(session, timedelta(minutes=15), MagicMock())
+
+    records = [r for r in caplog.records if r.name == "assay.worker.services.reconcile_runs"]
+    assert [(r.levelno, r.getMessage()) for r in records] == [
+        (logging.DEBUG, "Reconciliation scan: no Pending runs older than 15 min"),
+    ]
+
+
+def test_republish_summary_counts_the_failures(caplog):
+    run_ids = [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()]
+    session = _session_returning(run_ids)
+    publish = MagicMock(side_effect=[None, OperationalError("broker unreachable"), None])
+
+    with caplog.at_level(logging.INFO, logger="assay.worker"):
+        reconcile_pending_runs(session, timedelta(minutes=15), publish)
+
+    summary = next(r for r in caplog.records if r.getMessage().startswith("Reconciliation scan"))
+    assert summary.getMessage() == (
+        "Reconciliation scan: re-published 2 of 3 Pending runs older than 15 min"
+    )
+    assert (summary.republished, summary.stale_count, summary.threshold_minutes) == (2, 3, 15)
 
 
 def test_query_filters_pending_runs_older_than_threshold():

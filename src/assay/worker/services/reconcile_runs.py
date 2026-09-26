@@ -41,6 +41,14 @@ def reconcile_pending_runs(
         )
     ).all()
 
+    threshold_minutes = round(threshold.total_seconds() / 60)
+    if not stale_ids:
+        logger.debug(
+            "Reconciliation scan: no Pending runs older than %d min", threshold_minutes,
+            extra={"threshold_minutes": threshold_minutes},
+        )
+        return
+
     republished = 0
     for run_id in stale_ids:
         try:
@@ -50,5 +58,12 @@ def reconcile_pending_runs(
         else:
             republished += 1
 
-    if republished:
-        logger.info("Re-published %d stale Pending run(s)", republished)
+    logger.info(
+        "Reconciliation scan: re-published %d of %d Pending runs older than %d min",
+        republished, len(stale_ids), threshold_minutes,
+        extra={
+            "republished": republished,
+            "stale_count": len(stale_ids),
+            "threshold_minutes": threshold_minutes,
+        },
+    )

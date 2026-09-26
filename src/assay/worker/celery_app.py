@@ -14,14 +14,26 @@ evaluator modules, and this never imports assay.main. Run with:
 
     celery -A assay.worker worker --loglevel=info
     celery -A assay.worker beat --loglevel=info   # exactly one per environment
+
+Logging is the API's (assay/logging_config.py), applied through Celery's
+setup_logging signal below: same formats, ASSAY_LOG_LEVEL/ASSAY_LOG_FORMAT
+apply here too, and each run's lines carry the request ID of the API call
+that created it. The CLI's --loglevel keeps governing Celery's own loggers.
 """
+import logging
 import ssl
 from datetime import timedelta
 from urllib.parse import urlparse
 
 from celery import Celery
+from celery.signals import beat_init, setup_logging, worker_ready
+from kombu.utils.url import maybe_sanitize_url
 
+from assay import __version__
 from assay.config import settings
+from assay.logging_config import configure_logging
+
+logger = logging.getLogger(__name__)
 
 
 def _use_ssl_if_rediss(url: str) -> dict | None:
@@ -74,3 +86,45 @@ app.conf.update(
         },
     },
 )
+
+
+@setup_logging.connect
+def _configure_logging(loglevel: int | None = None, **_kwargs) -> None:
+    """Celery skips its own logging setup (root-logger takeover, its own
+    format) entirely when this signal has a receiver. ASSAY_LOG_LEVEL governs
+    the `assay.*` loggers here exactly as in the API; the CLI's --loglevel is
+    applied to Celery's own loggers so it keeps meaning (task received/
+    succeeded lines, Beat ticks).
+    """
+    configure_logging(settings.log_level, settings.log_format)
+    if loglevel is not None:
+        logging.getLogger("celery").setLevel(loglevel)
+
+
+@worker_ready.connect
+def _log_worker_ready(sender=None, **_kwargs) -> None:
+    controller = getattr(sender, "controller", None)
+    pool = getattr(getattr(controller, "pool_cls", None), "__module__", "?").rsplit(".", 1)[-1]
+    concurrency = getattr(controller, "concurrency", None)
+    logger.info(
+        "Assay worker %s ready: log_level=%s log_format=%s pool=%s concurrency=%s broker=%s",
+        __version__, settings.log_level, settings.log_format, pool, concurrency,
+        maybe_sanitize_url(settings.celery_broker_url),
+        extra={"version": __version__, "pool": pool, "concurrency": concurrency},
+    )
+
+
+@beat_init.connect
+def _log_beat_start(**_kwargs) -> None:
+    # Read from the schedule rather than naming tasks here, so a new entry in
+    # beat_schedule shows up without this having to know about it.
+    schedule = {
+        name: {"task": entry["task"], "every": str(entry["schedule"])}
+        for name, entry in (app.conf.beat_schedule or {}).items()
+    }
+    logger.info(
+        "Assay Beat %s starting with %d scheduled task(s): %s",
+        __version__, len(schedule),
+        "; ".join(f"{name} -> {e['task']} every {e['every']}" for name, e in schedule.items()),
+        extra={"version": __version__, "schedule": schedule},
+    )
