@@ -66,9 +66,11 @@ if TYPE_CHECKING:
 #   A TestRunModel represents a single evaluation attempt. There are three modes:
 #
 #   - STANDALONE: test_id is set, everything else null.
-#     The user runs a live test directly, outside any set or plan. The run
-#     reads input/expected_output from the live TestModel at execution time.
-#     Has no live/replay pair — nothing about a standalone run is ever frozen.
+#     The user runs a live test directly, outside any set or plan. When the
+#     run is created the test is copied into a StandaloneRunModel (same id as
+#     the run), and the run is evaluated against that copy — later edits to
+#     the live test never change it. Has no live/replay pair: each standalone
+#     run copies the test as it is at that moment.
 #
 #   - TEST-SET-TRIGGERED: test_set_entry_id + test_set_execution_id are set.
 #     The run belongs to a standalone test set execution (TestSetExecutionModel),
@@ -572,9 +574,13 @@ class TestRunModel(Base):
 
     STANDALONE (test_id set, everything else null):
         The user runs a live TestModel directly, outside any set or plan.
-        Input and configuration are read from the live test at execution time.
-        Use this for quick, ad-hoc evaluation during test authoring. Has no
-        live/replay pair, unlike the other two modes.
+        When the run is created, the test is copied into a
+        StandaloneRunModel sharing this run's id (see standalone_run), and
+        input and configuration are read from that frozen copy — so, like
+        the other two modes, the run stays reproducible regardless of later
+        edits to the live test. Use this for quick, ad-hoc evaluation
+        during test authoring. Has no live/replay pair, unlike the other
+        two modes.
 
     TEST-SET-TRIGGERED (test_set_entry_id + test_set_execution_id set):
         The run is part of a standalone test set execution. Input and
@@ -653,6 +659,12 @@ class TestRunModel(Base):
     test_plan_execution: Mapped["TestPlanExecutionModel | None"] = relationship(
         back_populates="runs"
     )
+    # Standalone mode only: the frozen copy of the test this run evaluates.
+    # One-to-one, sharing this run's id; None in the other two modes.
+    standalone_run: Mapped["StandaloneRunModel | None"] = relationship(
+        back_populates="test_run",
+        passive_deletes=True,
+    )
 
     status: Mapped[TestStatus] = mapped_column(
         SAEnum(TestStatus, create_constraint=True), default=TestStatus.pending, index=True
@@ -675,3 +687,40 @@ class TestRunModel(Base):
         back_populates="test_run",
         # TODO: cascade deletion of statistical_verifications should be opt-in via the API
     )
+
+
+class StandaloneRunModel(Base):
+    """
+    The standalone-specific half of a standalone run: a frozen copy of the
+    test as it was when the run was created.
+
+    test_runs is still the table that lists every run, standalone or not —
+    this table only extends the standalone ones. The two are one-to-one and
+    share the same id: a row's primary key is the test_runs.id it belongs
+    to (also its foreign key), so there's no second id to track.
+
+    The copy holds the same fields as a TestSetEntryModel snapshot, in the
+    same shapes — test_type_assignments is the same list of
+    {"name": str, "config": dict | null} objects — so a standalone run is
+    evaluated and displayed exactly like a test-set-triggered one. Unlike an
+    entry, it has no set membership and is never editable: it belongs to
+    exactly one run from the moment it's created, and later edits to the
+    live test (reachable through TestRunModel.test_id) never touch it.
+    """
+
+    __tablename__ = "standalone_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("test_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    input: Mapped[str] = mapped_column(Text)
+    expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    test_type_assignments: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    snapshot_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now().astimezone()
+    )
+
+    test_run: Mapped["TestRunModel"] = relationship(back_populates="standalone_run")

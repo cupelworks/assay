@@ -10,6 +10,18 @@ from assay.models import ConfigFieldKind, DatasetRowModel, TestModel, TestTypesM
 from assay.schemas import TestTypeAssignment
 
 
+def _frozen_test_type_assignments(test: TestModel) -> list[dict]:
+    """The test's assigned types with their config, in the frozen JSON shape
+    every snapshot of a test stores — a TestSetEntryModel when the test is
+    added to a set, a StandaloneRunModel when a standalone run is created:
+    `[{"name": ..., "config": ...}]`. The test's assignments must be loaded.
+    """
+    return [
+        {"name": assignment.test_type_name, "config": assignment.config}
+        for assignment in test.test_type_assignments
+    ]
+
+
 def _check_difference_between_found_tests_and_requested_tests(
         test_ids: list[uuid.UUID],
         found_test_ids: list[uuid.UUID],

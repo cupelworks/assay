@@ -27,7 +27,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
         201: {
             "description": (
                 "A pending run was created for the test and dispatched for "
-                "execution. This endpoint does not call the model, score "
+                "execution. The run keeps its own copy of the test as it is "
+                "right now (see the run's detail), so editing the test later "
+                "never changes what this run was judged against. This "
+                "endpoint does not call the model, score "
                 "anything, or write back results itself — `status` is always "
                 "`Pending` in the response, since the worker that does all of "
                 "that runs separately, after this response is returned. "
@@ -87,22 +90,26 @@ async def run_standalone_test(
 ) -> StandaloneRunCreationMetadata: # pragma: no cover
     """Create a standalone, pending run for a single live test.
 
-    A standalone run evaluates a live `TestModel` directly, outside any test
-    set or test plan — the quick, ad-hoc way to run a test during authoring,
-    without first snapshotting it anywhere. Unlike runs created via a test set
-    or test plan, a standalone run has no "live vs. replay" concept: it
-    always reads the test's current state, whatever that happens to be at the
-    moment it actually executes.
+    A standalone run evaluates a single test directly, outside any test set
+    or test plan — the quick, ad-hoc way to run a test during authoring,
+    without first adding it to a set. The run keeps its own frozen copy of
+    the test, taken right here at creation: its name, input, outputs and
+    assigned test types with their config. That copy is what gets evaluated
+    and what the run's detail shows, so editing the test afterwards never
+    changes what this run was judged against. Unlike runs created via a test
+    set or test plan, a standalone run has no "live vs. replay" concept —
+    each new standalone run copies the test as it is at that moment.
 
     Two guards run before the run is created:
     - The test must exist (404).
     - The test must have at least one test type assigned (409) — otherwise
       the run would have nothing to be scored against, ever.
 
-    This endpoint creates the run record and dispatches it for execution —
-    it does not execute anything itself; that happens in the worker process,
-    once it picks up the dispatched task. Exactly one `TestRunModel` row is
-    created regardless of how many test types are assigned to the test.
+    This endpoint creates the run record, with its frozen copy, and
+    dispatches it for execution — it does not execute anything itself; that
+    happens in the worker process, once it picks up the dispatched task.
+    Exactly one run is created regardless of how many test types are
+    assigned to the test.
 
     Returns the new run's ID, status (always `Pending` at creation), creation
     timestamp, and the ID of the test it was created for.
@@ -187,11 +194,16 @@ async def get_standalone_run_metadata(
     responses={
         200: {
             "description": (
-                "Full details for the standalone run, including its "
-                "post-execution results. `results`, `error`, and "
-                "`executed_at` are null until the run reaches a terminal "
-                "status (`Green`, `Amber`, `Red`, or `NotRan`) — this "
-                "example shows a run where every assigned test type passed."
+                "Full details for the standalone run: its post-execution "
+                "results, and the frozen copy of the test it was created "
+                "from (`name`, `input`, `expected_output`, `model_output`, "
+                "`test_type_assignments`, `test_case_snapshot_at`) — the "
+                "test exactly as it was when the run was created, so later "
+                "edits to the live test never change what this shows. "
+                "`results`, `error`, and `executed_at` are null until the "
+                "run reaches a terminal status (`Green`, `Amber`, `Red`, or "
+                "`NotRan`) — this example shows a run where every assigned "
+                "test type passed."
             ),
             "content": {
                 "application/json": {
@@ -208,6 +220,17 @@ async def get_standalone_run_metadata(
                         },
                         "error": None,
                         "executed_at": "2026-07-14T18:03:24.981022",
+                        "name": "greets the user by name",
+                        "input": "Say hello to Alice.",
+                        "expected_output": "Hello, Alice!",
+                        "model_output": "Hello, Alice!",
+                        "test_type_assignments": [
+                            {"name": "Exact Match", "config": None},
+                            {"name": "BLEU", "config": {"threshold": "0.4"}},
+                        ],
+                        "test_case_snapshot_at": {
+                            "snapshot_at": "2026-07-14T18:03:21.123456"
+                        },
                     }
                 }
             },
@@ -273,5 +296,13 @@ async def get_standalone_run_details(
     until the run reaches a terminal status (`Green`, `Amber`, `Red`, or
     `NotRan`), and `results`/`error` are mutually exclusive even then:
     `error` is only ever set for `NotRan`, `results` for the other three.
+
+    Also returns the frozen copy of the test taken when the run was created
+    — `name`, `input`, `expected_output`, `model_output`,
+    `test_type_assignments` (each with its config) and
+    `test_case_snapshot_at` — in the same shape a test-set or test-plan
+    run's detail returns its entry. It's what the run is evaluated against,
+    and editing the live test afterwards never changes it; `test_case_id`
+    still points at the live test.
     """
     return await get_run_details_by_test_and_run_id(test_id, test_run_id, session)

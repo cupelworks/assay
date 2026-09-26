@@ -10,7 +10,10 @@ from assay.services.test_sets._common import (
     _check_tests_not_in_test_set_or_409,
     _find_test_set_or_404,
 )
-from assay.services.tests._common import _find_all_tests_with_details_or_404
+from assay.services.tests._common import (
+    _find_all_tests_with_details_or_404,
+    _frozen_test_type_assignments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +66,7 @@ async def add_tests_to_test_set_by_test_id(
             input=test.input,
             expected_output=test.expected_output,
             model_output=test.model_output,
-            test_type_assignments=[
-                {"name": ta.test_type_name, "config": ta.config}
-                for ta in test.test_type_assignments
-            ],
+            test_type_assignments=_frozen_test_type_assignments(test),
             snapshot_at=datetime.now(),
         )
         for test in found_tests

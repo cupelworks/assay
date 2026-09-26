@@ -3,12 +3,11 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 from assay.models import (
+    StandaloneRunModel,
     TestModel,
     TestRunModel,
     TestSetEntryModel,
     TestStatus,
-    TestTypeAssignmentModel,
-    TestTypesModel,
 )
 from assay.schemas import TestTypeAssignment, TestTypeResult
 from assay.worker.services.execute_run import _resolve_content, execute_run
@@ -153,24 +152,27 @@ def test_one_assignments_own_evaluator_failure_does_not_fail_the_whole_run():
 # --- _resolve_content() ---
 
 
-def test_resolve_content_standalone():
-    test_type = TestTypesModel(name="Exact Match", category="deterministic")
-    assignment = TestTypeAssignmentModel(test_type_name="Exact Match", config=None)
-    assignment.test_type = test_type
-    test = TestModel(
-        id=uuid.uuid4(),
+def test_resolve_content_standalone_reads_its_frozen_copy_not_the_live_test():
+    run_id = uuid.uuid4()
+    live_test = TestModel(id=uuid.uuid4(), input="edited after the run")
+    frozen_copy = StandaloneRunModel(
+        id=run_id,
+        name="greets the user",
         input="Say hello",
-        test_type_assignments=[assignment],
+        test_type_assignments=[{"name": "Exact Match", "config": None}],
     )
-    run = TestRunModel(id=uuid.uuid4(), test_id=test.id)
-    run.test = test
+    run = TestRunModel(id=run_id, test_id=live_test.id)
+    run.test = live_test
+    run.standalone_run = frozen_copy
     session = MagicMock()
+    session.execute.return_value.tuples.return_value.all.return_value = [
+        ("Exact Match", "deterministic"),
+    ]
 
     entry, resolved = _resolve_content(run, session)
 
-    assert entry is test
+    assert entry is frozen_copy
     assert resolved == [(TestTypeAssignment(name="Exact Match", config=None), "deterministic")]
-    session.execute.assert_not_called()  # no join needed — category came from the relationship
 
 
 def test_resolve_content_test_set_entry():

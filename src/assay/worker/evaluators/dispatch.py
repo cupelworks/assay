@@ -10,9 +10,9 @@ schema the API already uses, reused rather than inventing a worker-only
 shape. `category` is passed alongside it rather than being a field on it:
 it's only needed to pick which function to call here — once inside
 deterministic.evaluate() (say), the function already knows its own
-category. `entry` is whichever ORM object tasks/execute_run.py resolved
-the run's content from (TestModel for a standalone run, TestSetEntryModel
-for everything else) — both expose the same input/expected_output/
+category. `entry` is the frozen copy of the test the run evaluates
+(StandaloneRunModel for a standalone run, TestSetEntryModel for
+everything else) — both expose the same input/expected_output/
 model_output fields, so the evaluators don't need to care which one they
 got.
 """

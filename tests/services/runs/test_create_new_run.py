@@ -80,6 +80,7 @@ def test_standalone_happy_path():
             test_type_assignments=[
                 TestTypeAssignmentModel(
                     test_type_name="ROUGE",
+                    config={"threshold": "0.7"},
                 ),
             ],
         )
@@ -108,6 +109,18 @@ def test_standalone_happy_path():
     assert response.created_at == test_run_model.created_at
     assert response.status == test_run_model.status
     assert response.test_case_id.id == test_id
+
+    # The run carries its own frozen copy of the test, sharing its id and
+    # taken at the run's creation time - committed in the same transaction.
+    frozen_copy = test_run_model.standalone_run
+    assert frozen_copy.id == test_run_model.id
+    assert frozen_copy.snapshot_at == test_run_model.created_at
+    assert (frozen_copy.name, frozen_copy.input) == ("Test Name", "Test Input")
+    assert frozen_copy.expected_output == "Test Expected Output"
+    assert frozen_copy.model_output == "Test Model Output"
+    assert frozen_copy.test_type_assignments == [
+        {"name": "ROUGE", "config": {"threshold": "0.7"}},
+    ]
 
 
 # --- create_new_live_test_set_run() ---

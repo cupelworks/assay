@@ -4,7 +4,13 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import TestPlanExecutionModel, TestRunModel, TestSetExecutionModel, TestStatus
+from assay.models import (
+    StandaloneRunModel,
+    TestPlanExecutionModel,
+    TestRunModel,
+    TestSetExecutionModel,
+    TestStatus,
+)
 from assay.schemas import (
     StandaloneRunCreationMetadata,
     TestCaseID,
@@ -33,7 +39,10 @@ from assay.services.runs._common import (
 )
 from assay.services.test_plans._common import _find_test_plan_by_id_or_404
 from assay.services.test_sets._common import _find_test_set_or_404
-from assay.services.tests._common import _find_all_tests_with_details_or_404
+from assay.services.tests._common import (
+    _find_all_tests_with_details_or_404,
+    _frozen_test_type_assignments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +59,15 @@ async def create_new_standalone_run(
     rejected upfront rather than silently created as a guaranteed no-op.
 
     Creates a single TestRunModel with status=pending (test_id set, every
-    other FK left null — the standalone mode), commits it, then dispatches
-    it for execution (best-effort, see _dispatch_runs) before returning.
-    Nothing here calls a model or writes back scores itself — that happens
-    in the worker process once it picks up the dispatched task. Exactly one
-    row is created regardless of how many test types are assigned.
+    other FK left null — the standalone mode) together with its
+    StandaloneRunModel — the frozen copy of the test (name, input, outputs,
+    assigned types with their config) this run is evaluated against, so
+    later edits to the live test never change what the run was judged by.
+    Both are committed in one transaction, then the run is dispatched for
+    execution (best-effort, see _dispatch_runs) before returning. Nothing
+    here calls a model or writes back scores itself — that happens in the
+    worker process once it picks up the dispatched task. Exactly one run is
+    created regardless of how many test types are assigned.
 
     Args:
         test_id: UUID of the live test to create a run for.
@@ -77,6 +90,15 @@ async def create_new_standalone_run(
         test_id=found.id,
         status=TestStatus.pending,
         created_at=datetime.now().astimezone(),
+    )
+    test_run_model.standalone_run = StandaloneRunModel(
+        id=test_run_model.id,
+        name=found.name,
+        input=found.input,
+        expected_output=found.expected_output,
+        model_output=found.model_output,
+        test_type_assignments=_frozen_test_type_assignments(found),
+        snapshot_at=test_run_model.created_at,
     )
 
     session.add(test_run_model)

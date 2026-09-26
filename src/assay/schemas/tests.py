@@ -68,7 +68,11 @@ class TestCaseID(BaseModel):
 class TestCaseSnapshotDate(BaseModel):
     snapshot_at: datetime = Field(
         ...,
-        description="When this entry was snapshotted from its live test",
+        description=(
+            "When this frozen copy was taken from its live test — when the "
+            "test was added to its set, for a test set entry; when the run "
+            "was created, for a standalone run"
+        ),
     )
 
 

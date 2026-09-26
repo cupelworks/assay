@@ -45,7 +45,9 @@ single outcome.
   set or plan, one run per entry. A **live** execution covers the current membership; a
   **replay** re-runs exactly what a past execution ran. A run goes `Pending` → `Running`
   → `Green` (every check passed), `Amber` (mixed), `Red` (every check failed) or `NotRan`
-  (nothing could be attempted), with the result of each check kept alongside.
+  (nothing could be attempted), with the result of each check kept alongside. Every run
+  keeps a record of the test exactly as it was run, so editing a test later never changes
+  a past run's history.
 - **Statistical verification** — a one-sample z-test over a series of metric scores
   against a threshold, for claims like "this metric holds above 0.8 at α = 0.05".
 

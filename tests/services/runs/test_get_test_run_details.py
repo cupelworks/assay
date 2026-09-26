@@ -74,81 +74,93 @@ def test_get_run_details_by_test_and_run_id_test_run_id_not_linked_to_specific_t
             f"to test with ID '{test_id}'") in str(e.value.detail)
 
 
+def _standalone_session(test_id, test_run_id, row):
+    session = AsyncMock()
+    session.scalar.side_effect = [test_id, test_run_id, TestRunModel(id=test_run_id)]
+    result = MagicMock()
+    result.one.return_value = row
+    session.execute.return_value = result
+    return session
+
+
+def _standalone_row(**overrides):
+    fields = dict(
+        status=TestStatus.green,
+        created_at=datetime.now().astimezone(),
+        results={
+            "BLEU": {"passed": True, "score": 0.5, "detail": None},
+            "ROUGE": {"passed": True, "score": 0.9, "detail": None},
+        },
+        error=None,
+        executed_at=datetime.now().astimezone(),
+        name="greets the user by name",
+        input="Say hello to Alice.",
+        expected_output="Hello, Alice!",
+        model_output="Hello, Alice!",
+        test_type_assignments=[
+            {"name": "BLEU", "config": {"threshold": "0.4"}},
+            {"name": "ROUGE", "config": {"threshold": "0.7"}},
+        ],
+        snapshot_at=datetime.now().astimezone(),
+    )
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
 def test_get_run_details_by_test_and_run_id_happy_path():
     test_id = uuid.uuid4()
     test_run_id = uuid.uuid4()
-    
-    session = AsyncMock()
-
-    results = {
-        "BLEU": {"passed": True, "score": 0.5, "detail": None},
-        "ROUGE": {"passed": True, "score": 0.9, "detail": None},
-    }
-    
-    returned_test_run_model_for_validation = TestRunModel(
-        id=test_run_id,
-        status=TestStatus.green,
-        created_at=datetime.now().astimezone(),
-        test_id=test_id,
-        results=results,
-        error=None,
-        executed_at=datetime.now().astimezone(),
-    )
-    session.scalar.side_effect = [
-        test_id, 
-        test_run_id, 
-        TestRunModel(id=test_run_id),
-        returned_test_run_model_for_validation
-    ]
+    row = _standalone_row()
+    session = _standalone_session(test_id, test_run_id, row)
 
     response = asyncio.run(get_run_details_by_test_and_run_id(test_id, test_run_id, session))
 
-    assert session.scalar.call_count == 4
+    assert session.scalar.call_count == 3
+    session.execute.assert_called_once()
     assert response == StandaloneRunDetails(
-        id=returned_test_run_model_for_validation.id,
-        status=returned_test_run_model_for_validation.status,
-        created_at=returned_test_run_model_for_validation.created_at,
+        id=test_run_id,
+        status=row.status,
+        created_at=row.created_at,
         test_case_id=TestCaseID(id=test_id),
-        results=returned_test_run_model_for_validation.results,
-        error=returned_test_run_model_for_validation.error,
-        executed_at=returned_test_run_model_for_validation.executed_at,
+        results=row.results,
+        error=None,
+        executed_at=row.executed_at,
+        name=row.name,
+        input=row.input,
+        expected_output=row.expected_output,
+        model_output=row.model_output,
+        test_type_assignments=row.test_type_assignments,
+        test_case_snapshot_at=TestCaseSnapshotDate(snapshot_at=row.snapshot_at),
     )
+
+
+def test_get_run_details_by_test_and_run_id_reads_the_frozen_copy():
+    # The content comes from the run's StandaloneRunModel (joined in the
+    # same query), never from the live test - that's what keeps an edited
+    # test from rewriting what an old run was judged against.
+    test_id = uuid.uuid4()
+    test_run_id = uuid.uuid4()
+    session = _standalone_session(test_id, test_run_id, _standalone_row())
+
+    asyncio.run(get_run_details_by_test_and_run_id(test_id, test_run_id, session))
+
+    sql = str(session.execute.call_args.args[0])
+    assert "JOIN standalone_runs ON test_runs.id = standalone_runs.id" in sql
+    assert "standalone_runs.expected_output" in sql
+    assert "tests." not in sql
 
 
 def test_get_run_details_by_test_and_run_id_happy_path_non_terminal_run():
     test_id = uuid.uuid4()
     test_run_id = uuid.uuid4()
-
-    session = AsyncMock()
-
-    returned_test_run_model_for_validation = TestRunModel(
-        id=test_run_id,
-        status=TestStatus.pending,
-        created_at=datetime.now().astimezone(),
-        test_id=test_id,
-        results=None,
-        error=None,
-        executed_at=None,
-    )
-    session.scalar.side_effect = [
-        test_id,
-        test_run_id,
-        TestRunModel(id=test_run_id),
-        returned_test_run_model_for_validation,
-    ]
+    row = _standalone_row(status=TestStatus.pending, results=None, executed_at=None)
+    session = _standalone_session(test_id, test_run_id, row)
 
     response = asyncio.run(get_run_details_by_test_and_run_id(test_id, test_run_id, session))
 
-    assert session.scalar.call_count == 4
-    assert response == StandaloneRunDetails(
-        id=returned_test_run_model_for_validation.id,
-        status=TestStatus.pending,
-        created_at=returned_test_run_model_for_validation.created_at,
-        test_case_id=TestCaseID(id=test_id),
-        results=None,
-        error=None,
-        executed_at=None,
-    )
+    assert response.status == TestStatus.pending
+    assert (response.results, response.error, response.executed_at) == (None, None, None)
+    assert response.input == "Say hello to Alice."  # the copy exists from creation on
 
 
 # --- get_run_details_by_test_set_execution_and_run_id() ---

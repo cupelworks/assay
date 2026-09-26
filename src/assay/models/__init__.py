@@ -6,6 +6,7 @@ from assay.models.stats import StatisticalVerificationModel
 from assay.models.test import (
     TERMINAL_STATUSES,
     ConfigFieldKind,
+    StandaloneRunModel,
     TestModel,
     TestPlanEntryModel,
     TestPlanExecutionModel,
@@ -27,6 +28,7 @@ __all__ = [
     "ConfigFieldKind",
     "DatasetModel",
     "DatasetRowModel",
+    "StandaloneRunModel",
     "StatisticalVerificationModel",
     "TestModel",
     "TestPlanEntryModel",

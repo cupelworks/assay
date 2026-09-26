@@ -138,8 +138,9 @@ class PaginatedStandaloneRunCreationMetadata(Pagination):
     items: list[StandaloneRunCreationMetadata]
 
 
-class StandaloneRunDetails(StandaloneRunCreationMetadata, RunResults, RunError, RunExecutionDate):
-    pass
+class StandaloneRunDetails(StandaloneRunCreationMetadata, RunResults, RunError,
+                           RunExecutionDate, CreateTestCaseRequest):
+    test_case_snapshot_at: TestCaseSnapshotDate
 
 
 class TestSetExecutionID(BaseModel):
