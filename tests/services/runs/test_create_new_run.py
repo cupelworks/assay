@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -85,13 +85,25 @@ def test_standalone_happy_path():
         )
     ]))
 
-    response = asyncio.run(create_new_standalone_run(test_id, session))
+    order = []
+    session.commit.side_effect = lambda: order.append("commit")
+
+    with patch(
+            "assay.services.runs.create_new_run._dispatch_runs",
+            side_effect=lambda run_ids: order.append("dispatch"),
+    ) as mock_dispatch:
+        response = asyncio.run(create_new_standalone_run(test_id, session))
 
     test_run_model = session.add.call_args.args[0]
 
     session.scalars.assert_called_once()
     session.add.assert_called_once()
     session.commit.assert_called_once()
+    mock_dispatch.assert_called_once_with([test_run_model.id])
+    # Dispatch must happen only after the creating transaction has
+    # committed (dev_notes.md note 10) — the worker's own connection isn't
+    # guaranteed to see the row until then.
+    assert order == ["commit", "dispatch"]
     assert response.id == test_run_model.id
     assert response.created_at == test_run_model.created_at
     assert response.status == test_run_model.status
@@ -182,7 +194,14 @@ def test_new_live_test_set_run_happy_path():
             for entry in available_test_set_entry_models
         ]))
 
-    response = asyncio.run(create_new_live_test_set_run(test_set_id, session))
+    order = []
+    session.commit.side_effect = lambda: order.append("commit")
+
+    with patch(
+            "assay.services.runs.create_new_run._dispatch_runs",
+            side_effect=lambda run_ids: order.append("dispatch"),
+    ) as mock_dispatch:
+        response = asyncio.run(create_new_live_test_set_run(test_set_id, session))
 
     session.scalar.assert_called_once()
     session.scalars.assert_called_once()
@@ -190,6 +209,7 @@ def test_new_live_test_set_run_happy_path():
     session.add.assert_called_once()
     session.add_all.assert_called_once()
     session.commit.assert_called_once()
+    assert order == ["commit", "dispatch"]
 
     test_set_execution_model = session.add.call_args.args[0]
     assert test_set_execution_model.test_set_id == test_set_id
@@ -208,6 +228,9 @@ def test_new_live_test_set_run_happy_path():
         matching_run = test_runs_models_by_test_set_entry_id[available_test_set_entry.id]
         assert matching_run.test_set_execution_id == test_set_execution_model.id
 
+    mock_dispatch.assert_called_once_with(
+        [test_run_model.id for test_run_model in test_runs_models]
+    )
     assert response.id == test_set_execution_model.id
     assert response.created_at == test_set_execution_model.created_at
     assert response.test_set_id.id == test_set_id
@@ -316,15 +339,23 @@ def test_new_replay_test_set_run_happy_path():
     session.scalars.return_value = MagicMock(all=MagicMock(
         return_value=[entry.id for entry in available_test_set_entry_models]))
 
-    response = asyncio.run(
-        create_new_replay_test_set_run(test_set_id, test_set_execution_id, session)
-    )
+    order = []
+    session.commit.side_effect = lambda: order.append("commit")
+
+    with patch(
+            "assay.services.runs.create_new_run._dispatch_runs",
+            side_effect=lambda run_ids: order.append("dispatch"),
+    ) as mock_dispatch:
+        response = asyncio.run(
+            create_new_replay_test_set_run(test_set_id, test_set_execution_id, session)
+        )
 
     assert session.scalar.call_count == 3
     session.scalars.assert_called_once()
     session.add.assert_called_once()
     session.add_all.assert_called_once()
     session.commit.assert_called_once()
+    assert order == ["commit", "dispatch"]
 
     test_set_execution_model = session.add.call_args.args[0]
     assert isinstance(test_set_execution_model, TestSetExecutionModel)
@@ -350,6 +381,9 @@ def test_new_replay_test_set_run_happy_path():
         matching_run = test_runs_models_by_test_set_entry_id[available_test_set_entry.id]
         assert matching_run.test_set_execution_id == test_set_execution_model.id
 
+    mock_dispatch.assert_called_once_with(
+        [test_run_model.id for test_run_model in test_runs_models]
+    )
     assert response.id == test_set_execution_model.id
     assert response.created_at == test_set_execution_model.created_at
     assert response.test_set_id.id == test_set_id
@@ -469,7 +503,14 @@ def test_new_live_test_plan_run_happy_path():
         ])),
     ]
 
-    response = asyncio.run(create_new_live_test_plan_run(test_plan_id, session))
+    order = []
+    session.commit.side_effect = lambda: order.append("commit")
+
+    with patch(
+            "assay.services.runs.create_new_run._dispatch_runs",
+            side_effect=lambda run_ids: order.append("dispatch"),
+    ) as mock_dispatch:
+        response = asyncio.run(create_new_live_test_plan_run(test_plan_id, session))
 
     session.scalar.assert_called_once()
     session.scalars.assert_called_once()
@@ -477,6 +518,7 @@ def test_new_live_test_plan_run_happy_path():
     session.add.assert_called_once()
     session.add_all.assert_called_once()
     session.commit.assert_called_once()
+    assert order == ["commit", "dispatch"]
 
     test_plan_execution_model = session.add.call_args.args[0]
     assert test_plan_execution_model.test_plan_id == test_plan_id
@@ -495,6 +537,9 @@ def test_new_live_test_plan_run_happy_path():
         matching_run = test_runs_models_by_test_set_entry_id[entry_id]
         assert matching_run.test_plan_execution_id == test_plan_execution_model.id
 
+    mock_dispatch.assert_called_once_with(
+        [test_run_model.id for test_run_model in test_runs_models]
+    )
     assert response.id == test_plan_execution_model.id
     assert response.created_at == test_plan_execution_model.created_at
     assert response.test_plan_id.id == test_plan_id
@@ -617,14 +662,22 @@ def test_new_replay_test_plan_happy_path():
         test_plan_execution_entry_id,
     ]))
 
-    response = asyncio.run(create_new_replay_test_plan_run(
-        test_plan_id, test_plan_execution_id, session
-    ))
+    order = []
+    session.commit.side_effect = lambda: order.append("commit")
+
+    with patch(
+            "assay.services.runs.create_new_run._dispatch_runs",
+            side_effect=lambda run_ids: order.append("dispatch"),
+    ) as mock_dispatch:
+        response = asyncio.run(create_new_replay_test_plan_run(
+            test_plan_id, test_plan_execution_id, session
+        ))
 
     session.scalars.assert_called_once()
     session.add.assert_called_once()
     session.add_all.assert_called_once()
     assert session.scalar.call_count == 3
+    assert order == ["commit", "dispatch"]
 
     test_plan_execution_model = session.add.call_args.args[0]
     assert test_plan_execution_model.test_plan_id == test_plan_id
@@ -637,6 +690,7 @@ def test_new_replay_test_plan_happy_path():
     assert test_run_model.test_set_entry_id == test_plan_execution_entry_id
     assert test_run_model.test_plan_execution_id == test_plan_execution_model.id
     assert test_run_model.status == TestStatus.pending
+    mock_dispatch.assert_called_once_with([test_run_model.id])
     assert response.id == test_plan_execution_model.id
     assert response.created_at == test_plan_execution_model.created_at
     assert response.test_plan_id == TestPlanID(id=test_plan_id)

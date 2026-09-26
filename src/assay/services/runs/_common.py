@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import HTTPException
@@ -13,6 +14,9 @@ from assay.models import (
     TestSetEntryModel,
     TestSetExecutionModel,
 )
+from assay.worker import app as _celery_app
+
+logger = logging.getLogger(__name__)
 
 
 async def _find_test_set_entries_ids_or_409(
@@ -613,3 +617,35 @@ async def _check_test_plan_or_404(test_plan_id: uuid.UUID, session: AsyncSession
             status_code=404,
             detail=f"Test plan with ID '{test_plan_id}' not found"
         )
+
+
+def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:
+    """Publish an execute_run task for each given run id, best-effort.
+
+    Callers must only invoke this after the row(s) have already been
+    committed to the database — the worker picks up a run through its own,
+    separate database connection, which won't see an uncommitted row yet.
+
+    Publishes by task name (send_task) rather than calling execute_run.delay()
+    directly. .delay() requires importing the actual execute_run function,
+    which pulls in its whole dependency chain — the evaluator modules, and
+    eventually the anthropic/openai SDKs once the LLM-as-judge evaluator is
+    real — into this process just to send a message. send_task only needs a
+    Celery app configured with a broker URL, so the API can dispatch work
+    without importing anything the worker itself depends on.
+
+    Publishing is fire-and-forget: each run's send is wrapped in its own
+    try/except, so one run failing to publish (a broker outage, a network
+    blip) never stops the rest of a batch from being attempted, and never
+    raises out of this function at all. A run whose dispatch fails simply
+    stays in its current status, to be picked up some other way later.
+
+    Args:
+        run_ids: UUIDs of the already-committed TestRunModel rows to
+            dispatch execute_run for.
+    """
+    for run_id in run_ids:
+        try:
+            _celery_app.send_task("assay.worker.tasks.execute_run.execute_run", args=[run_id])
+        except Exception:
+            logger.exception("Failed to dispatch execute_run for run %s", run_id)

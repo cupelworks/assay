@@ -15,6 +15,9 @@ dependencies = [
     "alembic>=1.13",                           # Database migration tool — tracks schema changes over time
     "asyncpg>=0.30",                           # Async PostgreSQL driver — used in prod via postgresql+asyncpg:// URLs
     "prometheus-fastapi-instrumentator>=7.0",  # Prometheus /metrics endpoint and request instrumentation
+    "celery[redis]>=5.4",                      # API dispatches execute_run via a producer-only send_task() call
+                                                # (services/runs/_common.py) — never imports the worker's task or
+                                                # evaluator modules, see docs/run_execution/dev_notes.md notes 10-11
 ]
 
 [project.optional-dependencies]
@@ -33,7 +36,6 @@ openai = [
     "openai>=1.35",  # OpenAI Chat Completions client (used by OpenAIClient in llm.py)
 ]
 worker = [
-    "celery[redis]>=5.4",    # Task queue that promotes a pending TestRunModel to a terminal outcome
     "psycopg2-binary>=2.9",  # Sync PostgreSQL driver for assay.worker.db — the worker's tasks use a
                              # sync SQLAlchemy session (see docs/run_execution/dev_notes.md note 4),
                              # never asyncpg. Only needed against production Postgres; SQLite's sync

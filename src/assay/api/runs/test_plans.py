@@ -32,13 +32,16 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
             "description": (
                 "A live execution was triggered: one pending run was created "
                 "per entry across every test set currently linked to the "
-                "plan, all grouped under a single new test plan execution. "
-                "This endpoint only enqueues the runs — it does not call the "
-                "model, score anything, or write back results. Every created "
-                "run's `status` is `Pending`; a separate, later mechanism "
-                "promotes each one to `Running`, then a terminal outcome "
-                "(`Green`, `Amber`, `Red`, or `NotRan`) once it actually "
-                "executes."
+                "plan, all grouped under a single new test plan execution, "
+                "and each one dispatched for execution. This endpoint does "
+                "not call the model, score anything, or write back results "
+                "itself — every created run's `status` is `Pending`, since "
+                "the worker that does all of that runs separately, after "
+                "this response is returned. Dispatch is best-effort per run: "
+                "a run whose dispatch fails (e.g. the broker is unreachable) "
+                "simply stays `Pending`. Once picked up, the worker promotes "
+                "each run to `Running`, then a terminal outcome (`Green`, "
+                "`Amber`, `Red`, or `NotRan`)."
             ),
             "content": {
                 "application/json": {
@@ -145,8 +148,10 @@ async def run_live_test_plan_entries(
 
     Creates one test plan execution record (the trigger-event grouping
     every run this call produces) and one pending run per entry across all
-    linked test sets, all sharing that same execution. This endpoint only
-    creates those records — it does not execute anything itself.
+    linked test sets, all sharing that same execution. This endpoint
+    creates those records and dispatches each new run for execution — it
+    does not execute anything itself; that happens in the worker process,
+    once it picks up each dispatched task.
 
     Returns the new execution's ID, creation timestamp, the test plan it
     targeted, and the number of runs created (equal to the number of
@@ -168,12 +173,16 @@ async def run_live_test_plan_entries(
                 "sets are currently linked to the plan — test sets linked or "
                 "unlinked since have no effect, and an entry whose test set "
                 "has since been unlinked from the plan is still included, "
-                "since its content stays frozen either way. This endpoint "
-                "only enqueues the runs — it does not call the model, score "
-                "anything, or write back results. Every created run's "
-                "`status` is `Pending`; a separate, later mechanism promotes "
-                "each one to `Running`, then a terminal outcome (`Green`, "
-                "`Amber`, `Red`, or `NotRan`) once it actually executes."
+                "since its content stays frozen either way, and each new "
+                "run is dispatched for execution. This endpoint does not "
+                "call the model, score anything, or write back results "
+                "itself — every created run's `status` is `Pending`, since "
+                "the worker that does all of that runs separately, after "
+                "this response is returned. Dispatch is best-effort per "
+                "run: a run whose dispatch fails (e.g. the broker is "
+                "unreachable) simply stays `Pending`. Once picked up, the "
+                "worker promotes each run to `Running`, then a terminal "
+                "outcome (`Green`, `Amber`, `Red`, or `NotRan`)."
             ),
             "content": {
                 "application/json": {
@@ -278,8 +287,10 @@ async def replay_previous_test_plan_execution(
     Creates one new test plan execution record (with `replayed_execution_id`
     set to the execution being replayed, marking it as a replay rather than
     a live run) and one pending run per original test set entry,
-    all sharing that new execution. This endpoint only creates those records —
-    it does not execute anything itself.
+    all sharing that new execution. This endpoint creates those records and
+    dispatches each new run for execution — it does not execute anything
+    itself; that happens in the worker process, once it picks up each
+    dispatched task.
 
     Returns the new execution's ID, creation timestamp, the test plan it
     targeted, the number of runs created (always equal to the number of

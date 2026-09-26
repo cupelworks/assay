@@ -23,6 +23,7 @@ from assay.services.runs._common import (
     _check_test_set_execution_id_linked_to_specific_test_set_id_or_404,
     _check_test_set_execution_or_404,
     _check_tests_have_test_types_or_409,
+    _dispatch_runs,
     _find_test_plan_entries_or_409,
     _find_test_plan_execution_id_entries_or_409,
     _find_test_set_entries_ids_or_409,
@@ -45,11 +46,12 @@ async def create_new_standalone_run(
     test with no test types would measure nothing once executed, so it's
     rejected upfront rather than silently created as a guaranteed no-op.
 
-    Enqueue-only: this creates a single TestRunModel with status=pending
-    (test_id set, every other FK left null — the standalone mode) and
-    returns immediately. Nothing here calls a model or writes back scores;
-    that's separate, later work. Exactly one row is created regardless of
-    how many test types are assigned.
+    Creates a single TestRunModel with status=pending (test_id set, every
+    other FK left null — the standalone mode), commits it, then dispatches
+    it for execution (best-effort, see _dispatch_runs) before returning.
+    Nothing here calls a model or writes back scores itself — that happens
+    in the worker process once it picks up the dispatched task. Exactly one
+    row is created regardless of how many test types are assigned.
 
     Args:
         test_id: UUID of the live test to create a run for.
@@ -76,6 +78,8 @@ async def create_new_standalone_run(
 
     session.add(test_run_model)
     await session.commit()
+
+    _dispatch_runs([test_run_model.id])
 
     return StandaloneRunCreationMetadata(
         id=test_run_model.id,
@@ -108,8 +112,9 @@ async def create_new_live_test_set_run(
     every run produced by this call, with replayed_execution_id left unset
     since this is a live run, not a replay) and one TestRunModel per entry,
     each pointing at that same execution — test_set_entry_id and
-    test_set_execution_id set, status=pending. Enqueue-only: nothing here
-    calls a model or writes back results.
+    test_set_execution_id set, status=pending. Every created run is then
+    dispatched for execution (best-effort, see _dispatch_runs); nothing
+    here calls a model or writes back results itself.
 
     Args:
         test_set_id: UUID of the test set to execute.
@@ -148,7 +153,9 @@ async def create_new_live_test_set_run(
     session.add(test_set_execution_model)
     session.add_all(test_runs)
     await session.commit()
-    
+
+    _dispatch_runs([test_run.id for test_run in test_runs])
+
     return TestSetLiveRunCreationMetadata(
         id=test_set_execution_model.id,
         created_at=test_set_execution_model.created_at,
@@ -181,8 +188,9 @@ async def create_new_replay_test_set_run(
     the execution being replayed, marking this one as a replay rather than a
     live run) and one TestRunModel per original entry, each pointing at the
     new execution — test_set_entry_id and test_set_execution_id set,
-    status=pending. Enqueue-only: nothing here calls a model or writes back
-    results.
+    status=pending. Every created run is then dispatched for execution
+    (best-effort, see _dispatch_runs); nothing here calls a model or writes
+    back results itself.
 
     Args:
         test_set_id: UUID of the test set the execution must belong to.
@@ -228,6 +236,8 @@ async def create_new_replay_test_set_run(
     session.add_all(test_runs)
     await session.commit()
 
+    _dispatch_runs([test_run.id for test_run in test_runs])
+
     return TestSetReplayedExecutionCreationMetadata(
         id=test_set_execution_model.id,
         created_at=test_set_execution_model.created_at,
@@ -266,8 +276,9 @@ async def create_new_live_test_plan_run(
     left unset since this is a live run, not a replay) and one TestRunModel
     per entry across all linked test sets, each pointing at that same
     execution — test_set_entry_id and test_plan_execution_id set,
-    status=pending. Enqueue-only: nothing here calls a model or writes back
-    results.
+    status=pending. Every created run is then dispatched for execution
+    (best-effort, see _dispatch_runs); nothing here calls a model or writes
+    back results itself.
 
     Args:
         test_plan_id: UUID of the test plan to execute.
@@ -309,7 +320,9 @@ async def create_new_live_test_plan_run(
     session.add(test_plan_execution_model)
     session.add_all(test_runs)
     await session.commit()
-    
+
+    _dispatch_runs([test_run.id for test_run in test_runs])
+
     return TestPlanLiveRunCreationMetadata(
         id=test_plan_execution_model.id,
         created_at=test_plan_execution_model.created_at,
@@ -345,8 +358,9 @@ async def create_new_replay_test_plan_run(
     to the execution being replayed, marking this one as a replay rather
     than a live run) and one TestRunModel per original entry, each pointing
     at the new execution — test_set_entry_id and test_plan_execution_id
-    set, status=pending. Enqueue-only: nothing here calls a model or writes
-    back results.
+    set, status=pending. Every created run is then dispatched for execution
+    (best-effort, see _dispatch_runs); nothing here calls a model or writes
+    back results itself.
 
     Args:
         test_plan_id: UUID of the test plan the execution must belong to.
@@ -394,7 +408,9 @@ async def create_new_replay_test_plan_run(
     session.add(test_plan_execution_model)
     session.add_all(test_runs)
     await session.commit()
-    
+
+    _dispatch_runs([test_run.id for test_run in test_runs])
+
     return TestPlanReplayedExecutionCreationMetadata(
         id=test_plan_execution_model.id,
         created_at=test_plan_execution_model.created_at,

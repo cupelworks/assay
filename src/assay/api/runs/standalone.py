@@ -26,12 +26,15 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
     responses={
         201: {
             "description": (
-                "A pending run was created for the test. This endpoint only "
-                "enqueues the run — it does not call the model, score anything, "
-                "or write back results. `status` is always `Pending` in the "
-                "response; a separate, later mechanism promotes the run to "
-                "`Running`, then a terminal outcome (`Green`, `Amber`, `Red`, "
-                "or `NotRan`) once it actually executes."
+                "A pending run was created for the test and dispatched for "
+                "execution. This endpoint does not call the model, score "
+                "anything, or write back results itself — `status` is always "
+                "`Pending` in the response, since the worker that does all of "
+                "that runs separately, after this response is returned. "
+                "Dispatch is best-effort: if it fails (e.g. the broker is "
+                "unreachable), the run simply stays `Pending`. Once picked up, "
+                "the worker promotes it to `Running`, then a terminal outcome "
+                "(`Green`, `Amber`, `Red`, or `NotRan`)."
             ),
             "content": {
                 "application/json": {
@@ -96,9 +99,10 @@ async def run_standalone_test(
     - The test must have at least one test type assigned (409) — otherwise
       the run would have nothing to be scored against, ever.
 
-    This endpoint only creates the run record — it does not execute anything.
-    Exactly one `TestRunModel` row is created regardless of how many test
-    types are assigned to the test.
+    This endpoint creates the run record and dispatches it for execution —
+    it does not execute anything itself; that happens in the worker process,
+    once it picks up the dispatched task. Exactly one `TestRunModel` row is
+    created regardless of how many test types are assigned to the test.
 
     Returns the new run's ID, status (always `Pending` at creation), creation
     timestamp, and the ID of the test it was created for.
