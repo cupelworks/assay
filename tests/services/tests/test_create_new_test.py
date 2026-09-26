@@ -538,7 +538,7 @@ def test_unknown_test_type_name():
     assert exc.value.status_code == 422
 
 
-def test_dataset_import_raises_422_when_any_row_missing_expected_output_for_reference_required_type():
+def test_dataset_import_422_when_any_row_missing_expected_output_for_reference_required_type():
     mock_request, _ = _get_mock_request_with_id()
     mock_request.test_type_assignments = [TestTypeAssignment(name="Exact Match")]
 
