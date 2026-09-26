@@ -14,16 +14,55 @@ from assay.middleware import REQUEST_ID_HEADER, RequestContextMiddleware
 
 logger = logging.getLogger(__name__)
 
+_DESCRIPTION = """
+Assay measures how a GenAI-powered application actually behaves, and keeps a reproducible
+record of every measurement.
+
+**What it does.** You bring the prompts you send your application, the outputs it
+produced, and — where you have them — the outputs you expected. Assay scores each case
+with the checks you assign to it:
+
+- **Deterministic** checks — *Exact Match* against the expected output.
+- **NLP metrics** scored against a threshold you set — *ROUGE*, *BLEU*, *BERTScore*,
+  *Cosine Similarity*.
+- **LLM-as-judge** verdicts against a rubric you write — *Correctness*, *Relevance*,
+  *Bias*, *Toxicity*, *Hallucination*.
+
+Every check yields a pass/fail with a score or a rationale, and every run rolls up to a
+single outcome.
+
+**How the pieces fit.**
+
+- **Datasets** — rows of `prompt` / `expected_output` / `model_output`, uploaded from a
+  `.jsonl` file. The raw material; rows can be added, replaced, edited and deleted.
+- **Tests** — one case each: an input, its outputs, and the checks (*test types*) to run
+  on it. Created by hand or in bulk from a dataset's rows. A test is always editable.
+- **Test sets** — a named baseline. Adding a test to a set snapshots it, so the set stays
+  stable while the live tests keep evolving. An entry can still be edited until its first
+  run, then it freezes for good — a run's record of what it executed never changes.
+- **Test plans** — campaigns that group test sets. Membership can change at any time.
+- **Runs and executions** — a *standalone* run of one test, or an *execution* of a whole
+  set or plan, one run per entry. A **live** execution covers the current membership; a
+  **replay** re-runs exactly what a past execution ran. A run goes `Pending` → `Running`
+  → `Green` (every check passed), `Amber` (mixed), `Red` (every check failed) or `NotRan`
+  (nothing could be attempted), with the result of each check kept alongside.
+- **Statistical verification** — a one-sample z-test over a series of metric scores
+  against a threshold, for claims like "this metric holds above 0.8 at α = 0.05".
+
+**Conventions.** List endpoints paginate with `offset`/`limit` and always return `total`.
+Every response carries an `X-Request-ID` header — send your own to have it reused — and a
+500 also returns it in the body: quote it when reporting a problem. Errors use
+`{"detail": ...}`.
+"""
+
 
 def create_app() -> FastAPI:
     configure_logging(settings.log_level, settings.log_format)
 
     app = FastAPI(
         title="Assay",
-        description=(
-            "Evaluation toolkit for GenAI-powered applications: "
-            "NLP metrics, LLM-as-judge, and statistical reporting."
-        ),
+        summary="Test how a GenAI application behaves — and keep a reproducible record of it.",
+        description=_DESCRIPTION,
         version=__version__,
         responses={
             500: {

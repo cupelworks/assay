@@ -1,6 +1,6 @@
 # Assay
 
-Evaluation toolkit for GenAI-powered applications. Helps testers measure model behaviour with NLP metrics, LLM-as-judge scoring, and statistical reporting over test runs.
+Test how a GenAI-powered application behaves — and keep a reproducible record of it. Bring the prompts you send your application, the outputs it produced and the outputs you expected; Assay scores each case with deterministic checks, NLP metrics against a threshold, and LLM-as-judge verdicts against a rubric, organises cases into stable test sets and plans, and records every run's outcome.
 
 ## Status
 
