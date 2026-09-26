@@ -68,7 +68,8 @@ def test_update_test_plan_name_none_is_noop():
             id=test_plan_id,
             name=test_plan_name,
             created_at=created_at,
-        )
+        ),
+        2,
     ]
 
     response = asyncio.run(
@@ -78,10 +79,11 @@ def test_update_test_plan_name_none_is_noop():
     )
 
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 1
+    assert session.scalar.call_count == 2
     assert response.id == test_plan_id
     assert response.name == test_plan_name
     assert response.created_at == created_at
+    assert response.linked_set_count == 2
 
 
 def test_update_test_plan_name_unchanged_is_noop():
@@ -96,7 +98,8 @@ def test_update_test_plan_name_unchanged_is_noop():
             id=test_plan_id,
             name=test_plan_name,
             created_at=created_at,
-        )
+        ),
+        2,
     ]
 
     response = asyncio.run(
@@ -106,10 +109,11 @@ def test_update_test_plan_name_unchanged_is_noop():
     )
 
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 1
+    assert session.scalar.call_count == 2
     assert response.id == test_plan_id
     assert response.name == test_plan_name
     assert response.created_at == created_at
+    assert response.linked_set_count == 2
 
 
 def test_update_test_plan_name_happy_path():
@@ -125,7 +129,8 @@ def test_update_test_plan_name_happy_path():
             name="Old Test Plan Name",
             created_at=created_at,
         ),
-        None
+        None,
+        2,
     ]
 
     response = asyncio.run(
@@ -135,7 +140,8 @@ def test_update_test_plan_name_happy_path():
     )
 
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 2
+    assert session.scalar.call_count == 3
     assert response.id == test_plan_id
     assert response.name == test_plan_name
     assert response.created_at == created_at
+    assert response.linked_set_count == 2

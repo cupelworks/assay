@@ -26,6 +26,10 @@ class TestSetMetadata(TestSetID, TestSetName):
         ...,
         description="The creation date of the test set.",
     )
+    entry_count: int = Field(
+        ...,
+        description="The number of entries currently in the test set.",
+    )
 
 
 class PaginatedTestSetMetadataResponse(Pagination):

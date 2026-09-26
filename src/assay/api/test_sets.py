@@ -124,6 +124,7 @@ async def unlink_test_set_entry_from_a_test_set(
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Renamed regression suite",
                         "created_at": "2026-07-03T15:43:09.032480",
+                        "entry_count": 12,
                     }
                 }
             },
@@ -740,6 +741,7 @@ async def add_tests_to_test_set(
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Regression suite",
                         "created_at": "2026-07-03T15:43:09.032480",
+                        "entry_count": 12,
                     }
                 }
             },
@@ -766,7 +768,8 @@ async def get_single_test_set_metadata(
 ) -> TestSetMetadata: # pragma: no cover
     """Retrieve metadata for a single test set by its ID.
 
-    Returns the test set's `id`, `name`, and `created_at` timestamp.
+    Returns the test set's `id`, `name`, `created_at` timestamp, and `entry_count`
+    (the number of entries currently in the set).
     """
     return await get_test_set_metadata_by_id(test_set_id, session)
 
@@ -787,11 +790,13 @@ async def get_single_test_set_metadata(
                                 "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                                 "name": "Regression suite",
                                 "created_at": "2026-07-03T15:43:09.032480",
+                                "entry_count": 12,
                             },
                             {
                                 "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                 "name": "Smoke tests",
                                 "created_at": "2026-07-03T16:00:00.000000",
+                                "entry_count": 4,
                             },
                         ],
                     }
@@ -810,7 +815,8 @@ async def get_test_sets_metadata(
 ) -> PaginatedTestSetMetadataResponse: # pragma: no cover
     """List all test sets with their metadata, paginated.
 
-    Returns each test set's `id`, `name`, and `created_at` timestamp.
+    Returns each test set's `id`, `name`, `created_at` timestamp, and `entry_count`
+    (the number of entries currently in the set).
     Use `offset` and `limit` to page through results. The response includes `total`
     so the client can calculate the number of pages.
     """

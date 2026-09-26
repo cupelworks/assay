@@ -32,6 +32,8 @@ def test_no_returned_test_plan_entries_fallback_to_zero():
     session = AsyncMock()
     session.scalar.side_effect = [test_plan_id, None]
     session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.tuples.return_value.all.return_value = []
 
     response = asyncio.run(get_all_test_plan_entries_metadata(test_plan_id, session, 1, 5))
 
@@ -73,9 +75,14 @@ def test_returned_test_plan_entries():
         ),
     ]
     session.scalars.return_value = MagicMock(all=MagicMock(return_value=found_entries))
-    
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.tuples.return_value.all.return_value = [
+        (first_test_set_id, 5),
+        (second_test_set_id, 0),
+    ]
+
     response = asyncio.run(get_all_test_plan_entries_metadata(test_plan_id, session,))
-    
+
     session.scalars.assert_called_once()
     assert session.scalar.call_count == 2
     assert response.total == 2
@@ -83,12 +90,21 @@ def test_returned_test_plan_entries():
     assert response.limit == 100
     assert response.items == [
         TestPlanEntryDetails(
-            id=entry.id,
+            id=found_entries[0].id,
             test_set=TestSetMetadata(
-                id=entry.test_set.id,
-                name=entry.test_set.name,
-                created_at=entry.test_set.created_at,
+                id=found_entries[0].test_set.id,
+                name=found_entries[0].test_set.name,
+                created_at=found_entries[0].test_set.created_at,
+                entry_count=5,
             ),
-        )
-        for entry in found_entries
+        ),
+        TestPlanEntryDetails(
+            id=found_entries[1].id,
+            test_set=TestSetMetadata(
+                id=found_entries[1].test_set.id,
+                name=found_entries[1].test_set.name,
+                created_at=found_entries[1].test_set.created_at,
+                entry_count=0,
+            ),
+        ),
     ]

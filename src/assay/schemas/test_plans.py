@@ -26,7 +26,11 @@ class TestPlanMetadata(TestPlanID, TestPlanName):
         ...,
         description="The creation date of the test plan.",
     )
-    
+    linked_set_count: int = Field(
+        ...,
+        description="The number of test sets currently linked to the test plan.",
+    )
+
 
 class ModifyTestPlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
