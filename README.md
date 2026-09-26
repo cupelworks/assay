@@ -53,8 +53,10 @@ Copy `.env.example` to `.env` (in the project root) to configure the app locally
 | `ASSAY_LLM_MODEL` | *(unset)* | Reserved for the LLM-as-judge evaluator's model selection. Same caveat as `ASSAY_LLM_PROVIDER` |
 | `ANTHROPIC_API_KEY` | *(unset)* | Will be needed once the Anthropic LLM-as-judge evaluator ships. Install the optional extra ahead of time with `pip install -e ".[anthropic]"` (or `uv sync --extra anthropic`) |
 | `OPENAI_API_KEY` | *(unset)* | Will be needed once the OpenAI LLM-as-judge evaluator ships. Install with the `openai` extra, same pattern as above |
-| `ASSAY_CELERY_BROKER_URL` | `redis://localhost:6379/0` | Only read by the worker process (`assay.worker`), never the API — see [Worker](#worker) for the full set of options (local Redis, local SQLite with nothing to install, production Azure Cache for Redis) |
+| `ASSAY_CELERY_BROKER_URL` | `redis://localhost:6379/0` | Read by both the worker process and the API (the API dispatches via a producer-only Celery client, see [Worker](#worker)) — see [Worker](#worker) for the full set of options (local Redis, local SQLite with nothing to install, production Azure Cache for Redis) |
 | `ASSAY_CELERY_RESULT_BACKEND` | `redis://localhost:6379/0` | Same scope as `ASSAY_CELERY_BROKER_URL`, see [Worker](#worker) |
+| `ASSAY_WORKER_DB_POOL_SIZE` | `10` | Only read by the worker process — `assay/worker/db.py`'s sync engine pool size. Right sizing depends on the worker's `--pool`/`--concurrency` choice (see [Worker](#worker)); overridable per environment so raising it doesn't need a new build |
+| `ASSAY_WORKER_DB_MAX_OVERFLOW` | `10` | Same scope as `ASSAY_WORKER_DB_POOL_SIZE`, the connections allowed beyond it under a burst |
 
 ## Project layout
 
@@ -287,6 +289,8 @@ The worker process itself stays optional — the API runs fine, and every run-cr
 uv sync --extra worker
 uv run celery -A assay.worker worker --loglevel=info
 ```
+
+`assay/worker/db.py`'s sync engine pool (`ASSAY_WORKER_DB_POOL_SIZE`/`ASSAY_WORKER_DB_MAX_OVERFLOW`, both `10` by default) needs sizing against whichever `--pool` the worker actually runs under: under the default `--pool=prefork`, each forked child process gets its own copy of that pool, so the per-process number needs to stay small; under `--pool=threads` (or `--pool=solo`), there's no forking at all — one process, one shared pool across every concurrent thread — so it needs to cover total `--concurrency` instead. `--pool=threads` is also the workaround for a real, known Celery/billiard bug (`ValueError: not enough values to unpack (expected 3, got 0)` in `fast_trace_task`) that surfaces whenever a worker child process starts without inheriting the parent's fork-time initialization — most commonly hit on platforms/Python versions where `prefork`'s usual reliance on `fork()` doesn't hold ([celery#4178](https://github.com/celery/celery/issues/4178) and similar).
 
 Broker and result backend are controlled by `ASSAY_CELERY_BROKER_URL`/`ASSAY_CELERY_RESULT_BACKEND` — same "no code changes, only the URL changes" story as the database. Three environments, in order of how close each gets to what production actually runs:
 

@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     # rather not install Redis locally.
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/0"
+    # assay/worker/db.py's sync engine pool — only read by the worker process.
+    # Right sizing depends on the worker's own --pool choice and --concurrency
+    # (see worker/db.py's module docstring), both operational choices made at
+    # deploy/run time, not at code-change time — so these are env-overridable
+    # rather than hardcoded, the same reasoning as database_url itself: change
+    # the number for a given environment without a new release to do it.
+    worker_db_pool_size: int = 10
+    worker_db_max_overflow: int = 10
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod

@@ -1,10 +1,25 @@
 """Sync SQLAlchemy engine/session for the Celery worker — separate from
 assay/db.py's async one. Per docs/run_execution/dev_notes.md note 4: a
 Celery task is a plain synchronous callable, not running inside an
-asyncio event loop, and the default (prefork) pool runs each task in a
-forked child process — sharing an engine's connection pool across that
-fork is a documented SQLAlchemy/Celery hazard, not just an async/sync
-style preference. See note 4 for the full reasoning.
+asyncio event loop. See note 4 for the full reasoning.
+
+Pool sizing here depends on which Celery worker pool is actually running,
+since that changes how many processes vs. threads end up sharing this
+module's one `engine`:
+- `--pool=threads` (currently used locally, macOS + Python 3.14 — prefork's
+  `fast_trace_task` optimization assumes a forked child inherits the
+  parent's already-initialized state, which doesn't hold under `spawn`;
+  see docs/run_execution/dev_notes.md note 4): one process, no forking at
+  all — every concurrent task borrows a connection from this same pool via
+  plain OS threads. SQLAlchemy's pool is thread-safe for exactly this
+  (many threads, each with its own short-lived `Session` from
+  `get_session()`, sharing one `Engine`) — sized against total worker
+  `--concurrency`, not per-process.
+- `--pool=prefork` (the default elsewhere, e.g. Linux/production): one
+  child process per worker slot, each getting its own copy of this
+  pool via fork — a per-process size needs to stay small, since it
+  multiplies out across every forked child against the database's real
+  connection limit.
 
 Derives a sync-compatible URL from the same ASSAY_DATABASE_URL setting
 the API uses, rather than introducing a second "where's the database" env
@@ -34,14 +49,15 @@ def _sync_url() -> URL:
     return url.set(drivername=sync_drivername)
 
 
-# Small pool per process: the default prefork pool spawns one child process
-# per worker slot (10 by default — see the concurrency line in any worker
-# startup log), each with its own pool. A careless per-process size
-# multiplies out fast against the database's real connection limit.
+# Read from settings, not hardcoded: the right size depends on --pool and
+# --concurrency (see module docstring above), both chosen at deploy/run
+# time — e.g. an Azure deployment can raise ASSAY_WORKER_DB_POOL_SIZE for a
+# bigger --concurrency without shipping a new build. Defaults (10/10) match
+# what a default-sized local --pool=threads worker needs.
 engine = create_engine(
     _sync_url(),
-    pool_size=1,
-    max_overflow=2,
+    pool_size=settings.worker_db_pool_size,
+    max_overflow=settings.worker_db_max_overflow,
     # Echo SQL to stdout when log level is DEBUG — same convention as assay/db.py.
     echo=settings.log_level == "DEBUG",
 )
@@ -60,11 +76,13 @@ if engine.dialect.name == "sqlite":
 
 @worker_process_init.connect
 def _reset_engine_after_fork(**_kwargs):
-    """The prefork pool forks worker child processes after this module (and
-    its module-level `engine`) has already been imported in the parent —
-    inheriting the parent's pooled connections across that fork corrupts
-    them. Disposing here drops whatever was inherited, so each child
-    process opens its own fresh connections the first time it needs one.
+    """Only fires for a forking pool (prefork) — it forks worker child
+    processes after this module (and its module-level `engine`) has
+    already been imported in the parent, and inheriting the parent's
+    pooled connections across that fork corrupts them. Disposing here
+    drops whatever was inherited, so each child process opens its own
+    fresh connections the first time it needs one. Never fires under
+    --pool=threads/solo — there's no fork, so nothing to reset.
     """
     engine.dispose()
 
