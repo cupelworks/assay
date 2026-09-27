@@ -289,8 +289,16 @@ async def update_test(
     """Partially update a test case by ID.
 
     Only the fields included in the request body are updated — omitted fields are left unchanged.
-    `test_type_assignments: null` leaves type assignments untouched;
-    `test_type_assignments: []` removes all assignments.
+
+    | Field | Sent with a value | Sent as `null` | Left out |
+    |---|---|---|---|
+    | `expected_output`, `model_output` | set | **cleared** | unchanged |
+    | `name`, `input` | set | unchanged (neither can be empty) | unchanged |
+    | `test_type_assignments` | replaces the whole list (`[]` removes all) | unchanged | unchanged |
+
+    Clearing `model_output` means runs of this test ask the application under test for
+    the answer. Clearing `expected_output` is refused (422) while a type that needs it
+    (e.g. Exact Match, ROUGE) stays assigned.
 
     Unknown body fields are rejected with a 422 — the schema uses `extra="forbid"` to
     prevent silently ignoring misplaced fields such as `id`.

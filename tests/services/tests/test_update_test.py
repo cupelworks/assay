@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -195,3 +196,88 @@ def test_modify_passes_assigning_reference_required_type_with_existing_expected_
 
     session.commit.assert_called_once()
     assert response.test_type_assignments == [TestTypeAssignment(name="Exact Match", config=None)]
+
+
+# -- null clears a nullable field, a missing key keeps it --
+
+
+def test_modify_null_model_output_clears_it():
+    mock_test_id = uuid.uuid4()
+    mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
+    # model_validate on a dict, as FastAPI builds it from the JSON body
+    mock_request = ModifyTestCaseRequest.model_validate({"model_output": None})
+
+    response = _call_api_orchestrator(mock_test_id, mock_request, _get_session(mock_test))
+
+    assert response.model_output is None
+    assert response.expected_output == "Testing Expected Output"
+
+
+def test_modify_null_expected_output_clears_it():
+    mock_test_id = uuid.uuid4()
+    mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
+    mock_request = ModifyTestCaseRequest.model_validate({"expected_output": None})
+
+    response = _call_api_orchestrator(mock_test_id, mock_request, _get_session(mock_test))
+
+    assert response.expected_output is None
+    assert response.model_output == "Testing Model Output"
+
+
+def test_modify_leaving_the_outputs_out_keeps_them():
+    mock_test_id = uuid.uuid4()
+    mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
+    mock_request = ModifyTestCaseRequest.model_validate({"input": "New input"})
+
+    response = _call_api_orchestrator(mock_test_id, mock_request, _get_session(mock_test))
+
+    assert response.input == "New input"
+    assert response.model_output == "Testing Model Output"
+    assert response.expected_output == "Testing Expected Output"
+
+
+def test_modify_null_name_or_input_changes_nothing():
+    mock_test_id = uuid.uuid4()
+    mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
+    mock_request = ModifyTestCaseRequest.model_validate({"name": None, "input": None})
+
+    response = _call_api_orchestrator(mock_test_id, mock_request, _get_session(mock_test))
+
+    assert (response.name, response.input) == ("Testing Name", "Testing Input")
+
+
+def test_modify_raises_422_when_nulling_expected_output_with_reference_required_type_assigned():
+    mock_test_id = uuid.uuid4()
+    mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
+    mock_assignment = MagicMock()
+    mock_assignment.test_type_name = "Exact Match"
+    mock_assignment.config = None
+    mock_test.test_type_assignments = [mock_assignment]
+    mock_request = ModifyTestCaseRequest.model_validate({"expected_output": None})
+    session = _get_session(mock_test)
+    catalogue_row = MagicMock()
+    catalogue_row.name = "Exact Match"
+    catalogue_row.config_fields = [
+        {"key": "reference", "label": "Expected output", "kind": "reference", "required": True}
+    ]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[catalogue_row]))
+
+    with pytest.raises(HTTPException) as e:
+        _call_api_orchestrator(mock_test_id, mock_request, session)
+
+    # the check sees the value the request is about to write, null included
+    session.commit.assert_not_called()
+    assert e.value.status_code == 422
+    assert mock_test.expected_output == "Testing Expected Output"
+
+
+def test_modify_logs_a_cleared_field_but_not_an_ignored_null(caplog):
+    mock_test_id = uuid.uuid4()
+    mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
+    mock_request = ModifyTestCaseRequest.model_validate({"model_output": None, "name": None})
+
+    with caplog.at_level(logging.INFO, logger="assay.services.tests.update_test"):
+        _call_api_orchestrator(mock_test_id, mock_request, _get_session(mock_test))
+
+    (record,) = [r for r in caplog.records if r.name == "assay.services.tests.update_test"]
+    assert record.fields == ["model_output"]

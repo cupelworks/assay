@@ -81,25 +81,30 @@ class ModifyTestCaseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(
         None,
-        description="Name of test case",
+        description="Name of test case. It can't be empty: null or left out, it's "
+                    "unchanged.",
     )
     input: str | None = Field(
         None,
-        description="Input of test case",
+        description="Input of test case. It can't be empty: null or left out, it's "
+                    "unchanged.",
     )
     expected_output: str | None = Field(
         None,
-        description="Expected output of test case",
+        description="Expected output of test case. Send null to clear it; leave the key "
+                    "out to keep it.",
     )
     model_output: str | None = Field(
         None,
-        description="The real output of the model",
+        description="The real output of the model. Send null to clear it — runs then ask "
+                    "the application under test for the answer; leave the key out to "
+                    "keep it.",
     )
     test_type_assignments: list[TestTypeAssignment] | None = Field(
         None,
         description="Test types to assign to this test case, with any config "
                     "each one needs. Replaces the full assignment list — not merged "
-                    "with what's already assigned.",
+                    "with what's already assigned. null or left out: unchanged.",
     )
 
 

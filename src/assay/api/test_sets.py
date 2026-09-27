@@ -463,9 +463,16 @@ async def update_a_test_set_entry(
     the originating test's state at snapshot time; `test_case_id` keeps pointing
     at the live test regardless.
 
-    Only fields explicitly set in the request body are written — omitted fields are
-    left unchanged. For `test_type_assignments` specifically, omitting it leaves the
-    snapshot list untouched, while `[]` clears it. Each provided name must exist in
+    Only fields included in the request body are written — omitted fields are left
+    unchanged:
+
+    | Field | Sent with a value | Sent as `null` | Left out |
+    |---|---|---|---|
+    | `expected_output`, `model_output` | set | **cleared** | unchanged |
+    | `name`, `input` | set | unchanged (neither can be empty) | unchanged |
+    | `test_type_assignments` | replaces the list (`[]` clears it) | unchanged | unchanged |
+
+    Each provided name must exist in
     the test types catalogue and satisfy that type's required config fields — a 422
     is returned otherwise. Considering the effective state after this update, a type
     requiring a reference (e.g. Exact Match, ROUGE) also requires a non-empty
