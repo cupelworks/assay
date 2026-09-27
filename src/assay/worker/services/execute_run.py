@@ -3,11 +3,21 @@ import time
 import uuid
 from datetime import datetime
 
+from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from assay.models import OutputSource, TestRunModel, TestStatus, TestTypesModel
+from assay.models import (
+    OutputSource,
+    SettingsModel,
+    SettingsSection,
+    TestRunModel,
+    TestStatus,
+    TestTypesModel,
+)
 from assay.schemas import TestTypeAssignment, TestTypeResult
+from assay.schemas.settings import describe_validation_error
+from assay.target_settings import resolve_target_settings
 from assay.worker import evaluators, target
 
 logger = logging.getLogger(__name__)
@@ -63,20 +73,32 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         extra={"origin": origin, "test_type_count": len(resolved)},
     )
 
-    # The answer every engine scores (docs/evaluators/dev_notes.md note 2):
-    # the copy's recorded model_output when it has one, otherwise the
-    # application under test is asked now. A failed call means nothing can
-    # be evaluated - NotRan with the reason, evaluated_output left null.
+    # The answer every engine scores: the copy's recorded model_output when
+    # it has one, otherwise the application under test is asked now, with the
+    # settings in effect at this moment - saved from the UI, else the
+    # environment - read per run so a change applies without restarting the
+    # worker. A failed call, or saved settings that no longer validate, means
+    # nothing can be evaluated - NotRan with the reason, evaluated_output
+    # left null.
+    settings_source = None
     if entry.model_output is not None:
         answer, output_source = entry.model_output, OutputSource.recorded
     else:
         try:
-            answer = target.get_answer(entry.input).answer
-        except target.TargetError as exc:
-            # target.py already logged the failing call itself
-            logger.error("Run %s could not be executed: %s", run_id, exc)
+            target_settings = resolve_target_settings(
+                session.get(SettingsModel, SettingsSection.target)
+            )
+            settings_source = target_settings.source
+            answer = target.get_answer(entry.input, target_settings).answer
+        except (target.TargetError, ValidationError) as exc:
+            # target.py already logged a failing call itself
+            reason = (
+                f"the saved application settings are invalid: {describe_validation_error(exc)}"
+                if isinstance(exc, ValidationError) else str(exc)
+            )
+            logger.error("Run %s could not be executed: %s", run_id, reason)
             run.status = TestStatus.not_ran
-            run.error = str(exc)
+            run.error = reason
             run.executed_at = datetime.now().astimezone()
             session.commit()
             return
@@ -133,6 +155,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
             "passed": passed,
             "test_type_count": len(passed_flags),
             "output_source": output_source.value,
+            "settings_source": settings_source.value if settings_source else None,
             "duration_ms": duration_ms,
         },
     )

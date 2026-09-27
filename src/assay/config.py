@@ -5,8 +5,10 @@ import logging
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import field_validator
+from pydantic import ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from assay.schemas.settings import TargetSettings, describe_validation_error
 
 # Anchored to this file's own location, not the process's working directory:
 # a bare "./.env" is resolved relative to CWD, which silently finds nothing
@@ -66,11 +68,11 @@ class Settings(BaseSettings):
     # original dispatch as lost and re-publishes it. Only read by the worker/Beat.
     reconciliation_interval_minutes: int = 60
     reconciliation_pending_threshold_minutes: int = 15
-    # The application under test (docs/evaluators/dev_notes.md note 2) — only
-    # read by the worker (worker/target.py), when a test has no recorded
-    # model_output and the run must obtain the answer itself. One deployment
-    # tests one application; unset URL means none is configured, and such a
-    # run lands on NotRan saying so. The request is described as data rather
+    # The application under test — the fallback for when no settings have
+    # been saved from the UI (a saved row wins for the whole group),
+    # validated by the same rules as a save (_validate_target). One
+    # deployment tests one application; unset URL means none is configured,
+    # and such a run lands on NotRan saying so. The request is described as data rather
     # than coded per application: the body is a JSON template whose string
     # values may contain {{input}}, the answer is read at a JSONPath, and
     # header values may reference ${ENV_VAR} so secrets stay out of .env.
@@ -99,12 +101,29 @@ class Settings(BaseSettings):
     def _upper_method(cls, value: str) -> str:
         return value.upper()
 
-    @field_validator("target_max_retries")
-    @classmethod
-    def _non_negative_retries(cls, value: int) -> int:
-        if value < 0:
-            raise ValueError("ASSAY_TARGET_MAX_RETRIES must be 0 or more")
-        return value
+    @model_validator(mode="after")
+    def _validate_target(self) -> "Settings":
+        # The same rules as a save from the UI, so a value PATCH
+        # /settings/target would refuse can't get in
+        # through the environment instead — and it fails here, at start-up.
+        try:
+            self.target_settings()
+        except ValidationError as exc:
+            raise ValueError(describe_validation_error(exc, prefix="ASSAY_TARGET_")) from None
+        return self
+
+    def target_settings(self) -> "TargetSettings":
+        """The application-under-test settings as this environment defines
+        them — the fallback whenever none have been saved from the UI."""
+        return TargetSettings(
+            url=self.target_url,
+            method=self.target_method,
+            headers=self.target_headers,
+            body=self.target_body,
+            output_path=self.target_output_path,
+            timeout_seconds=self.target_timeout_seconds,
+            max_retries=self.target_max_retries,
+        )
 
     @field_validator("log_level")
     @classmethod

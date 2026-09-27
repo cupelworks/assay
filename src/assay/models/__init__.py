@@ -2,6 +2,10 @@
 # Without these imports, autogenerate would see an empty schema and drop all tables.
 from assay.models.base import Base
 from assay.models.datasets import DatasetModel, DatasetRowModel
+from assay.models.settings import (
+    SettingsModel,
+    SettingsSection,
+)
 from assay.models.stats import StatisticalVerificationModel
 from assay.models.test import (
     TERMINAL_STATUSES,
@@ -32,6 +36,8 @@ __all__ = [
     "DatasetModel",
     "DatasetRowModel",
     "OutputSource",
+    "SettingsModel",
+    "SettingsSection",
     "StandaloneRunModel",
     "StatisticalVerificationModel",
     "TestModel",

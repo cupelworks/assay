@@ -172,9 +172,53 @@ def test_upgrade_adds_nullable_evaluated_output_and_a_constrained_output_source(
 
 def test_downgrade_removes_the_two_run_columns_only(scratch):
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "c8f2a7d11e94")
 
     command.downgrade(config, "-1")
 
     assert not {"evaluated_output", "output_source"} & set(_run_columns(db_path))
     assert {"engine", "engine_settings", "comparison"} <= set(_columns(db_path))
+
+
+# --- a0f4ff4fd23a: settings ---
+
+
+def _tables(db_path: Path) -> set[str]:
+    with sqlite3.connect(db_path) as connection:
+        return {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )}
+
+
+def test_upgrade_creates_an_empty_settings_table_keyed_by_a_constrained_section(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    with sqlite3.connect(db_path) as connection:
+        # empty on purpose: no row means the environment's settings apply
+        assert connection.execute("SELECT COUNT(*) FROM settings").fetchone() == (0,)
+        connection.execute(
+            "INSERT INTO settings (section, value, updated_at) "
+            "VALUES ('target', '{}', '2026-01-01')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE constraint failed"):
+            connection.execute(
+                "INSERT INTO settings (section, value, updated_at) "
+                "VALUES ('target', '{}', '2026-01-01')"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "INSERT INTO settings (section, value, updated_at) "
+                "VALUES ('judge', '{}', '2026-01-01')"
+            )
+
+
+def test_downgrade_removes_the_settings_table_only(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "c8f2a7d11e94")
+
+    assert "settings" not in _tables(db_path)
+    assert {"evaluated_output", "output_source"} <= set(_run_columns(db_path))

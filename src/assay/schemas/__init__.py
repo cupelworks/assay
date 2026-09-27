@@ -16,6 +16,12 @@ from assay.schemas.datasets import (
     PaginatedDataSetResponse,
     PaginatedDataSetRowResponse,
 )
+from assay.schemas.settings import (
+    SettingsSource,
+    TargetSettings,
+    TargetSettingsRead,
+    TargetSettingsUpdate,
+)
 from assay.schemas.stats import ZTestRequest, ZTestResult
 from assay.schemas.test_plan_entries import (
     PaginatedTestPlanEntriesDetails,
@@ -155,8 +161,12 @@ __all__ = [
     "RunOrigin",
     "RunResults",
     "RunStatus",
+    "SettingsSource",
     "StandaloneRunCreationMetadata",
     "StandaloneRunDetails",
+    "TargetSettings",
+    "TargetSettingsRead",
+    "TargetSettingsUpdate",
     "TestCaseID",
     "TestCaseSnapshotDate",
     "TestPlanCreationResponse",

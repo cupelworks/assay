@@ -18,6 +18,8 @@ dependencies = [
     "celery[redis]>=5.4",                      # API dispatches execute_run via a producer-only send_task() call
                                                 # (services/runs/_common.py) — never imports the worker's task or
                                                 # evaluator modules, see docs/run_execution/dev_notes.md notes 10-11
+    "jsonpath-ng>=1.6",                        # Validates the application-under-test output path when settings are
+                                                # saved (schemas/settings.py) — the worker also reads the answer with it
 ]
 
 [project.optional-dependencies]
@@ -30,7 +32,6 @@ dev = [
     "flower>=2.0",      # Web dashboard for Celery task/worker history — celery -A assay.worker flower
     "regex>=2024.0",    # The worker's Regex Match engine (see the worker extra) — the test suite
                         # imports the evaluator engines, so it needs it too
-    "jsonpath-ng>=1.6", # Same reason: the suite imports worker/target.py
 ]
 anthropic = [
     "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)
@@ -40,8 +41,6 @@ openai = [
 ]
 worker = [
     "httpx>=0.27",           # The adapter that calls the application under test (worker/target.py)
-    "jsonpath-ng>=1.6",      # Reads the application's answer out of its JSON reply at
-                             # ASSAY_TARGET_OUTPUT_PATH — a lookup only, never code
     "regex>=2024.0",         # Regex Match engine (worker/evaluators/engines/regex.py): a drop-in
                              # for the stdlib `re` that supports a per-call timeout, so a
                              # catastrophically backtracking user pattern fails that one type

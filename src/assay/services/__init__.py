@@ -27,6 +27,11 @@ from assay.services.runs import (
     get_test_set_execution_metadata_all_executions,
     get_test_set_execution_run_metadata_all_runs,
 )
+from assay.services.settings import (
+    get_target_settings,
+    reset_target_settings,
+    update_target_settings,
+)
 from assay.services.stats import run_z_test
 from assay.services.test_plans import (
     add_test_sets_to_test_plan_by_id,
@@ -100,6 +105,8 @@ __all__ = [
     "get_test_set_execution_metadata_all_executions",
     "get_test_set_execution_run_metadata_all_runs",
     "get_test_types_by_category",
+    "get_target_settings",
+    "reset_target_settings",
     "run_z_test",
     "update_dataset_name_by_id",
     "update_dataset_rows_by_id",
@@ -114,4 +121,5 @@ __all__ = [
     "unlink_test_set_entries_by_id",
     "update_test_plan_by_id",
     "update_test_set_metadata_by_id",
+    "update_target_settings",
 ]

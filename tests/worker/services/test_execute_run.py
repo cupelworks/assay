@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 from assay.models import (
     Comparison,
     OutputSource,
+    SettingsModel,
+    SettingsSection,
     StandaloneRunModel,
     TestModel,
     TestRunModel,
@@ -12,7 +14,7 @@ from assay.models import (
     TestStatus,
     TestTypesModel,
 )
-from assay.schemas import TestTypeAssignment, TestTypeResult
+from assay.schemas import SettingsSource, TestTypeAssignment, TestTypeResult
 from assay.worker.services.execute_run import _resolve_content, execute_run
 from assay.worker.target import TargetError, TargetResponse
 
@@ -45,6 +47,8 @@ def _mock_successful_claim(session: MagicMock, run: TestRunModel) -> None:
     """
     session.execute.return_value.rowcount = 1
     session.scalar.return_value = run
+    # no application-under-test settings saved: the environment's apply
+    session.get.return_value = None
 
 
 def _stamped(passed: bool, row: TestTypesModel, score=None, detail=None) -> dict:
@@ -242,6 +246,7 @@ def test_a_recorded_answer_is_scored_and_copied_onto_the_run():
         execute_run(run_id, session)
 
     get_answer.assert_not_called()
+    session.get.assert_not_called()  # a recorded answer never needs the settings
     assert run.evaluated_output == "Go to Settings\n"
     assert run.output_source == OutputSource.recorded
     assert run.status == TestStatus.green
@@ -261,7 +266,10 @@ def test_without_a_recorded_answer_the_application_is_asked_and_its_reply_scored
             patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match"})) as evaluate:
         execute_run(run_id, session)
 
-    get_answer.assert_called_once_with("How do I reset?")
+    (input_text, settings), _ = get_answer.call_args
+    assert input_text == "How do I reset?"
+    assert settings.source == SettingsSource.environment
+    session.get.assert_called_once_with(SettingsModel, SettingsSection.target)
     evaluate.assert_called_once_with(assignment, EXACT_MATCH, entry, "Go to Settings")
     assert run.evaluated_output == "Go to Settings"
     assert run.output_source == OutputSource.application
@@ -322,6 +330,56 @@ def test_a_failed_application_call_is_logged_as_an_error_without_a_second_traceb
     error = next(r for r in _records(caplog) if r.levelno == logging.ERROR)
     assert error.getMessage() == f"Run {run_id} could not be executed: no application configured"
     assert error.exc_info is None
+
+
+def test_settings_saved_from_the_ui_are_the_ones_the_application_is_called_with():
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    session.get.return_value = SettingsModel(
+        section=SettingsSection.target,
+        value={"url": "https://saved.example.test/chat", "timeout_seconds": 5},
+    )
+    reply = TargetResponse(answer="Go to Settings", status=200, latency_ms=12.5, attempts=1)
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=(
+                _recorded_entry(model_output=None),
+                [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])), \
+            patch(_PATCH_GET_ANSWER, return_value=reply) as get_answer, \
+            patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match"})):
+        execute_run(run_id, session)
+
+    (_, settings), _ = get_answer.call_args
+    assert (settings.source, settings.url, settings.timeout_seconds) == (
+        SettingsSource.database, "https://saved.example.test/chat", 5)
+    assert run.status == TestStatus.green
+
+
+def test_saved_settings_that_no_longer_validate_are_not_ran_with_the_reason():
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    session.get.return_value = SettingsModel(
+        section=SettingsSection.target, value={"url": "ftp://nope", "max_retries": 99},
+    )
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=(
+                _recorded_entry(model_output=None),
+                [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])), \
+            patch(_PATCH_GET_ANSWER) as get_answer, \
+            patch(_PATCH_EVALUATE) as evaluate:
+        execute_run(run_id, session)
+
+    get_answer.assert_not_called()
+    evaluate.assert_not_called()
+    assert run.status == TestStatus.not_ran
+    assert run.error == (
+        "the saved application settings are invalid: url: must be an http:// or https:// URL; "
+        "max_retries: Input should be less than or equal to 10"
+    )
+    assert (run.results, run.evaluated_output, run.output_source) == (None, None, None)
 
 
 # --- _resolve_content() ---

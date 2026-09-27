@@ -57,5 +57,30 @@ def test_invalid_json_in_target_body_fails_at_startup(monkeypatch):
 
 
 def test_negative_target_max_retries_is_rejected():
-    with pytest.raises(ValueError, match="0 or more"):
+    with pytest.raises(ValueError, match="ASSAY_TARGET_MAX_RETRIES: Input should be greater "
+                                         "than or equal to 0"):
         Settings(_env_file=None, target_max_retries=-1)
+
+
+def test_the_environment_gets_the_same_rules_as_a_save_from_the_ui_all_reported_at_once():
+    with pytest.raises(ValidationError) as refused:
+        Settings(_env_file=None, target_url="ftp://app", target_method="DELETE",
+                 target_body={"prompt": "no placeholder"}, target_output_path="$[",
+                 target_timeout_seconds=0)
+
+    message = str(refused.value)
+    for field in ("URL", "METHOD", "BODY", "OUTPUT_PATH", "TIMEOUT_SECONDS"):
+        assert f"ASSAY_TARGET_{field}:" in message
+
+
+def test_a_blank_target_url_means_no_application():
+    assert Settings(_env_file=None, target_url="").target_settings().url is None
+
+
+def test_target_settings_are_the_environments_values():
+    settings = Settings(_env_file=None, target_url="http://app.test/chat", target_method="put",
+                        target_max_retries=0)
+
+    target = settings.target_settings()
+
+    assert (target.url, target.method, target.max_retries) == ("http://app.test/chat", "PUT", 0)
