@@ -130,8 +130,8 @@ def test_invalid_results_are_a_422_listing_every_problem_and_nothing_is_saved():
         ))
 
     assert [(e["loc"], e["msg"].split(",")[0]) for e in refused.value.errors()] == [
-        (("body", "url"), "must be an http:// or https:// URL"),
-        (("body", "body"), "must contain {{input}} in at least one string value"),
+        (("body", "url"), "Must be an http:// or https:// URL"),
+        (("body", "body"), "Must contain {{input}} in at least one string value"),
         (("body", "max_retries"), "Input should be less than or equal to 10"),
     ]
     assert all("input" not in error for error in refused.value.errors())

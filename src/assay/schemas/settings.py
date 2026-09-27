@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from jsonpath_ng import parse as parse_jsonpath
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from assay.messages import sentence
 from assay.models import TargetCheckStatus
 
 INPUT_PLACEHOLDER = "{{input}}"
@@ -114,7 +115,7 @@ class TargetSettings(BaseModel):
         value = value.strip()
         parsed = urlparse(value)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError("must be an http:// or https:// URL")
+            raise ValueError("Must be an http:// or https:// URL")
         return value
 
     @field_validator("method")
@@ -122,7 +123,7 @@ class TargetSettings(BaseModel):
     def _known_method(cls, value: str) -> str:
         method = value.strip().upper()
         if method not in ALLOWED_METHODS:
-            raise ValueError(f"must be one of {', '.join(ALLOWED_METHODS)}")
+            raise ValueError(f"Must be one of {', '.join(ALLOWED_METHODS)}")
         return method
 
     @field_validator("headers")
@@ -142,7 +143,7 @@ class TargetSettings(BaseModel):
                         "starting with a digit)"
                     )
         if problems:
-            raise ValueError("; ".join(problems))
+            raise ValueError(sentence("; ".join(problems)))
         return value
 
     @field_validator("body")
@@ -150,7 +151,7 @@ class TargetSettings(BaseModel):
     def _body_takes_the_input(cls, value: dict[str, Any]) -> dict[str, Any]:
         if not _contains_placeholder(value):
             raise ValueError(
-                f"must contain {INPUT_PLACEHOLDER} in at least one string value, "
+                f"Must contain {INPUT_PLACEHOLDER} in at least one string value, "
                 "or the application never receives the test's input"
             )
         return value
@@ -161,7 +162,7 @@ class TargetSettings(BaseModel):
         try:
             parse_jsonpath(value)
         except Exception as exc:  # jsonpath-ng's parser raises assorted exception types
-            raise ValueError(f"is not a valid JSONPath: {exc}") from None
+            raise ValueError(f"Not a valid JSONPath: {exc}") from None
         return value
 
 

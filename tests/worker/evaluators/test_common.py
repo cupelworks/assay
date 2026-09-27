@@ -23,12 +23,12 @@ def test_parse_threshold_reads_the_string_the_api_stored(raw, expected):
 
 @pytest.mark.parametrize("config", [{}, {"threshold": ""}, {"threshold": "   "}])
 def test_parse_threshold_missing_or_blank_is_the_users_error(config):
-    with pytest.raises(ValueError, match="no threshold configured"):
+    with pytest.raises(ValueError, match="No threshold configured"):
         parse_threshold(config)
 
 
 def test_parse_threshold_non_numeric_names_the_value():
-    with pytest.raises(ValueError, match="threshold 'high' is not a number"):
+    with pytest.raises(ValueError, match="Threshold 'high' is not a number"):
         parse_threshold({"threshold": "high"})
 
 

@@ -16,7 +16,7 @@ def require_reference(evaluation: EvaluationInput) -> str:
     that predates that guard - still reported, not guessed around.
     """
     if evaluation.reference is None:
-        raise ValueError("the test has no expected output to compare against")
+        raise ValueError("The test has no expected output to compare against")
     return evaluation.reference
 
 
@@ -29,11 +29,11 @@ def parse_threshold(config: dict[str, str]) -> float:
     """
     raw = config.get("threshold")
     if raw is None or not str(raw).strip():
-        raise ValueError("no threshold configured for this test type")
+        raise ValueError("No threshold configured for this test type")
     try:
         return float(raw)
     except (TypeError, ValueError):
-        raise ValueError(f"threshold {raw!r} is not a number") from None
+        raise ValueError(f"Threshold {raw!r} is not a number") from None
 
 
 def passes(score: float, threshold: float, comparison: Comparison | None) -> bool:
@@ -50,6 +50,6 @@ def passes(score: float, threshold: float, comparison: Comparison | None) -> boo
             return score <= threshold
         case _:
             raise ValueError(
-                "this test type's catalogue row declares no comparison (gte/lte), "
+                "This test type's catalogue row declares no comparison (gte/lte), "
                 "so its score can't be turned into passed"
             )

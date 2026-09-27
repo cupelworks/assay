@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 RETRYABLE_STATUSES = frozenset({429}) | frozenset(range(500, 600))
 MAX_RETRY_AFTER_SECONDS = 30.0
 
-_ENV_REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_ENV_REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)}")
 
 
 class TargetError(Exception):
@@ -76,7 +76,7 @@ def get_answer(
         settings: TargetSettings,
         *,
         transport: httpx.BaseTransport | None = None,
-) -> TargetResponse:
+) -> TargetResponse | None:
     """Call the application with the test's input and return its answer.
 
     Args:
@@ -95,7 +95,7 @@ def get_answer(
             output path.
     """
     if not settings.url:
-        raise TargetError("no application configured: no URL is set")
+        raise TargetError("No application configured: no URL is set")
     headers = _resolve_headers(settings.headers)
     body = _render(settings.body, input_text)
     output_path = _compile_output_path(settings.output_path)
@@ -128,7 +128,7 @@ def get_answer(
                                "attempt": attempt, "attempts": attempts},
                     )
                     return TargetResponse(answer, response.status_code, latency_ms, attempt)
-                reason = f"application answered HTTP {response.status_code}"
+                reason = f"Application answered HTTP {response.status_code}"
                 if response.status_code not in RETRYABLE_STATUSES:
                     logger.error("%s; not retried", reason,
                                  extra={"status": response.status_code, "attempt": attempt})
@@ -146,6 +146,7 @@ def get_answer(
                 extra={"attempt": attempt, "attempts": attempts, "retry_in_seconds": delay},
             )
             time.sleep(delay)
+        return None
 
 
 def _resolve_headers(headers: dict[str, str]) -> dict[str, str]:
@@ -156,7 +157,7 @@ def _resolve_headers(headers: dict[str, str]) -> dict[str, str]:
         value = os.environ.get(name)
         if value is None:
             raise TargetError(
-                f"a header references ${{{name}}} but {name} is not set on this server"
+                f"A header references ${{{name}}} but {name} is not set on this server"
             )
         return value
 
@@ -179,7 +180,7 @@ def _compile_output_path(path: str):
     try:
         return parse_jsonpath(path)
     except JSONPathError as exc:
-        raise TargetError(f"output path {path!r} is not a valid JSONPath: {exc}") from None
+        raise TargetError(f"Output path {path!r} is not a valid JSONPath: {exc}") from None
 
 
 def _extract_answer(response: httpx.Response, output_path, path: str,
@@ -190,14 +191,14 @@ def _extract_answer(response: httpx.Response, output_path, path: str,
     try:
         payload = response.json()
     except ValueError:
-        raise fail("application's reply is not JSON") from None
+        raise fail("The application's reply is not JSON") from None
     matches = output_path.find(payload)
     if not matches:
-        raise fail(f"nothing found at output path {path!r} in the application's reply")
+        raise fail(f"Nothing found at output path {path!r} in the application's reply")
     value = matches[0].value
     if not isinstance(value, str) or not value.strip():
         kind = "empty" if isinstance(value, str) else type(value).__name__
-        raise fail(f"the value at output path {path!r} is {kind}, not a text answer")
+        raise fail(f"The value at output path {path!r} is {kind}, not a text answer")
     return value
 
 

@@ -19,7 +19,7 @@ from assay.worker import app as _celery_app
 logger = logging.getLogger(__name__)
 
 CHECK_TASK = "assay.worker.tasks.check_target.check_target"
-NOT_DISPATCHED = "could not be sent to a worker"
+NOT_DISPATCHED = "Could not be sent to a worker"
 
 
 async def create_target_check(

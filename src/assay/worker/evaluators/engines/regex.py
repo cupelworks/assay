@@ -25,12 +25,12 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
     answer = evaluation.answer
     pattern = evaluation.config.get("pattern")
     if not pattern:
-        raise ValueError("no pattern configured for this test type")
+        raise ValueError("No pattern configured for this test type")
 
     mode = evaluation.engine_settings.get("mode", "search")
     match_with = _MODES.get(mode)
     if match_with is None:
-        raise ValueError(f"unknown regex mode {mode!r} on this test type's catalogue row")
+        raise ValueError(f"Unknown regex mode {mode!r} on this test type's catalogue row")
     timeout = float(evaluation.engine_settings.get("timeout_seconds", 1))
 
     compiled = regex.compile(pattern)  # regex.error on an invalid pattern, message included
@@ -39,10 +39,10 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
     except TimeoutError:
         return TestTypeResult(
             passed=False, score=None,
-            detail=f"pattern took longer than {timeout:g} s to match — "
+            detail=f"Pattern took longer than {timeout:g} s to match — "
                    "likely catastrophic backtracking",
         )
 
     if matched:
         return TestTypeResult(passed=True, score=None, detail=None)
-    return TestTypeResult(passed=False, score=None, detail=f"pattern did not {mode} the answer")
+    return TestTypeResult(passed=False, score=None, detail=f"Pattern did not {mode} the answer")

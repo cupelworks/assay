@@ -64,25 +64,25 @@ def test_the_call_uses_the_checks_own_settings_with_no_retries():
 
 def test_a_failed_call_completes_the_check_with_the_reason_and_what_came_back():
     check = _check()
-    refused = TargetError("application answered HTTP 401", status=401, latency_ms=88.1)
+    refused = TargetError("Application answered HTTP 401", status=401, latency_ms=88.1)
 
     with patch(_PATCH_GET_ANSWER, side_effect=refused):
         check_target(check.id, _claimed(check))
 
     assert check.status == TargetCheckStatus.completed
     assert (check.ok, check.answer) == (False, None)
-    assert check.error == "application answered HTTP 401"
+    assert check.error == "Application answered HTTP 401"
     assert (check.status_code, check.latency_ms) == (401, 88.1)
 
 
 def test_an_unset_header_variable_on_the_worker_is_reported_by_name():
     check = _check()
-    missing = TargetError("a header references ${KEY} but KEY is not set on this server")
+    missing = TargetError("A header references ${KEY} but KEY is not set on this server")
 
     with patch(_PATCH_GET_ANSWER, side_effect=missing):
         check_target(check.id, _claimed(check))
 
-    assert check.error == "a header references ${KEY} but KEY is not set on this server"
+    assert check.error == "A header references ${KEY} but KEY is not set on this server"
     assert (check.status_code, check.latency_ms) == (None, None)
 
 
@@ -94,7 +94,7 @@ def test_a_check_queued_too_long_expires_without_calling_the_application():
 
     get_answer.assert_not_called()
     assert check.status == TargetCheckStatus.completed
-    assert (check.ok, check.error) == (False, "expired before a worker picked it up")
+    assert (check.ok, check.error) == (False, "Expired before a worker picked it up")
 
 
 def test_completion_is_logged_without_the_input_or_the_answer(caplog):

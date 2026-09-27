@@ -26,4 +26,4 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
     if answer == reference:
         return TestTypeResult(passed=True, score=None, detail=None)
     # Not the texts themselves - the run detail already shows both.
-    return TestTypeResult(passed=False, score=None, detail="differs from the expected output")
+    return TestTypeResult(passed=False, score=None, detail="Differs from the expected output")

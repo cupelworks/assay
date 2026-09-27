@@ -68,7 +68,7 @@ _INVALID_SETTINGS = {
             "example": {
                 "detail": [
                     {"type": "value_error", "loc": ["body", "url"],
-                     "msg": "must be an http:// or https:// URL"},
+                     "msg": "Must be an http:// or https:// URL"},
                     {"type": "less_than_equal", "loc": ["body", "max_retries"],
                      "msg": "Input should be less than or equal to 10"},
                 ]
@@ -226,7 +226,7 @@ async def post_target_check(
                             **_CHECK_PENDING, "status": "completed",
                             "completed_at": "2026-09-27T15:12:04+02:00", "ok": False,
                             "status_code": 401, "latency_ms": 88.1,
-                            "error": "application answered HTTP 401",
+                            "error": "Application answered HTTP 401",
                         }},
                         "pending": {"summary": "Not picked up yet", "value": _CHECK_PENDING},
                     }

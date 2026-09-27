@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from assay.messages import sentence
 from assay.models import (
     OutputSource,
     SettingsModel,
@@ -62,7 +63,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         # error carries the reason, results stays null.
         logger.exception("Run %s could not be executed: %s", run_id, exc)
         run.status = TestStatus.not_ran
-        run.error = str(exc)
+        run.error = sentence(str(exc))
         run.executed_at = datetime.now().astimezone()
         session.commit()
         return
@@ -93,8 +94,8 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         except (target.TargetError, ValidationError) as exc:
             # target.py already logged a failing call itself
             reason = (
-                f"the saved application settings are invalid: {describe_validation_error(exc)}"
-                if isinstance(exc, ValidationError) else str(exc)
+                f"The saved application settings are invalid: {describe_validation_error(exc)}"
+                if isinstance(exc, ValidationError) else sentence(str(exc))
             )
             logger.error("Run %s could not be executed: %s", run_id, reason)
             run.status = TestStatus.not_ran
@@ -126,7 +127,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
                 exc_info=True, extra={"test_type": assignment.name, "engine": engine},
             )
             results[assignment.name] = TestTypeResult(
-                passed=False, score=None, detail=str(exc), engine=engine,
+                passed=False, score=None, detail=sentence(str(exc)), engine=engine,
                 engine_settings=catalogue_row.engine_settings if catalogue_row else None,
             )
 

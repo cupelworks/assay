@@ -95,7 +95,8 @@ def test_content_resolution_failure_marks_not_ran():
         execute_run(run_id, session)
 
     assert run.status == TestStatus.not_ran
-    assert run.error == "entry vanished"
+    # stored for the UI as a sentence, whatever case the exception used
+    assert run.error == "Entry vanished"
     assert run.results is None
     assert run.executed_at is not None
 
@@ -194,11 +195,12 @@ def test_one_assignments_own_evaluator_failure_does_not_fail_the_whole_run():
         execute_run(run_id, session)
 
     # a per-assignment failure becomes that type's own detail, not NotRan -
-    # and still records the engine that would have scored it
+    # capitalized for the UI, and still recording the engine that would have
+    # scored it
     assert run.status == TestStatus.amber
     assert run.error is None
     assert run.results["Exact Match"] == _stamped(True, EXACT_MATCH)
-    assert run.results["Toxicity"] == _stamped(False, TOXICITY, detail="judge API timed out")
+    assert run.results["Toxicity"] == _stamped(False, TOXICITY, detail="Judge API timed out")
 
 
 def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
@@ -301,14 +303,14 @@ def test_a_failed_application_call_is_not_ran_with_the_reason_and_nothing_evalua
 
     with patch(_PATCH_RESOLVE_CONTENT,
                return_value=(entry, [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])), \
-            patch(_PATCH_GET_ANSWER, side_effect=TargetError("application answered HTTP 503 "
+            patch(_PATCH_GET_ANSWER, side_effect=TargetError("Application answered HTTP 503 "
                                                              "after 3 attempt(s)")), \
             patch(_PATCH_EVALUATE) as evaluate:
         execute_run(run_id, session)
 
     evaluate.assert_not_called()
     assert run.status == TestStatus.not_ran
-    assert run.error == "application answered HTTP 503 after 3 attempt(s)"
+    assert run.error == "Application answered HTTP 503 after 3 attempt(s)"
     assert (run.results, run.evaluated_output, run.output_source) == (None, None, None)
     assert run.executed_at is not None
 
@@ -322,13 +324,13 @@ def test_a_failed_application_call_is_logged_as_an_error_without_a_second_traceb
     with (
         patch(_PATCH_RESOLVE_CONTENT,
               return_value=(entry, [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])),
-        patch(_PATCH_GET_ANSWER, side_effect=TargetError("no application configured")),
+        patch(_PATCH_GET_ANSWER, side_effect=TargetError("No application configured")),
         caplog.at_level(logging.INFO, logger=_LOGGER),
     ):
         execute_run(run_id, session)
 
     error = next(r for r in _records(caplog) if r.levelno == logging.ERROR)
-    assert error.getMessage() == f"Run {run_id} could not be executed: no application configured"
+    assert error.getMessage() == f"Run {run_id} could not be executed: No application configured"
     assert error.exc_info is None
 
 
@@ -376,7 +378,7 @@ def test_saved_settings_that_no_longer_validate_are_not_ran_with_the_reason():
     evaluate.assert_not_called()
     assert run.status == TestStatus.not_ran
     assert run.error == (
-        "the saved application settings are invalid: url: must be an http:// or https:// URL; "
+        "The saved application settings are invalid: url: Must be an http:// or https:// URL; "
         "max_retries: Input should be less than or equal to 10"
     )
     assert (run.results, run.evaluated_output, run.output_source) == (None, None, None)

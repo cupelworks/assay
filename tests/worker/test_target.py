@@ -92,7 +92,7 @@ def test_an_unset_env_var_in_a_header_is_a_clear_failure_before_any_call(configu
     monkeypatch.delenv("NOPE", raising=False)
 
     with pytest.raises(TargetError,
-                       match=r"a header references \$\{NOPE\} but NOPE is not set on this server"):
+                       match=r"A header references \$\{NOPE\} but NOPE is not set on this server"):
         get_answer("q", settings, transport=_transport(lambda r: pytest.fail("must not be called")))
 
 
@@ -123,7 +123,7 @@ def test_a_nested_output_path_finds_the_answer(configured):
 
 
 @pytest.mark.parametrize("payload,expected", [
-    ({"answer": "x"}, "nothing found at output path '\\$.output'"),
+    ({"answer": "x"}, "Nothing found at output path '\\$.output'"),
     ({"output": None}, "is NoneType, not a text answer"),
     ({"output": ""}, "is empty, not a text answer"),
     ({"output": "   "}, "is empty, not a text answer"),
@@ -147,7 +147,7 @@ def test_an_invalid_output_path_is_still_a_failure_before_any_call(configured):
     # TargetSettings refuses one; the adapter stays defensive regardless
     settings = SETTINGS.model_copy(update={"output_path": "$["})
 
-    with pytest.raises(TargetError, match="output path '\\$\\[' is not a valid JSONPath"):
+    with pytest.raises(TargetError, match="Output path '\\$\\[' is not a valid JSONPath"):
         get_answer("q", settings, transport=_transport(lambda r: pytest.fail("must not be called")))
 
 
@@ -155,7 +155,7 @@ def test_an_invalid_output_path_is_still_a_failure_before_any_call(configured):
 
 
 def test_no_url_is_a_failure_that_says_so(configured):
-    with pytest.raises(TargetError, match="no application configured: no URL is set"):
+    with pytest.raises(TargetError, match="No application configured: no URL is set"):
         get_answer("q", _settings(url=None))
 
 
@@ -207,7 +207,7 @@ def test_backoff_doubles_one_second_then_two(configured):
 def test_other_4xx_are_never_retried(configured, status):
     handler, calls = _flaky([httpx.Response(status)])
 
-    with pytest.raises(TargetError, match=f"application answered HTTP {status}$"):
+    with pytest.raises(TargetError, match=f"Application answered HTTP {status}$"):
         get_answer("q", SETTINGS, transport=_transport(handler))
 
     assert len(calls) == 1
@@ -217,7 +217,7 @@ def test_other_4xx_are_never_retried(configured, status):
 def test_exhausting_the_retries_fails_with_the_last_reason_and_the_attempt_count(configured):
     handler, calls = _flaky([httpx.Response(503)] * 3)
 
-    with pytest.raises(TargetError, match="application answered HTTP 503 after 3 attempt"):
+    with pytest.raises(TargetError, match="Application answered HTTP 503 after 3 attempt"):
         get_answer("q", SETTINGS, transport=_transport(handler))
 
     assert len(calls) == 3
@@ -284,10 +284,10 @@ def test_logs_a_warning_per_retried_attempt_and_an_error_when_giving_up(configur
     records = _target_records(caplog)
     assert [r.levelno for r in records] == [logging.WARNING, logging.WARNING, logging.ERROR]
     assert records[0].getMessage() == (
-        "application answered HTTP 503 (attempt 1 of 3); retrying in 1.0 s"
+        "Application answered HTTP 503 (attempt 1 of 3); retrying in 1.0 s"
     )
     assert records[-1].getMessage() == (
-        "application answered HTTP 503 after 3 attempt(s); giving up"
+        "Application answered HTTP 503 after 3 attempt(s); giving up"
     )
 
 

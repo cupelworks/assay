@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from assay.messages import sentence
 from assay.models import TargetCheckModel, TargetCheckStatus
 from assay.schemas.settings import TargetSettings
 from assay.worker import target
@@ -46,7 +47,7 @@ def check_target(check_id: uuid.UUID, session: Session) -> None:
     check = session.scalar(select(TargetCheckModel).where(TargetCheckModel.id == check_id))
 
     if _age(check.created_at) > CHECK_EXPIRES_AFTER:
-        _complete(check, ok=False, error="expired before a worker picked it up")
+        _complete(check, ok=False, error="Expired before a worker picked it up")
         session.commit()
         logger.warning("Check %s expired before a worker picked it up", check_id)
         return
@@ -57,7 +58,7 @@ def check_target(check_id: uuid.UUID, session: Session) -> None:
     try:
         response = target.get_answer(check.input, settings)
     except target.TargetError as exc:
-        _complete(check, ok=False, error=str(exc), status_code=exc.status,
+        _complete(check, ok=False, error=sentence(str(exc)), status_code=exc.status,
                   latency_ms=exc.latency_ms)
     else:
         _complete(check, ok=True, answer=response.answer, status_code=response.status,

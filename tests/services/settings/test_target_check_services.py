@@ -85,7 +85,7 @@ def test_a_check_that_cannot_be_sent_completes_at_once_with_the_reason(caplog):
         check = asyncio.run(create_target_check(TargetCheckRequest(input="Hello?"), session))
 
     assert check.status == TargetCheckStatus.completed
-    assert (check.ok, check.error) == (False, "could not be sent to a worker")
+    assert (check.ok, check.error) == (False, "Could not be sent to a worker")
     assert check.completed_at is not None
     assert session.commit.await_count == 2
     assert any(r.exc_info for r in caplog.records)

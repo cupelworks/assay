@@ -21,7 +21,7 @@ def test_a_mismatch_fails_with_no_score_and_a_short_reason_not_the_texts():
     result = exact_match.evaluate(_evaluation("Go to Settings → Privacy"))
 
     assert (result.passed, result.score) == (False, None)
-    assert result.detail == "differs from the expected output"
+    assert result.detail == "Differs from the expected output"
     assert "Privacy" not in result.detail
 
 

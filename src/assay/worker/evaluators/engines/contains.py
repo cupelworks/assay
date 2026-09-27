@@ -15,7 +15,7 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
     answer = evaluation.answer
     substring = evaluation.config.get("substring")
     if not substring:
-        raise ValueError("no substring configured for this test type")
+        raise ValueError("No substring configured for this test type")
 
     if not evaluation.engine_settings.get("case_sensitive", True):
         answer, substring = answer.casefold(), substring.casefold()
@@ -23,5 +23,5 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
     if substring in answer:
         return TestTypeResult(passed=True, score=None, detail=None)
     return TestTypeResult(
-        passed=False, score=None, detail="required substring not found in the answer",
+        passed=False, score=None, detail="Required substring not found in the answer",
     )
