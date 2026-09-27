@@ -14,13 +14,12 @@ error is the user's feedback); it is never validated at write time.
 import regex
 
 from assay.schemas import EvaluationInput, TestTypeResult
-from assay.worker.evaluators._common import require_answer
 
 _MODES = {"search": regex.Pattern.search, "fullmatch": regex.Pattern.fullmatch}
 
 
 def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
-    answer = require_answer(evaluation)
+    answer = evaluation.answer
     pattern = evaluation.config.get("pattern")
     if not pattern:
         raise ValueError("no pattern configured for this test type")

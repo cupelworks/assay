@@ -66,10 +66,6 @@ def test_an_empty_answer_is_a_plain_mismatch_not_an_error():
     assert (result.passed, result.score) == (False, 0.0)
 
 
-def test_no_recorded_answer_is_this_types_failure_with_the_reason():
-    with pytest.raises(ValueError, match="no recorded answer"):
-        exact_match.evaluate(_evaluation(None))
-
 
 def test_no_expected_output_is_this_types_failure_with_the_reason():
     with pytest.raises(ValueError, match="no expected output"):

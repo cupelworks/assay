@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from assay.models import (
     Comparison,
+    OutputSource,
     StandaloneRunModel,
     TestModel,
     TestRunModel,
@@ -13,9 +14,11 @@ from assay.models import (
 )
 from assay.schemas import TestTypeAssignment, TestTypeResult
 from assay.worker.services.execute_run import _resolve_content, execute_run
+from assay.worker.target import TargetError, TargetResponse
 
 _PATCH_RESOLVE_CONTENT = "assay.worker.services.execute_run._resolve_content"
 _PATCH_EVALUATE = "assay.worker.evaluators.evaluate"
+_PATCH_GET_ANSWER = "assay.worker.services.execute_run.target.get_answer"
 
 EXACT_MATCH = TestTypesModel(
     name="Exact Match", engine="exact_match",
@@ -29,6 +32,11 @@ ROUGE = TestTypesModel(
     name="ROUGE", engine="rouge", engine_settings={"variant": "rougeL"},
     comparison=Comparison.gte,
 )
+
+
+def _recorded_entry(model_output="Go to Settings"):
+    return TestSetEntryModel(input="How do I reset?", expected_output="Go to Settings",
+                             model_output=model_output)
 
 
 def _mock_successful_claim(session: MagicMock, run: TestRunModel) -> None:
@@ -48,7 +56,7 @@ def _stamped(passed: bool, row: TestTypesModel, score=None, detail=None) -> dict
 
 
 def _fake_evaluate(passed_for: set[str]):
-    def fake(assignment, catalogue_row, entry):
+    def fake(assignment, catalogue_row, entry, answer):
         return TestTypeResult(
             passed=assignment.name in passed_for, score=None, detail=None,
             engine=catalogue_row.engine, engine_settings=catalogue_row.engine_settings,
@@ -94,7 +102,7 @@ def test_every_type_passing_rolls_up_to_green():
     session = MagicMock()
     _mock_successful_claim(session, run)
     resolved = (
-        MagicMock(),
+        _recorded_entry(),
         [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
          (TestTypeAssignment(name="Toxicity"), TOXICITY)],
     )
@@ -117,14 +125,14 @@ def test_evaluate_is_handed_the_assignment_its_catalogue_row_and_the_entry():
     run = TestRunModel(id=run_id, status=TestStatus.running)
     session = MagicMock()
     _mock_successful_claim(session, run)
-    entry = MagicMock()
+    entry = _recorded_entry("the recorded answer")
     assignment = TestTypeAssignment(name="ROUGE", config={"threshold": "0.7"})
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=(entry, [(assignment, ROUGE)])), \
             patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"ROUGE"})) as mock_evaluate:
         execute_run(run_id, session)
 
-    mock_evaluate.assert_called_once_with(assignment, ROUGE, entry)
+    mock_evaluate.assert_called_once_with(assignment, ROUGE, entry, "the recorded answer")
 
 
 def test_every_type_failing_rolls_up_to_red():
@@ -132,7 +140,7 @@ def test_every_type_failing_rolls_up_to_red():
     run = TestRunModel(id=run_id, status=TestStatus.running)
     session = MagicMock()
     _mock_successful_claim(session, run)
-    resolved = (MagicMock(), [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+    resolved = (_recorded_entry(), [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
             patch(_PATCH_EVALUATE, side_effect=_fake_evaluate(set())):
@@ -147,7 +155,7 @@ def test_mixed_pass_fail_rolls_up_to_amber():
     session = MagicMock()
     _mock_successful_claim(session, run)
     resolved = (
-        MagicMock(),
+        _recorded_entry(),
         [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
          (TestTypeAssignment(name="Toxicity"), TOXICITY)],
     )
@@ -167,15 +175,15 @@ def test_one_assignments_own_evaluator_failure_does_not_fail_the_whole_run():
     session = MagicMock()
     _mock_successful_claim(session, run)
     resolved = (
-        MagicMock(),
+        _recorded_entry(),
         [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
          (TestTypeAssignment(name="Toxicity"), TOXICITY)],
     )
 
-    def fake_evaluate(assignment, catalogue_row, entry):
+    def fake_evaluate(assignment, catalogue_row, entry, answer):
         if assignment.name == "Toxicity":
             raise RuntimeError("judge API timed out")
-        return _fake_evaluate({"Exact Match"})(assignment, catalogue_row, entry)
+        return _fake_evaluate({"Exact Match"})(assignment, catalogue_row, entry, answer)
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
             patch(_PATCH_EVALUATE, side_effect=fake_evaluate):
@@ -195,15 +203,15 @@ def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
     session = MagicMock()
     _mock_successful_claim(session, run)
     resolved = (
-        MagicMock(),
+        _recorded_entry(),
         [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
          (TestTypeAssignment(name="Retired Type"), None)],
     )
 
-    def fake_evaluate(assignment, catalogue_row, entry):
+    def fake_evaluate(assignment, catalogue_row, entry, answer):
         if catalogue_row is None:
             raise LookupError("Test type 'Retired Type' is not in the catalogue")
-        return _fake_evaluate({"Exact Match"})(assignment, catalogue_row, entry)
+        return _fake_evaluate({"Exact Match"})(assignment, catalogue_row, entry, answer)
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
             patch(_PATCH_EVALUATE, side_effect=fake_evaluate):
@@ -215,6 +223,105 @@ def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
         "detail": "Test type 'Retired Type' is not in the catalogue",
         "engine": None, "engine_settings": None,
     }
+
+
+# --- where the answer comes from ---
+
+
+def test_a_recorded_answer_is_scored_and_copied_onto_the_run():
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    resolved = (_recorded_entry("Go to Settings\n"),
+                [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
+            patch(_PATCH_GET_ANSWER) as get_answer, \
+            patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match"})):
+        execute_run(run_id, session)
+
+    get_answer.assert_not_called()
+    assert run.evaluated_output == "Go to Settings\n"
+    assert run.output_source == OutputSource.recorded
+    assert run.status == TestStatus.green
+
+
+def test_without_a_recorded_answer_the_application_is_asked_and_its_reply_scored():
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    entry = _recorded_entry(model_output=None)
+    assignment = TestTypeAssignment(name="Exact Match")
+    reply = TargetResponse(answer="Go to Settings", status=200, latency_ms=12.5, attempts=1)
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=(entry, [(assignment, EXACT_MATCH)])), \
+            patch(_PATCH_GET_ANSWER, return_value=reply) as get_answer, \
+            patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match"})) as evaluate:
+        execute_run(run_id, session)
+
+    get_answer.assert_called_once_with("How do I reset?")
+    evaluate.assert_called_once_with(assignment, EXACT_MATCH, entry, "Go to Settings")
+    assert run.evaluated_output == "Go to Settings"
+    assert run.output_source == OutputSource.application
+    assert run.status == TestStatus.green
+
+
+def test_an_empty_recorded_answer_is_still_a_recorded_answer():
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    resolved = (_recorded_entry(""), [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
+            patch(_PATCH_GET_ANSWER) as get_answer, \
+            patch(_PATCH_EVALUATE, side_effect=_fake_evaluate(set())):
+        execute_run(run_id, session)
+
+    get_answer.assert_not_called()
+    assert (run.evaluated_output, run.output_source) == ("", OutputSource.recorded)
+
+
+def test_a_failed_application_call_is_not_ran_with_the_reason_and_nothing_evaluated():
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    entry = _recorded_entry(model_output=None)
+
+    with patch(_PATCH_RESOLVE_CONTENT,
+               return_value=(entry, [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])), \
+            patch(_PATCH_GET_ANSWER, side_effect=TargetError("application answered HTTP 503 "
+                                                             "after 3 attempt(s)")), \
+            patch(_PATCH_EVALUATE) as evaluate:
+        execute_run(run_id, session)
+
+    evaluate.assert_not_called()
+    assert run.status == TestStatus.not_ran
+    assert run.error == "application answered HTTP 503 after 3 attempt(s)"
+    assert (run.results, run.evaluated_output, run.output_source) == (None, None, None)
+    assert run.executed_at is not None
+
+
+def test_a_failed_application_call_is_logged_as_an_error_without_a_second_traceback(caplog):
+    run_id = uuid.uuid4()
+    session = MagicMock()
+    _mock_successful_claim(session, TestRunModel(id=run_id, status=TestStatus.running))
+    entry = _recorded_entry(model_output=None)
+
+    with (
+        patch(_PATCH_RESOLVE_CONTENT,
+              return_value=(entry, [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])),
+        patch(_PATCH_GET_ANSWER, side_effect=TargetError("no application configured")),
+        caplog.at_level(logging.INFO, logger=_LOGGER),
+    ):
+        execute_run(run_id, session)
+
+    error = next(r for r in _records(caplog) if r.levelno == logging.ERROR)
+    assert error.getMessage() == f"Run {run_id} could not be executed: no application configured"
+    assert error.exc_info is None
 
 
 # --- _resolve_content() ---
@@ -316,7 +423,7 @@ def test_a_finished_run_logs_what_ran_and_its_outcome(caplog):
     session = MagicMock()
     _mock_successful_claim(session, run)
     resolved = (
-        MagicMock(),
+        _recorded_entry(),
         [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
          (TestTypeAssignment(name="Toxicity"), TOXICITY)],
     )
@@ -331,8 +438,11 @@ def test_a_finished_run_logs_what_ran_and_its_outcome(caplog):
     executing, finished = _records(caplog)
     assert executing.getMessage() == f"Executing run {run_id} (test set entry, 2 test types)"
     assert (executing.origin, executing.test_type_count) == ("test set entry", 2)
-    assert finished.getMessage().startswith(f"Run {run_id} finished: Amber (1/2 passed) in ")
+    assert finished.getMessage().startswith(
+        f"Run {run_id} finished: Amber (1/2 passed, recorded answer) in "
+    )
     assert (finished.status, finished.passed, finished.test_type_count) == ("Amber", 1, 2)
+    assert finished.output_source == "recorded"
     assert isinstance(finished.duration_ms, float)
 
 
@@ -357,7 +467,7 @@ def test_an_evaluator_failure_is_a_warning_with_the_traceback_and_the_engine(cap
     run_id = uuid.uuid4()
     session = MagicMock()
     _mock_successful_claim(session, TestRunModel(id=run_id, status=TestStatus.running))
-    resolved = (MagicMock(), [(TestTypeAssignment(name="Toxicity"), TOXICITY)])
+    resolved = (_recorded_entry(), [(TestTypeAssignment(name="Toxicity"), TOXICITY)])
 
     with (
         patch(_PATCH_RESOLVE_CONTENT, return_value=resolved),

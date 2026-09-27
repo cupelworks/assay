@@ -533,6 +533,8 @@ async def get_test_plan_execution_run_metadata(
                             },
                         },
                         "error": None,
+                        "evaluated_output": "Go to Settings → Security and choose Reset password.",
+                        "output_source": "recorded",
                         "executed_at": "2026-07-20T09:12:08.554021",
                         "test_case_id": {
                             "id": "c4d5e6f7-a8b9-0123-cdef-567890123456"

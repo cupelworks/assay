@@ -9,19 +9,6 @@ from assay.models import Comparison
 from assay.schemas import EvaluationInput
 
 
-def require_answer(evaluation: EvaluationInput) -> str:
-    """The text to score, or a clear failure when there isn't one yet.
-
-    Until runs can obtain an answer from the application under test
-    (docs/evaluators/next_move.md Phase 4), a test with no recorded
-    model_output has nothing to evaluate — better said outright than scored
-    as an empty string, which would silently fail every check.
-    """
-    if evaluation.answer is None:
-        raise ValueError("the test has no recorded answer (model_output) to evaluate")
-    return evaluation.answer
-
-
 def require_reference(evaluation: EvaluationInput) -> str:
     """The expected output, for engines that compare against one.
 

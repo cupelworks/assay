@@ -49,6 +49,7 @@ def evaluate(
         assignment: TestTypeAssignment,
         catalogue_row: TestTypesModel | None,
         entry,
+        answer: str,
 ) -> TestTypeResult:
     """Score one assigned test type against the run's frozen copy of the test.
 
@@ -68,7 +69,11 @@ def evaluate(
         catalogue_row: That type's TestTypesModel row, or None if the name
             isn't in the catalogue.
         entry: The frozen copy being evaluated — a StandaloneRunModel or a
-            TestSetEntryModel; both expose input/expected_output/model_output.
+            TestSetEntryModel; both expose input/expected_output.
+        answer: The text to score — resolved by execute_run (the copy's
+            recorded model_output, or the application's reply), not read
+            from the entry here, so every engine scores the same answer the
+            run records as evaluated_output.
     """
     if catalogue_row is None:
         raise LookupError(f"Test type '{assignment.name}' is not in the catalogue")
@@ -81,7 +86,7 @@ def evaluate(
     evaluation = EvaluationInput(
         input=entry.input,
         reference=entry.expected_output,
-        answer=entry.model_output,
+        answer=answer,
         config=assignment.config or {},
         engine_settings=catalogue_row.engine_settings,
         comparison=catalogue_row.comparison,

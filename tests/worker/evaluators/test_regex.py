@@ -76,8 +76,3 @@ def test_an_unknown_mode_is_a_catalogue_error():
 def test_a_missing_or_empty_pattern_is_this_types_failure(pattern):
     with pytest.raises(ValueError, match="no pattern configured"):
         regex.evaluate(_evaluation("anything", pattern=pattern))
-
-
-def test_no_recorded_answer_is_this_types_failure_with_the_reason():
-    with pytest.raises(ValueError, match="no recorded answer"):
-        regex.evaluate(_evaluation(None))

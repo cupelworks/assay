@@ -17,3 +17,45 @@ def test_log_format_only_accepts_text_or_json():
     assert Settings(_env_file=None, log_format="json").log_format == "json"
     with pytest.raises(ValidationError):
         Settings(_env_file=None, log_format="xml")
+
+
+# --- the application under test (ASSAY_TARGET_*) ---
+
+
+def test_target_defaults_are_assays_own_minimal_contract():
+    settings = Settings(_env_file=None)
+
+    assert settings.target_url is None
+    assert settings.target_method == "POST"
+    assert settings.target_headers == {}
+    assert settings.target_body == {"input": "{{input}}"}
+    assert settings.target_output_path == "$.output"
+    assert (settings.target_timeout_seconds, settings.target_max_retries) == (60, 2)
+
+
+def test_target_method_is_normalised_to_upper_case():
+    assert Settings(_env_file=None, target_method="post").target_method == "POST"
+
+
+def test_target_headers_and_body_are_parsed_from_json_strings(monkeypatch):
+    monkeypatch.setenv("ASSAY_TARGET_HEADERS", '{"Authorization": "Bearer ${KEY}"}')
+    monkeypatch.setenv(
+        "ASSAY_TARGET_BODY", '{"messages": [{"role": "user", "content": "{{input}}"}]}',
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert settings.target_headers == {"Authorization": "Bearer ${KEY}"}
+    assert settings.target_body == {"messages": [{"role": "user", "content": "{{input}}"}]}
+
+
+def test_invalid_json_in_target_body_fails_at_startup(monkeypatch):
+    monkeypatch.setenv("ASSAY_TARGET_BODY", "{not json")
+
+    with pytest.raises(Exception, match="target_body"):
+        Settings(_env_file=None)
+
+
+def test_negative_target_max_retries_is_rejected():
+    with pytest.raises(ValueError, match="0 or more"):
+        Settings(_env_file=None, target_max_retries=-1)

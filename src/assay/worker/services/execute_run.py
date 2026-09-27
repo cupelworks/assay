@@ -6,9 +6,9 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from assay.models import TestRunModel, TestStatus, TestTypesModel
+from assay.models import OutputSource, TestRunModel, TestStatus, TestTypesModel
 from assay.schemas import TestTypeAssignment, TestTypeResult
-from assay.worker import evaluators
+from assay.worker import evaluators, target
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,25 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         extra={"origin": origin, "test_type_count": len(resolved)},
     )
 
+    # The answer every engine scores (docs/evaluators/dev_notes.md note 2):
+    # the copy's recorded model_output when it has one, otherwise the
+    # application under test is asked now. A failed call means nothing can
+    # be evaluated - NotRan with the reason, evaluated_output left null.
+    if entry.model_output is not None:
+        answer, output_source = entry.model_output, OutputSource.recorded
+    else:
+        try:
+            answer = target.get_answer(entry.input).answer
+        except target.TargetError as exc:
+            # target.py already logged the failing call itself
+            logger.error("Run %s could not be executed: %s", run_id, exc)
+            run.status = TestStatus.not_ran
+            run.error = str(exc)
+            run.executed_at = datetime.now().astimezone()
+            session.commit()
+            return
+        output_source = OutputSource.application
+
     # evaluators.evaluate() is expected to return a TestTypeResult - the
     # same schema the API reads results back as (schemas/runs.py), so both
     # ends are pinned to one shape instead of agreeing by convention. One
@@ -75,7 +94,9 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     for assignment, catalogue_row in resolved:
         engine = catalogue_row.engine if catalogue_row is not None else None
         try:
-            results[assignment.name] = evaluators.evaluate(assignment, catalogue_row, entry)
+            results[assignment.name] = evaluators.evaluate(
+                assignment, catalogue_row, entry, answer,
+            )
         except Exception as exc:
             logger.warning(
                 "Evaluator %s (engine %s) failed for run %s: %s",
@@ -96,6 +117,8 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         status = TestStatus.amber
 
     run.results = {name: result.model_dump() for name, result in results.items()}
+    run.evaluated_output = answer
+    run.output_source = output_source
     run.status = status
     run.executed_at = datetime.now().astimezone()
     session.commit()
@@ -103,12 +126,13 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     passed = sum(passed_flags)
     duration_ms = round((time.perf_counter() - started) * 1000, 1)
     logger.info(
-        "Run %s finished: %s (%d/%d passed) in %.1f ms",
-        run_id, status.value, passed, len(passed_flags), duration_ms,
+        "Run %s finished: %s (%d/%d passed, %s answer) in %.1f ms",
+        run_id, status.value, passed, len(passed_flags), output_source.value, duration_ms,
         extra={
             "status": status.value,
             "passed": passed,
             "test_type_count": len(passed_flags),
+            "output_source": output_source.value,
             "duration_ms": duration_ms,
         },
     )

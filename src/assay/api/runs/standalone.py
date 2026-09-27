@@ -226,6 +226,8 @@ async def get_standalone_run_metadata(
                             },
                         },
                         "error": None,
+                        "evaluated_output": "Go to Settings → Security and choose Reset password.",
+                        "output_source": "recorded",
                         "executed_at": "2026-07-14T18:03:24.981022",
                         "name": "greets the user by name",
                         "input": "Say hello to Alice.",

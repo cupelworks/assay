@@ -66,12 +66,44 @@ class Settings(BaseSettings):
     # original dispatch as lost and re-publishes it. Only read by the worker/Beat.
     reconciliation_interval_minutes: int = 60
     reconciliation_pending_threshold_minutes: int = 15
+    # The application under test (docs/evaluators/dev_notes.md note 2) — only
+    # read by the worker (worker/target.py), when a test has no recorded
+    # model_output and the run must obtain the answer itself. One deployment
+    # tests one application; unset URL means none is configured, and such a
+    # run lands on NotRan saying so. The request is described as data rather
+    # than coded per application: the body is a JSON template whose string
+    # values may contain {{input}}, the answer is read at a JSONPath, and
+    # header values may reference ${ENV_VAR} so secrets stay out of .env.
+    # The defaults are Assay's own minimal contract: POST {"input": ...},
+    # answer at $.output.
+    target_url: str | None = None
+    target_method: str = "POST"
+    target_headers: dict[str, str] = {}
+    target_body: dict = {"input": "{{input}}"}
+    target_output_path: str = "$.output"
+    target_timeout_seconds: float = 60
+    # Retries only for failures that say "try again" (connection error,
+    # timeout, 5xx, 429) — a retry is a second call to the application, which
+    # can cost money or have side effects, so 0 is a valid choice.
+    target_max_retries: int = 2
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @field_validator("target_method")
+    @classmethod
+    def _upper_method(cls, value: str) -> str:
+        return value.upper()
+
+    @field_validator("target_max_retries")
+    @classmethod
+    def _non_negative_retries(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("ASSAY_TARGET_MAX_RETRIES must be 0 or more")
         return value
 
     @field_validator("log_level")

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from assay.models import TestRunModel, TestStatus
+from assay.models import OutputSource, TestRunModel, TestStatus
 from assay.schemas import (
     StandaloneRunDetails,
     TestCaseID,
@@ -92,6 +92,8 @@ def _standalone_row(**overrides):
             "ROUGE": {"passed": True, "score": 0.9, "detail": None},
         },
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=datetime.now().astimezone(),
         name="greets the user by name",
         input="Say hello to Alice.",
@@ -124,6 +126,8 @@ def test_get_run_details_by_test_and_run_id_happy_path():
         test_case_id=TestCaseID(id=test_id),
         results=row.results,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=row.executed_at,
         name=row.name,
         input=row.input,
@@ -282,6 +286,8 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
         test_set_entry_id=test_set_entry_id,
         results=results,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=executed_at,
         test_id=test_case_id,
         name="greets the user by name",
@@ -311,6 +317,8 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
         test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
         results=results,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=executed_at,
         test_case_id=TestCaseID(id=test_case_id),
         name="greets the user by name",
@@ -359,6 +367,8 @@ def test_get_run_details_by_test_set_execution_and_run_id_reachable_after_unlink
         test_set_entry_id=test_set_entry_id,
         results=results,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=executed_at,
         test_id=test_case_id,
         name="greets the user by name",
@@ -405,6 +415,8 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_termina
         test_set_entry_id=test_set_entry_id,
         results=None,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=None,
         test_id=test_case_id,
         name="greets the user by name",
@@ -431,6 +443,8 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_termina
         test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
         results=None,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=None,
         test_case_id=TestCaseID(id=test_case_id),
         name="greets the user by name",
@@ -565,6 +579,8 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path():
         test_set_entry_id=test_set_entry_id,
         results=results,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=executed_at,
         test_id=test_case_id,
         test_set_id=test_set_id,
@@ -595,6 +611,8 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path():
         test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
         results=results,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=executed_at,
         test_case_id=TestCaseID(id=test_case_id),
         name="greets the user by name",
@@ -632,6 +650,8 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
         test_set_entry_id=test_set_entry_id,
         results=None,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=None,
         test_id=test_case_id,
         test_set_id=test_set_id,
@@ -659,6 +679,8 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
         test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
         results=None,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=None,
         test_case_id=TestCaseID(id=test_case_id),
         name="greets the user by name",
@@ -709,6 +731,8 @@ def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlin
         test_set_entry_id=test_set_entry_id,
         results=results,
         error=None,
+        evaluated_output=None,
+        output_source=None,
         executed_at=executed_at,
         test_id=test_case_id,
         test_set_id=None,
@@ -740,3 +764,17 @@ def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlin
     assert response.test_set_entry_id == TestSetEntryID(id=test_set_entry_id)
     assert response.test_set_id is None
     assert response.results == results
+
+# --- evaluated_output / output_source pass through on every detail ---
+
+
+def test_standalone_details_carry_the_evaluated_output_and_its_source():
+    test_id = uuid.uuid4()
+    test_run_id = uuid.uuid4()
+    row = _standalone_row(evaluated_output="Hello, Alice!", output_source=OutputSource.application)
+    session = _standalone_session(test_id, test_run_id, row)
+
+    response = asyncio.run(get_run_details_by_test_and_run_id(test_id, test_run_id, session))
+
+    assert response.evaluated_output == "Hello, Alice!"
+    assert response.output_source == OutputSource.application

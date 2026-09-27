@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from assay.models import Comparison, TestStatus
+from assay.models import Comparison, OutputSource, TestStatus
 from assay.schemas import (
     CreateTestCaseRequest,
     Pagination,
@@ -70,11 +70,12 @@ class EvaluationInput(BaseModel):
             'has none.'
         ),
     )
-    answer: str | None = Field(
+    answer: str = Field(
         description=(
-            'The text being scored — the entry\'s recorded `model_output` today; '
-            'the application\'s live reply once runs can obtain one. Null when '
-            'the test has no recorded answer yet.'
+            'The text being scored — the copy\'s recorded `model_output`, or the '
+            'application\'s reply obtained during the run when the test had '
+            'none. Always present: a run that couldn\'t obtain an answer is '
+            '`NotRan` and never reaches an engine.'
         ),
     )
     config: dict[str, str] = Field(
@@ -188,6 +189,32 @@ class RunError(BaseModel):
     )
 
 
+class RunEvaluatedOutput(BaseModel):
+    evaluated_output: str | None = Field(
+        ...,
+        description=(
+            'The answer this run actually scored — what every entry in `results` '
+            'describes. Set once the run reaches `Green`, `Amber` or `Red`, '
+            'whether the answer was the test\'s recorded `model_output` (copied '
+            'here, so the results always sit next to the exact text they judged) '
+            'or was obtained from the application under test during the run. '
+            'Null while `Pending`/`Running`, for `NotRan`, and on runs executed '
+            'before this field existed.'
+        ),
+    )
+    output_source: OutputSource | None = Field(
+        ...,
+        description=(
+            'Where `evaluated_output` came from: `recorded` — the test already had '
+            'a `model_output` and the run scored that; `application` — the test '
+            'had none, so the run called the application under test '
+            '(`ASSAY_TARGET_*` settings) and scored its reply, which is why two '
+            'runs of the same test can legitimately differ. Null whenever '
+            '`evaluated_output` is.'
+        ),
+    )
+
+
 class RunExecutionDate(BaseModel):
     executed_at: datetime | None = Field(
         ...,
@@ -212,7 +239,7 @@ class PaginatedStandaloneRunCreationMetadata(Pagination):
 
 
 class StandaloneRunDetails(StandaloneRunCreationMetadata, RunResults, RunError,
-                           RunExecutionDate, CreateTestCaseRequest):
+                           RunEvaluatedOutput, RunExecutionDate, CreateTestCaseRequest):
     test_case_snapshot_at: TestCaseSnapshotDate
 
 
@@ -312,7 +339,7 @@ class PaginatedTestSetExecutionRunMetadata(Pagination):
 
 
 class TestSetExecutionRunDetails(TestSetExecutionRunMetadata, RunResults, RunError,
-                                 RunExecutionDate, CreateTestCaseRequest):
+                                 RunEvaluatedOutput, RunExecutionDate, CreateTestCaseRequest):
     test_case_id: TestCaseID
     test_set_id: TestSetID
     test_case_snapshot_at: TestCaseSnapshotDate
@@ -415,7 +442,7 @@ class PaginatedTestPlanExecutionRunMetadata(Pagination):
 
 
 class TestPlanExecutionRunDetails(TestPlanExecutionRunMetadata, RunResults, RunError,
-                                 RunExecutionDate, CreateTestCaseRequest):
+                                  RunEvaluatedOutput, RunExecutionDate, CreateTestCaseRequest):
     test_case_id: TestCaseID
     test_set_id: TestSetID | None
     test_plan_id: TestPlanID

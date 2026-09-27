@@ -8,11 +8,11 @@ keeps "exact" meaning exact by default. A case-insensitive variant is a
 catalogue row with the flag flipped, not a code change.
 """
 from assay.schemas import EvaluationInput, TestTypeResult
-from assay.worker.evaluators._common import require_answer, require_reference
+from assay.worker.evaluators._common import require_reference
 
 
 def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
-    answer = require_answer(evaluation)
+    answer = evaluation.answer
     reference = require_reference(evaluation)
 
     if evaluation.engine_settings.get("trim", True):

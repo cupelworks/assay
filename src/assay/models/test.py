@@ -156,6 +156,17 @@ TERMINAL_STATUSES = frozenset({
 })
 
 
+class OutputSource(StrEnum):
+    """Where the answer a run evaluated came from — docs/evaluators/dev_notes.md
+    note 2. recorded: the test already had a model_output and the run scored
+    that. application: the test had none, so the run called the application
+    under test and scored its reply — which is why two runs of the same test
+    can legitimately differ.
+    """
+    recorded = "recorded"
+    application = "application"
+
+
 class TestTypes(StrEnum):
     deterministic = "deterministic"
     nlp_metric = "nlp_metric"
@@ -715,6 +726,18 @@ class TestRunModel(Base):
     results: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # The answer this run actually scored, and where it came from — set on
+    # every run that evaluated anything (Green/Amber/Red), whether the answer
+    # was the copy's recorded model_output or obtained from the application
+    # during the run. Copied even when recorded, so results always sit next
+    # to the exact text they describe. Null while Pending/Running and for
+    # NotRan (nothing was evaluated). Not named model_output: on the test
+    # that means "the answer someone recorded, if any"; here it means "what
+    # this run scored, always".
+    evaluated_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_source: Mapped[OutputSource | None] = mapped_column(
+        SAEnum(OutputSource), nullable=True
+    )
 
     statistical_verifications: Mapped[list["StatisticalVerificationModel"]] = relationship(
         back_populates="test_run",

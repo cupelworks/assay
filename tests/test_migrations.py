@@ -127,7 +127,7 @@ def test_downgrade_removes_the_columns_and_restores_the_0_1_bounds(scratch):
     config, db_path = scratch
     command.upgrade(config, "head")
 
-    command.downgrade(config, "-1")
+    command.downgrade(config, "f0a9d5ed2c65")
 
     assert not {"engine", "engine_settings", "comparison"} & set(_columns(db_path))
     rows = _test_types(db_path)
@@ -137,4 +137,44 @@ def test_downgrade_removes_the_columns_and_restores_the_0_1_bounds(scratch):
 
     # and the round trip is clean
     command.upgrade(config, "head")
+    assert {"engine", "engine_settings", "comparison"} <= set(_columns(db_path))
+
+
+# --- c8f2a7d11e94: evaluated_output and output_source on test_runs ---
+
+
+def _run_columns(db_path: Path) -> list[str]:
+    with sqlite3.connect(db_path) as connection:
+        return [row[1] for row in connection.execute("PRAGMA table_info(test_runs)")]
+
+
+def test_upgrade_adds_nullable_evaluated_output_and_a_constrained_output_source(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    assert {"evaluated_output", "output_source"} <= set(_run_columns(db_path))
+    with sqlite3.connect(db_path) as connection:
+        # both nullable: a Pending run has neither
+        connection.execute(
+            "INSERT INTO test_runs (id, status, created_at) VALUES (X'02', 'pending', '2026-01-01')"
+        )
+        connection.execute(
+            "INSERT INTO test_runs (id, status, created_at, evaluated_output, output_source) "
+            "VALUES (X'03', 'green', '2026-01-01', 'hi', 'application')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "INSERT INTO test_runs (id, status, created_at, output_source) "
+                "VALUES (X'04', 'green', '2026-01-01', 'guessed')"
+            )
+
+
+def test_downgrade_removes_the_two_run_columns_only(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "-1")
+
+    assert not {"evaluated_output", "output_source"} & set(_run_columns(db_path))
     assert {"engine", "engine_settings", "comparison"} <= set(_columns(db_path))

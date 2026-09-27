@@ -44,8 +44,3 @@ def test_an_empty_answer_is_a_plain_miss_not_an_error():
 def test_a_missing_or_empty_substring_is_this_types_failure(substring):
     with pytest.raises(ValueError, match="no substring configured"):
         contains.evaluate(_evaluation("anything", substring=substring))
-
-
-def test_no_recorded_answer_is_this_types_failure_with_the_reason():
-    with pytest.raises(ValueError, match="no recorded answer"):
-        contains.evaluate(_evaluation(None))

@@ -2,23 +2,9 @@ import pytest
 
 from assay.models import Comparison
 from assay.schemas import EvaluationInput
-from assay.worker.evaluators._common import (
-    parse_threshold,
-    passes,
-    require_answer,
-    require_reference,
-)
+from assay.worker.evaluators._common import parse_threshold, passes, require_reference
 
-# --- require_answer() / require_reference() ---
-
-
-def test_require_answer_returns_the_recorded_answer_even_when_empty():
-    assert require_answer(EvaluationInput(input="q", reference="r", answer="")) == ""
-
-
-def test_require_answer_fails_when_the_test_has_no_recorded_answer_yet():
-    with pytest.raises(ValueError, match="no recorded answer \\(model_output\\)"):
-        require_answer(EvaluationInput(input="q", reference="r", answer=None))
+# --- require_reference() ---
 
 
 def test_require_reference_fails_when_the_test_has_no_expected_output():

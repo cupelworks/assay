@@ -6,11 +6,10 @@ no edge to trim, and a user who wants surrounding whitespace ignored can
 leave it out of the substring.
 """
 from assay.schemas import EvaluationInput, TestTypeResult
-from assay.worker.evaluators._common import require_answer
 
 
 def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
-    answer = require_answer(evaluation)
+    answer = evaluation.answer
     substring = evaluation.config.get("substring")
     if not substring:
         raise ValueError("no substring configured for this test type")
