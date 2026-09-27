@@ -157,11 +157,10 @@ TERMINAL_STATUSES = frozenset({
 
 
 class OutputSource(StrEnum):
-    """Where the answer a run evaluated came from — docs/evaluators/dev_notes.md
-    note 2. recorded: the test already had a model_output and the run scored
-    that. application: the test had none, so the run called the application
-    under test and scored its reply — which is why two runs of the same test
-    can legitimately differ.
+    """Where the answer a run evaluated came from. recorded: the test already
+    had a model_output and the run scored that. application: the test had
+    none, so the run called the application under test and scored its reply
+    — which is why two runs of the same test can legitimately differ.
     """
     recorded = "recorded"
     application = "application"
@@ -195,8 +194,8 @@ class ConfigFieldKind(StrEnum):
     """What kind of value a TestTypesModel.config_fields entry holds.
 
     "reference" is reserved: a field of this kind is never stored per
-    assignment, it always resolves to the test case's own expected_output
-    (see docs/test_type_config/dev_notes.md). Every other kind is
+    assignment, it always resolves to the test case's own expected_output.
+    Every other kind is
     per-assignment free text, stored under TestTypeAssignmentModel.config /
     TestSetEntryModel.test_type_assignments, keyed by the field's own key.
     """
@@ -227,8 +226,7 @@ class TestTypesModel(Base):
     this type, and comparison says which way a threshold-scored type passes.
     Engines are the kitchen appliances, rows are the recipes: a new type that
     only needs an existing engine with different settings (a "ROUGE-1" next
-    to "ROUGE", a case-insensitive "Exact Match") is a new row, not new code
-    (docs/evaluators/dev_notes.md notes 4 and 5).
+    to "ROUGE", a case-insensitive "Exact Match") is a new row, not new code.
     """
 
     __tablename__ = "test_types"
@@ -244,10 +242,10 @@ class TestTypesModel(Base):
     # {"key": str, "label": str, "kind": str, "required": bool, "min": float |
     # None, "max": float | None}. kind "reference" is reserved — it never gets
     # its own storage, it always resolves to the test case's own
-    # expected_output (see docs/test_type_config/dev_notes.md). min/max are
-    # only ever set for kind "numeric" (advisory bounds, not enforced by the
-    # API — see note 8); omitted (→ None) for every other kind. Empty list for
-    # a self-contained type that needs no extra input.
+    # expected_output. min/max are only ever set for kind "numeric" (advisory
+    # bounds for the FE, not enforced by the API); omitted (→ None) for every
+    # other kind. Empty list for a self-contained type that needs no extra
+    # input.
     config_fields: Mapped[list[dict]] = mapped_column(JSON, default=list)
     # Plain text, not an enum: the engine list grows with code, and a row
     # naming an engine this worker doesn't have must fail that one type at
@@ -368,7 +366,7 @@ class TestTypeAssignmentModel(Base):
     # Per-assignment config values, keyed by the test type's config_fields[].key.
     # Null if the type has no non-reference config fields. A "reference"-kind
     # field is never stored here — it always resolves to the live test's own
-    # expected_output (see docs/test_type_config/dev_notes.md).
+    # expected_output.
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     test: Mapped["TestModel"] = relationship(back_populates="test_type_assignments",

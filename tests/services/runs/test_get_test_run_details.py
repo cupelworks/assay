@@ -334,8 +334,8 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
 
 
 def test_get_run_details_by_test_set_execution_and_run_id_reachable_after_unlink():
-    """Regression test for basic_api_implementation/dev_notes.md note 22: the entry lookup must not
-    filter on the entry's current test_set_id, so a run's detail stays
+    """Regression test: the entry lookup must not filter on the entry's
+    current test_set_id, so a run's detail stays
     reachable even after its entry has been unlinked from the test set
     (PATCH /test-sets/{test_set_id}/entries nulls TestSetEntryModel.test_set_id).
 
@@ -695,13 +695,12 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
 
 
 def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlink():
-    """Regression test mirroring the test-set version's note-22 fix, one layer
+    """Regression test mirroring the test-set version's unlink fix, one layer
     up: the entry lookup must not filter on the entry's current test_set_id,
     and must not join TestPlanEntryModel at all, so a run's detail stays
     reachable even after its entry has been unlinked from its test set, or
-    that test set has since been unlinked from this plan
-    (basic_api_implementation/dev_notes.md note 4 — test-plan-to-set links
-    never freeze).
+    that test set has since been unlinked from this plan (test-plan-to-set
+    links never freeze).
 
     The mocked session returns a canned row regardless of the query's WHERE
     clauses, so the real assertion is on the query that was actually
@@ -756,7 +755,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlin
     # test_set_entries.test_set_id legitimately appears in the SELECT list
     # (it backs the nullable test_set_id response field) — the regression
     # check is that it's never used to *filter* the query, which would
-    # exclude an unlinked entry's row the way note 22 did originally.
+    # exclude an unlinked entry's row, as the original query did.
     where_sql = str(executed_stmt.whereclause.compile(compile_kwargs={"literal_binds": True}))
     assert "test_set_id" not in where_sql
     assert "test_plan_entries" not in compiled_sql

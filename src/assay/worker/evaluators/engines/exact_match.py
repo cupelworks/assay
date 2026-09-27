@@ -1,6 +1,6 @@
 """Exact Match: the answer equals the expected output.
 
-Row settings (docs/evaluators/dev_notes.md note 6): `trim` strips leading
+Row settings: `trim` strips leading
 and trailing whitespace — spaces, tabs and newlines, i.e. str.strip() — from
 both texts before comparing, because LLM answers routinely end in a stray
 newline that shouldn't fail an otherwise exact check; `case_sensitive`
@@ -8,8 +8,7 @@ keeps "exact" meaning exact by default. A case-insensitive variant is a
 catalogue row with the flag flipped, not a code change.
 
 No `score`: a deterministic check is pass/fail by nature, with no scale to
-measure on, so `passed` is the whole result (run_execution/dev_notes.md
-note 16).
+measure on, so `passed` is the whole result.
 """
 from assay.schemas import EvaluationInput, TestTypeResult
 from assay.worker.evaluators._common import require_reference

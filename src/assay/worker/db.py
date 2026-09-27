@@ -1,15 +1,14 @@
 """Sync SQLAlchemy engine/session for the Celery worker — separate from
-assay/db.py's async one. Per docs/run_execution/dev_notes.md note 4: a
-Celery task is a plain synchronous callable, not running inside an
-asyncio event loop. See note 4 for the full reasoning.
+assay/db.py's async one, because a Celery task is a plain synchronous
+callable, not running inside an asyncio event loop.
 
 Pool sizing here depends on which Celery worker pool is actually running,
 since that changes how many processes vs. threads end up sharing this
 module's one `engine`:
 - `--pool=threads` (currently used locally, macOS + Python 3.14 — prefork's
   `fast_trace_task` optimization assumes a forked child inherits the
-  parent's already-initialized state, which doesn't hold under `spawn`;
-  see docs/run_execution/dev_notes.md note 4): one process, no forking at
+  parent's already-initialized state, which doesn't hold under `spawn`):
+  one process, no forking at
   all — every concurrent task borrows a connection from this same pool via
   plain OS threads. SQLAlchemy's pool is thread-safe for exactly this
   (many threads, each with its own short-lived `Session` from

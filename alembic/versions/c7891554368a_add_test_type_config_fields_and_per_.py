@@ -19,10 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # test_set_entries already has 9 rows in the dev DB — server_default='[]'
-    # is required so the NOT NULL add succeeds against them. Per
-    # docs/test_type_config/dev_notes.md note 4 / next_move.md Phase 1.4,
-    # existing rows' old test_type_names data is deliberately not carried
-    # over into the new shape (pre-production, no deployed consumers).
+    # is required so the NOT NULL add succeeds against them. Existing rows'
+    # old test_type_names data is not carried over into the new shape
+    # (pre-production, no deployed consumers).
     with op.batch_alter_table('test_set_entries', schema=None) as batch_op:
         batch_op.add_column(sa.Column('test_type_assignments', sa.JSON(),
                                       nullable=False, server_default=sa.text("'[]'")))
@@ -44,11 +43,10 @@ def upgrade() -> None:
 def _seed_config_fields() -> None:
     """Populate config_fields for every seeded test type.
 
-    Values exactly as tabulated in docs/test_type_config/dev_notes.md note
-    2/7/8 — kind "reference" resolves to expected_output rather than being
+    Kind "reference" resolves to expected_output rather than being
     stored per-assignment; "rubric" fields are optional on every
     llm_as_judge type; "threshold" fields are required on every nlp_metric
-    type, unvalidated by the API (note 8 — that's on the FE to catch).
+    type, unvalidated by the API (that's on the FE to catch).
     """
     test_types_table = sa.table(
         "test_types",

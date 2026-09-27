@@ -1,13 +1,12 @@
 """Contains: the answer includes the assignment's `substring`.
 
-Row settings (docs/evaluators/dev_notes.md note 6): `case_sensitive`, on by
+Row settings: `case_sensitive`, on by
 default, consistent with Exact Match. No trimming — a substring check has
 no edge to trim, and a user who wants surrounding whitespace ignored can
 leave it out of the substring.
 
 No `score`: a deterministic check is pass/fail by nature, with no scale to
-measure on, so `passed` is the whole result (run_execution/dev_notes.md
-note 16).
+measure on, so `passed` is the whole result.
 """
 from assay.schemas import EvaluationInput, TestTypeResult
 

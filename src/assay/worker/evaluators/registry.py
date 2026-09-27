@@ -1,4 +1,4 @@
-"""Per-assignment dispatch, by engine — docs/evaluators/dev_notes.md note 5.
+"""Per-assignment dispatch, by engine.
 
 Called once per assigned test type from execute_run's loop, never once per
 run: a run routinely mixes engines (Exact Match + Toxicity on one test), so
@@ -60,9 +60,8 @@ def evaluate(
     failure — a misconfigured catalogue should be visible in the logs, not
     only in one run's results.
 
-    The result is stamped with the engine and settings it was scored with
-    (run_execution note 14's layer 3), so a later catalogue change can't
-    silently reinterpret it.
+    The result is stamped with the engine and settings it was scored with,
+    so a later catalogue change can't silently reinterpret it.
 
     Args:
         assignment: The assigned type (name + per-assignment config).

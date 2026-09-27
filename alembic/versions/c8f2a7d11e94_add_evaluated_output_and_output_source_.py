@@ -4,8 +4,7 @@ Revision ID: c8f2a7d11e94
 Revises: b4e1c9d27a58
 Create Date: 2026-09-27 15:00:00.000000
 
-Phase 4 of docs/evaluators/next_move.md (dev_notes.md note 2 there): a run
-records the answer it scored and where that answer came from - the copy's
+A run records the answer it scored and where that answer came from - the copy's
 recorded model_output, or the application under test called during the
 run. Both nullable: null while Pending/Running and for NotRan, and null on
 every run executed before this landed (no backfill - those runs scored the

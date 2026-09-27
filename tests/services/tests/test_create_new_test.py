@@ -232,7 +232,7 @@ def test_validate_does_not_check_threshold_format():
         ])])
     )
 
-    # note 8: the API only checks presence, never format — a non-numeric
+    # The API only checks presence, never format — a non-numeric
     # string is the FE's problem to catch, not the API's.
     asyncio.run(_validate_test_type_assignments(
         mock_session,
@@ -242,7 +242,7 @@ def test_validate_does_not_check_threshold_format():
 
 # -- _check_reference_required_types_have_expected_output_or_422 --
 # _validate_test_type_assignments deliberately never checks a "reference"
-# field (it resolves from expected_output, not config — note 3), so this
+# field (it resolves from expected_output, not config), so this
 # guard exists specifically to catch the gap that leaves: an assignment
 # needing a reference with no expected_output anywhere to supply one.
 

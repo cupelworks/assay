@@ -4,11 +4,10 @@ Revision ID: b4e1c9d27a58
 Revises: f0a9d5ed2c65
 Create Date: 2026-09-27 12:00:00.000000
 
-Phase 1 of docs/evaluators/next_move.md, implementing dev_notes.md notes 4
-and 5 there: every catalogue row now says how its type is evaluated, as
-data — which engine scores it, that engine's settings for this type, and
-(for threshold-scored types) which way the score passes. Nothing reads the
-new columns until Phase 2; this migration only shapes and seeds them.
+Every catalogue row now says how its type is evaluated, as data — which
+engine scores it, that engine's settings for this type, and (for
+threshold-scored types) which way the score passes. This migration only
+shapes and seeds the columns; the worker reads them.
 
 Data check (not a data change): BLEU's threshold moves from the 0-1 scale
 to sacreBLEU's native 0-100, and Cosine Similarity's to -1..1, so a BLEU
@@ -17,13 +16,12 @@ anything passes". Checked against the demo database (demo/assay_demo.db)
 before writing this: the only thresholds anywhere - live assignments and
 entry snapshots alike - are ROUGE "0.7" and BERTScore "0.75", both on
 ranges this migration leaves at 0-1. There are no BLEU or Cosine
-Similarity assignments to re-scale. Phase 8 re-checks before the demo
-data is refreshed.
+Similarity assignments to re-scale.
 
 The five llm_judge default rubrics seeded here are provisional one-liners,
 enough to be honest in GET /tests/types (engine_settings is exposed there)
-and to give Phase 7 a starting point; Phase 7's own migration replaces
-them with the rubrics its design note settles.
+and a starting point for the real rubrics, which a later migration replaces
+them with.
 
 """
 from typing import Sequence, Union
@@ -46,10 +44,9 @@ _test_types = sa.table(
     sa.column("config_fields", sa.JSON()),
 )
 
-# engine, engine_settings, comparison - exactly docs/evaluators/next_move.md
-# Phase 1.2's table. Every default is a *setting on the row*, not behaviour
-# hardcoded in an engine (dev_notes.md note 6): a type that needs different
-# behaviour is another row with different settings.
+# engine, engine_settings, comparison per type. Every default is a *setting
+# on the row*, not behaviour hardcoded in an engine: a type that needs
+# different behaviour is another row with different settings.
 _SEED = {
     "Exact Match": ("exact_match", {"trim": True, "case_sensitive": True}, None),
     "Contains": ("contains", {"case_sensitive": True}, None),
@@ -108,9 +105,8 @@ _SEED = {
     ),
 }
 
-# Each type's threshold field carries that type's *native* score range
-# (dev_notes.md note 4), so the FE bounds the input from the descriptor with
-# no code change. Only BLEU and Cosine Similarity differ from the 0-1 every
+# Each type's threshold field carries that type's *native* score range, so
+# the FE bounds the input from the descriptor with no code change. Only BLEU and Cosine Similarity differ from the 0-1 every
 # nlp_metric type was seeded with in c7891554368a.
 _NATIVE_RANGES = {
     "BLEU": (0.0, 100.0),

@@ -1,9 +1,8 @@
 """Helpers every scoring engine shares.
 
-Bad config is the user's responsibility (docs/evaluators/dev_notes.md note
-3): these raise with a message that says exactly what was wrong, and the
-per-assignment catch in execute_run turns that message into the type's own
-detail. Nothing here sanitizes or falls back to a default.
+Bad config is the user's responsibility: these raise with a message that
+says exactly what was wrong, and the per-assignment catch in execute_run
+turns that message into the type's own detail. Nothing here sanitizes or falls back to a default.
 """
 from assay.models import Comparison
 from assay.schemas import EvaluationInput
@@ -13,7 +12,7 @@ def require_reference(evaluation: EvaluationInput) -> str:
     """The expected output, for engines that compare against one.
 
     The API rejects assigning a reference-based type to a test without an
-    expected_output (test_type_config note 10), so this only fires for data
+    expected_output, so this only fires for data
     that predates that guard - still reported, not guessed around.
     """
     if evaluation.reference is None:
@@ -24,8 +23,8 @@ def require_reference(evaluation: EvaluationInput) -> str:
 def parse_threshold(config: dict[str, str]) -> float:
     """The assignment's threshold as a number.
 
-    Stored as a string like every config value (test_type_config note 8) and
-    never validated by the API, so this is where a missing or non-numeric
+    Stored as a string like every config value and never validated by the
+    API, so this is where a missing or non-numeric
     threshold surfaces — as this type's failure, with the reason.
     """
     raw = config.get("threshold")

@@ -113,9 +113,9 @@ def test_a_type_missing_from_the_catalogue_is_that_types_failure():
 
 
 def test_the_remaining_stubs_keep_their_fixed_outcomes():
-    # The deterministic engines score for real since Phase 3; the metric and
-    # judge engines still return what their category modules did, until
-    # Phases 5-7 replace them one at a time.
+    # The deterministic engines score for real; the metric and judge engines
+    # still return one fixed outcome each, until they're replaced one at a
+    # time.
     evaluation = EvaluationInput(input="q", reference="a", answer="a")
 
     for name in ("rouge", "bleu", "meteor", "bertscore", "embedding_cosine"):

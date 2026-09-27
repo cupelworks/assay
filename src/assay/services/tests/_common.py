@@ -137,7 +137,7 @@ async def _validate_test_type_assignments(
 
     A config_fields entry of kind "reference" is never checked here — it
     resolves from the test case's own expected_output, not from an
-    assignment's config (see docs/test_type_config/dev_notes.md).
+    assignment's config.
 
     Args:
         session: Async SQLAlchemy session.
@@ -196,9 +196,8 @@ async def _find_test_type_names_needing_reference(
     """Return which of the given test type names have a required "reference"
     config field.
 
-    A "reference"-kind field never appears in an assignment's own config
-    (see docs/test_type_config/dev_notes.md note 3) — it always resolves to
-    expected_output instead. This is the shared lookup behind
+    A "reference"-kind field never appears in an assignment's own config —
+    it always resolves to expected_output instead. This is the shared lookup behind
     _check_reference_required_types_have_expected_output_or_422, factored
     out so the dataset-import bulk path can reuse one catalogue query
     across every row instead of repeating it per row.

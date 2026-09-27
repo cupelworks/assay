@@ -102,7 +102,7 @@ def test_standalone_happy_path():
     session.commit.assert_called_once()
     mock_dispatch.assert_called_once_with([test_run_model.id])
     # Dispatch must happen only after the creating transaction has
-    # committed (dev_notes.md note 10) — the worker's own connection isn't
+    # committed — the worker's own connection isn't
     # guaranteed to see the row until then.
     assert order == ["commit", "dispatch"]
     assert response.id == test_run_model.id

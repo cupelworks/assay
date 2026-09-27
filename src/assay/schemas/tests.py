@@ -134,9 +134,8 @@ class ConfigFieldDescriptor(BaseModel):
         None,
         description="Minimum allowed value, for `kind: \"numeric\"` fields only. "
                     "Null for every other kind. Advisory only — the API does not "
-                    "enforce this against submitted config values (see "
-                    "docs/test_type_config/dev_notes.md note 8); it exists so the "
-                    "FE doesn't have to hardcode bounds per type.",
+                    "enforce this against submitted config values; it exists so "
+                    "the FE doesn't have to hardcode bounds per type.",
     )
     max: float | None = Field(
         None,

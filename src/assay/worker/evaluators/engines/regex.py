@@ -1,6 +1,6 @@
 """Regex Match: the assignment's `pattern` matches the answer.
 
-Row settings (docs/evaluators/dev_notes.md note 6): `mode` is `search`
+Row settings: `mode` is `search`
 (match anywhere — what people expect; `^…$` in the pattern still gives a
 whole-answer match) or `fullmatch`; `timeout_seconds` bounds one match
 attempt, so a catastrophically backtracking pattern fails this one type
@@ -8,12 +8,11 @@ instead of hanging a worker thread forever — the `regex` library is used
 in place of the stdlib `re` precisely because it supports that timeout.
 Flags such as case-insensitivity stay in the user's pattern (`(?i)`).
 
-An invalid pattern raises with the compiler's own message (note 3: the
-error is the user's feedback); it is never validated at write time.
+An invalid pattern raises with the compiler's own message — the error is
+the user's feedback; it is never validated at write time.
 
 No `score`: a deterministic check is pass/fail by nature, with no scale to
-measure on, so `passed` is the whole result (run_execution/dev_notes.md
-note 16).
+measure on, so `passed` is the whole result.
 """
 import regex
 

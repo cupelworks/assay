@@ -18,8 +18,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # No backfill for standalone runs that already exist - see
-    # docs/run_execution/dev_notes.md note 14: nothing is in production, and
+    # No backfill for standalone runs that already exist: nothing is in
+    # production, and
     # local databases are recreated rather than migrated. Such runs have no
     # row here and their detail endpoint can't be served.
     op.create_table('standalone_runs',
