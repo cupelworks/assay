@@ -169,12 +169,26 @@ async def get_test_types(
 
     Three read-only fields say how the worker evaluates the type: `engine`
     (which scoring engine runs it), `engine_settings` (that engine's
-    parameters for this type) and `comparison` (`gte`/`lte` — which way a
-    threshold-scored type passes; null for types with no threshold). A
-    `threshold` field's `min`/`max` are the type's own native score range,
-    which differs per type (0–1 for ROUGE, 0–100 for BLEU, −1 to 1 for
-    Cosine Similarity) — bound the input from the descriptor, not a shared
-    constant.
+    parameters for this type) and `comparison` (which way a threshold-scored
+    type passes; null for types with no threshold). A `threshold` field's
+    `min`/`max` are the type's own native score range, which differs per
+    type (0–1 for ROUGE, 0–100 for BLEU, −1 to 1 for Cosine Similarity) —
+    bound the input from the descriptor, not a shared constant.
+
+    `comparison` is one of:
+    - `gte` (greater than or equal) — **higher is better**: the check passes
+      when `score >= threshold`. E.g. ROUGE with threshold 0.7: a score of
+      0.81 passes, 0.65 fails. Every metric type today is `gte`, since they
+      all measure similarity.
+    - `lte` (less than or equal) — **lower is better**: the check passes
+      when `score <= threshold`. For a metric that measures mistakes, such
+      as an error rate: with threshold 0.1, a score of 0.05 passes, 0.3
+      fails. No type uses it yet; a future lower-is-better metric declares
+      it on its catalogue row, with no code change.
+    A score exactly equal to the threshold passes either way. Types that
+    don't score against a threshold have `comparison: null`: Exact Match,
+    Contains and Regex Match are pass/fail by nature, and an LLM-as-judge
+    type passes on the judge's own verdict.
 
     No lookup guards apply — every value of `test_category` is a valid
     category, so this always returns a 200. If no test types exist in that
