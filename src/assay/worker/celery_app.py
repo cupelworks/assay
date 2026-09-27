@@ -4,7 +4,8 @@ The Celery app itself, configured against Redis (or the local SQLite
 alternative) as broker and result backend, imported from the same
 settings the API process already uses. Two tasks are registered:
 `execute_run` (tasks/execute_run.py — runs one TestRunModel end to end; the
-evaluator engines it dispatches to are still stubs) and `reconcile_runs`
+deterministic engines score for real, the metric and judge engines are
+still stubs) and `reconcile_runs`
 (tasks/reconcile_runs.py — the Beat-scheduled safety net that re-publishes
 Pending runs whose original dispatch was lost).
 

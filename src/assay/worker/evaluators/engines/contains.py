@@ -1,7 +1,25 @@
+"""Contains: the answer includes the assignment's `substring`.
+
+Row settings (docs/evaluators/dev_notes.md note 6): `case_sensitive`, on by
+default, consistent with Exact Match. No trimming — a substring check has
+no edge to trim, and a user who wants surrounding whitespace ignored can
+leave it out of the substring.
+"""
 from assay.schemas import EvaluationInput, TestTypeResult
+from assay.worker.evaluators._common import require_answer
 
 
 def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
-    # Stub until Phase 3 — same fixed outcome the deterministic category
-    # module returned, so a run's results don't change across the restructure.
-    return TestTypeResult(passed=True, score=None, detail=None)
+    answer = require_answer(evaluation)
+    substring = evaluation.config.get("substring")
+    if not substring:
+        raise ValueError("no substring configured for this test type")
+
+    if not evaluation.engine_settings.get("case_sensitive", True):
+        answer, substring = answer.casefold(), substring.casefold()
+
+    if substring in answer:
+        return TestTypeResult(passed=True, score=1.0, detail=None)
+    return TestTypeResult(
+        passed=False, score=0.0, detail="required substring not found in the answer",
+    )

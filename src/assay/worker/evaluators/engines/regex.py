@@ -1,7 +1,46 @@
+"""Regex Match: the assignment's `pattern` matches the answer.
+
+Row settings (docs/evaluators/dev_notes.md note 6): `mode` is `search`
+(match anywhere — what people expect; `^…$` in the pattern still gives a
+whole-answer match) or `fullmatch`; `timeout_seconds` bounds one match
+attempt, so a catastrophically backtracking pattern fails this one type
+instead of hanging a worker thread forever — the `regex` library is used
+in place of the stdlib `re` precisely because it supports that timeout.
+Flags such as case-insensitivity stay in the user's pattern (`(?i)`).
+
+An invalid pattern raises with the compiler's own message (note 3: the
+error is the user's feedback); it is never validated at write time.
+"""
+import regex
+
 from assay.schemas import EvaluationInput, TestTypeResult
+from assay.worker.evaluators._common import require_answer
+
+_MODES = {"search": regex.Pattern.search, "fullmatch": regex.Pattern.fullmatch}
 
 
 def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
-    # Stub until Phase 3 — same fixed outcome the deterministic category
-    # module returned, so a run's results don't change across the restructure.
-    return TestTypeResult(passed=True, score=None, detail=None)
+    answer = require_answer(evaluation)
+    pattern = evaluation.config.get("pattern")
+    if not pattern:
+        raise ValueError("no pattern configured for this test type")
+
+    mode = evaluation.engine_settings.get("mode", "search")
+    match_with = _MODES.get(mode)
+    if match_with is None:
+        raise ValueError(f"unknown regex mode {mode!r} on this test type's catalogue row")
+    timeout = float(evaluation.engine_settings.get("timeout_seconds", 1))
+
+    compiled = regex.compile(pattern)  # regex.error on an invalid pattern, message included
+    try:
+        matched = match_with(compiled, answer, timeout=timeout) is not None
+    except TimeoutError:
+        return TestTypeResult(
+            passed=False, score=None,
+            detail=f"pattern took longer than {timeout:g} s to match — "
+                   "likely catastrophic backtracking",
+        )
+
+    if matched:
+        return TestTypeResult(passed=True, score=1.0, detail=None)
+    return TestTypeResult(passed=False, score=0.0, detail=f"pattern did not {mode} the answer")

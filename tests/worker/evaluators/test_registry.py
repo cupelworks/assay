@@ -102,13 +102,23 @@ def test_a_type_missing_from_the_catalogue_is_that_types_failure():
         evaluate(TestTypeAssignment(name="Retired"), None, ENTRY)
 
 
-def test_engine_stubs_keep_todays_outcomes():
-    # Phase 2 restructures without changing what a run records; the real
-    # engines replace these one phase at a time.
+def test_the_remaining_stubs_keep_their_fixed_outcomes():
+    # The deterministic engines score for real since Phase 3; the metric and
+    # judge engines still return what their category modules did, until
+    # Phases 5-7 replace them one at a time.
     evaluation = EvaluationInput(input="q", reference="a", answer="a")
 
-    assert ENGINES["exact_match"](evaluation) == TestTypeResult(passed=True, score=None,
-                                                                 detail=None)
-    assert ENGINES["rouge"](evaluation) == TestTypeResult(passed=True, score=1.0, detail=None)
+    for name in ("rouge", "bleu", "meteor", "bertscore", "embedding_cosine"):
+        assert ENGINES[name](evaluation) == TestTypeResult(passed=True, score=1.0, detail=None)
     assert ENGINES["llm_judge"](evaluation) == TestTypeResult(passed=True, score=None,
                                                                detail="Testing")
+
+
+def test_the_deterministic_engines_score_for_real_through_the_registry():
+    row = TestTypesModel(name="Exact Match", engine="exact_match",
+                         engine_settings={"trim": True, "case_sensitive": True}, comparison=None)
+    entry = TestSetEntryModel(input="q", expected_output="hi", model_output="hi\n")
+
+    result = evaluate(TestTypeAssignment(name="Exact Match"), row, entry)
+
+    assert (result.passed, result.score, result.engine) == (True, 1.0, "exact_match")

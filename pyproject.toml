@@ -28,6 +28,8 @@ dev = [
     "ruff>=0.7",        # Linter and formatter
     "aiosqlite>=0.20",  # Async SQLite driver — local dev only (prod uses asyncpg)
     "flower>=2.0",      # Web dashboard for Celery task/worker history — celery -A assay.worker flower
+    "regex>=2024.0",    # The worker's Regex Match engine (see the worker extra) — the test suite
+                        # imports the evaluator engines, so it needs it too
 ]
 anthropic = [
     "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)
@@ -36,6 +38,10 @@ openai = [
     "openai>=1.35",  # OpenAI Chat Completions client (used by OpenAIClient in llm.py)
 ]
 worker = [
+    "regex>=2024.0",         # Regex Match engine (worker/evaluators/engines/regex.py): a drop-in
+                             # for the stdlib `re` that supports a per-call timeout, so a
+                             # catastrophically backtracking user pattern fails that one type
+                             # instead of hanging a worker thread forever
     "psycopg2-binary>=2.9",  # Sync PostgreSQL driver for assay.worker.db — the worker's tasks use a
                              # sync SQLAlchemy session (see docs/run_execution/dev_notes.md note 4),
                              # never asyncpg. Only needed against production Postgres; SQLite's sync
