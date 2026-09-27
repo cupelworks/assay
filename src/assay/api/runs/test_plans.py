@@ -522,8 +522,15 @@ async def get_test_plan_execution_run_metadata(
                             "id": "b3c4d5e6-f7a8-9012-bcde-456789012345"
                         },
                         "results": {
-                            "Exact Match": {"passed": True, "score": 1.0, "detail": None},
-                            "BLEU": {"passed": True, "score": 0.37, "detail": None},
+                            "Exact Match": {
+                                "passed": True, "score": 1.0, "detail": None,
+                                "engine": "exact_match",
+                                "engine_settings": {"trim": True, "case_sensitive": True},
+                            },
+                            "BLEU": {
+                                "passed": True, "score": 37.0, "detail": None,
+                                "engine": "bleu", "engine_settings": {"smoothing": True},
+                            },
                         },
                         "error": None,
                         "executed_at": "2026-07-20T09:12:08.554021",

@@ -496,8 +496,15 @@ async def get_test_set_execution_run_metadata(
                             "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12"
                         },
                         "results": {
-                            "Exact Match": {"passed": True, "score": 1.0, "detail": None},
-                            "BLEU": {"passed": True, "score": 0.42, "detail": None},
+                            "Exact Match": {
+                                "passed": True, "score": 1.0, "detail": None,
+                                "engine": "exact_match",
+                                "engine_settings": {"trim": True, "case_sensitive": True},
+                            },
+                            "BLEU": {
+                                "passed": True, "score": 42.0, "detail": None,
+                                "engine": "bleu", "engine_settings": {"smoothing": True},
+                            },
                         },
                         "error": None,
                         "executed_at": "2026-07-15T16:44:33.981022",

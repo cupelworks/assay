@@ -68,18 +68,24 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     # ends are pinned to one shape instead of agreeing by convention. One
     # assignment's own failure becomes its own TestTypeResult.detail, not
     # the whole run going NotRan, so it's caught per-assignment here rather
-    # than by the broader try/except above.
+    # than by the broader try/except above. A failed result is still stamped
+    # with the engine the row named (None only if the type isn't in the
+    # catalogue at all), so it records what *would* have scored it.
     results: dict[str, TestTypeResult] = {}
-    for assignment, category in resolved:
+    for assignment, catalogue_row in resolved:
+        engine = catalogue_row.engine if catalogue_row is not None else None
         try:
-            results[assignment.name] = evaluators.evaluate(assignment, category, entry)
+            results[assignment.name] = evaluators.evaluate(assignment, catalogue_row, entry)
         except Exception as exc:
             logger.warning(
-                "Evaluator %s (%s) failed for run %s: %s",
-                assignment.name, category, run_id, exc,
-                exc_info=True, extra={"test_type": assignment.name, "category": category},
+                "Evaluator %s (engine %s) failed for run %s: %s",
+                assignment.name, engine, run_id, exc,
+                exc_info=True, extra={"test_type": assignment.name, "engine": engine},
             )
-            results[assignment.name] = TestTypeResult(passed=False, score=None, detail=str(exc))
+            results[assignment.name] = TestTypeResult(
+                passed=False, score=None, detail=str(exc), engine=engine,
+                engine_settings=catalogue_row.engine_settings if catalogue_row else None,
+            )
 
     passed_flags = [result.passed for result in results.values()]
     if all(passed_flags):
@@ -110,32 +116,35 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
 
 def _resolve_content(
         run: TestRunModel | None, session: Session
-) -> tuple[object, list[tuple[TestTypeAssignment, str]]]:
+) -> tuple[object, list[tuple[TestTypeAssignment, TestTypesModel | None]]]:
     """Every run evaluates a frozen copy of its test: a standalone run its
     own StandaloneRunModel, a test-set- or test-plan-triggered run the
     TestSetEntryModel it was created for. Both carry the same fields, with
     the assigned types embedded as the same JSON list, so there's one path:
-    pick the copy, then look each type's category up in the TestTypesModel
-    catalogue.
+    pick the copy, then fetch each assigned type's catalogue row in one
+    query.
 
-    category rides alongside each TestTypeAssignment rather than being a
-    field on it — it's only ever used to pick which evaluator function to
-    call (evaluators.dispatch); once inside deterministic.evaluate() (say),
-    the function already knows its own category, so it isn't data the
-    assignment itself needs to carry.
+    The catalogue row rides alongside each TestTypeAssignment rather than
+    being merged into it: the assignment is the frozen per-run choice (which
+    type, with which config), the row is the catalogue's current definition
+    of how that type is scored (engine, settings, comparison) — two different
+    things, read from two different places, and the registry is what
+    combines them. A type whose name isn't in the catalogue gets None here,
+    and fails as that one type when evaluated, not as the whole run.
     """
     entry = run.standalone_run if run.test_id is not None else run.test_set_entry
     raw_assignments = entry.test_type_assignments
-    categories = dict(
-        session.execute(
-            select(TestTypesModel.name, TestTypesModel.category)
+    rows_by_name = {
+        row.name: row
+        for row in session.scalars(
+            select(TestTypesModel)
             .where(TestTypesModel.name.in_([raw["name"] for raw in raw_assignments]))
-        ).tuples().all()
-    )
+        )
+    }
     return entry, [
         (
             TestTypeAssignment(name=raw.get("name"), config=raw.get("config")),
-            categories[raw.get("name")],
+            rows_by_name.get(raw.get("name")),
         )
         for raw in raw_assignments
     ]

@@ -2,9 +2,9 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from assay.models import TestStatus
+from assay.models import Comparison, TestStatus
 from assay.schemas import (
     CreateTestCaseRequest,
     Pagination,
@@ -51,36 +51,106 @@ class RunCreationDate(BaseModel):
     )
 
 
+class EvaluationInput(BaseModel):
+    """Everything one engine call needs, and nothing else.
+
+    Built by the evaluator registry from the run's frozen copy of the test,
+    the assignment and the type's catalogue row, so an engine is a pure
+    function of this object: it never sees an ORM model, never queries, and
+    can't tell a standalone run's copy from a test set entry — the two
+    frozen shapes are already collapsed into these fields.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    input: str = Field(description='The prompt the application was (or will be) asked.')
+    reference: str | None = Field(
+        description=(
+            'The expected answer — the entry\'s `expected_output`, where a '
+            '`reference`-kind config field resolves from. Null when the test '
+            'has none.'
+        ),
+    )
+    answer: str | None = Field(
+        description=(
+            'The text being scored — the entry\'s recorded `model_output` today; '
+            'the application\'s live reply once runs can obtain one. Null when '
+            'the test has no recorded answer yet.'
+        ),
+    )
+    config: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            'The assignment\'s own config values (`threshold`, `pattern`, '
+            '`rubric`, ...), keyed by the type\'s `config_fields[].key`. Empty '
+            'when the type takes nothing but the reference.'
+        ),
+    )
+    engine_settings: dict = Field(
+        default_factory=dict,
+        description=(
+            'The catalogue row\'s `engine_settings` — the engine\'s parameters for this type.'
+        ),
+    )
+    comparison: Comparison | None = Field(
+        default=None,
+        description=(
+            'The catalogue row\'s `comparison` — how a threshold-scored engine turns '
+            'its score into `passed`. Null for a type not scored against a threshold.'
+        ),
+    )
+
+
 class TestTypeResult(BaseModel):
     passed: bool = Field(
         ...,
         description=(
-            'Whether this test type\'s own pass criterion was met — exact/regex/'
-            'substring match for `deterministic` types, score vs. the type\'s own '
-            '`threshold` config field for `nlp_metric` types, or the judge\'s own '
-            'verdict for `llm_as_judge` types. Always present; every test type '
-            'must resolve to a boolean, regardless of whether it also produces '
-            'a `score`.'
+            'Whether this test type\'s own pass criterion was met — a match for '
+            'an exact/regex/substring engine, `score` against the assignment\'s '
+            '`threshold` (in the direction of the type\'s `comparison`) for a '
+            'metric engine, or the judge\'s own verdict for an LLM-judge engine. '
+            'Always present; every test type must resolve to a boolean, '
+            'regardless of whether it also produces a `score`.'
         ),
     )
     score: float | None = Field(
         ...,
         description=(
-            'The raw numeric result, when this test type produces one — always '
-            'for `deterministic` and `nlp_metric` types, sometimes for '
-            '`llm_as_judge` types. Null when the type has no natural score '
-            '(e.g. a judge verdict with nothing to reduce to a number) or when '
-            'this type failed to evaluate at all (see `detail`).'
+            'The raw numeric result, on the type\'s own native scale (see the '
+            'type\'s `threshold` bounds in `GET /tests/types`) — always for a '
+            'match or metric engine, sometimes for an LLM judge. Only comparable '
+            'within one type. Null when the type has no natural score (e.g. a '
+            'judge verdict with nothing to reduce to a number) or when this type '
+            'failed to evaluate at all (see `detail`).'
         ),
     )
     detail: str | None = Field(
         ...,
         description=(
-            'Free text alongside the result — an `llm_as_judge` type\'s '
-            'rationale for its verdict, or this specific type\'s own error '
-            'message if it individually failed to evaluate (e.g. a judge API '
-            'timeout) while the rest of the run\'s other assigned types '
-            'proceeded normally. Null when there\'s nothing to add.'
+            'Free text alongside the result — an LLM judge\'s rationale for its '
+            'verdict, or this specific type\'s own error message if it '
+            'individually failed to evaluate (e.g. a judge API timeout, a bad '
+            '`threshold` value, an engine this worker doesn\'t have) while the '
+            'rest of the run\'s other assigned types proceeded normally. Null '
+            'when there\'s nothing to add.'
+        ),
+    )
+    engine: str | None = Field(
+        default=None,
+        description=(
+            'Which evaluator engine produced this result, as the type\'s '
+            'catalogue row named it at execution time. Recorded on the run so a '
+            'later catalogue change can\'t silently reinterpret an old result. '
+            'Null only when the type was not in the catalogue at all when the '
+            'run executed (then `detail` says so), and on results written '
+            'before this field existed.'
+        ),
+    )
+    engine_settings: dict | None = Field(
+        default=None,
+        description=(
+            'The engine\'s settings for this type, exactly as the catalogue row '
+            'held them at execution time (same shape as `GET /tests/types`\' '
+            '`engine_settings`). Null in the same two cases as `engine`.'
         ),
     )
 
@@ -90,12 +160,15 @@ class RunResults(BaseModel):
         ...,
         description=(
             'Per-test-type results, keyed by assigned test type name (e.g. '
-            '`{"ROUGE": {"passed": true, "score": 0.81, "detail": null}, '
-            '"Toxicity": {"passed": false, "score": null, "detail": "..."}}`. '
-            'Populated once the run reaches `Green`, `Amber`, or `Red` — one '
-            'entry per test type that was assigned to the test/entry this run '
-            'targeted. Null while `Pending`/`Running`, and for `NotRan` (see '
-            '`error` instead).'
+            '`{"ROUGE": {"passed": true, "score": 0.81, "detail": null, '
+            '"engine": "rouge", "engine_settings": {"variant": "rougeL", ...}}, '
+            '"Toxicity": {"passed": false, "score": null, "detail": "...", '
+            '"engine": "llm_judge", "engine_settings": {...}}}`. Each entry also '
+            'records the engine and settings it was scored with, so the result '
+            'stays interpretable if the catalogue changes later. Populated once '
+            'the run reaches `Green`, `Amber`, or `Red` — one entry per test '
+            'type that was assigned to the test/entry this run targeted. Null '
+            'while `Pending`/`Running`, and for `NotRan` (see `error` instead).'
         ),
     )
 

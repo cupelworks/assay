@@ -1,5 +1,7 @@
-from assay.worker.evaluators.dispatch import evaluate
+from assay.worker.evaluators.registry import ENGINES, UnknownEngineError, evaluate
 
 __all__ = [
+    "ENGINES",
+    "UnknownEngineError",
     "evaluate",
 ]

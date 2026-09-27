@@ -215,8 +215,15 @@ async def get_standalone_run_metadata(
                             "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                         },
                         "results": {
-                            "Exact Match": {"passed": True, "score": 1.0, "detail": None},
-                            "BLEU": {"passed": True, "score": 0.42, "detail": None},
+                            "Exact Match": {
+                                "passed": True, "score": 1.0, "detail": None,
+                                "engine": "exact_match",
+                                "engine_settings": {"trim": True, "case_sensitive": True},
+                            },
+                            "BLEU": {
+                                "passed": True, "score": 42.0, "detail": None,
+                                "engine": "bleu", "engine_settings": {"smoothing": True},
+                            },
                         },
                         "error": None,
                         "executed_at": "2026-07-14T18:03:24.981022",

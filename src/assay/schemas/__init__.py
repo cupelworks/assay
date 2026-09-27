@@ -64,6 +64,7 @@ from assay.schemas.test_set_entries import (
 # runs imports TestCaseID, TestPlanID, TestSetID, and TestSetEntryID from assay.schemas —
 # must load after tests, test_plans, test_sets, and test_set_entries
 from assay.schemas.runs import (
+    EvaluationInput,
     ExecutionMetadata,
     ExecutionOrigin,
     PaginatedExecutionMetadata,
@@ -124,6 +125,7 @@ __all__ = [
     "DataSetImportingData",
     "DataSetRowUpdatedData",
     "DataSetMetadata",
+    "EvaluationInput",
     "ExecutionMetadata",
     "ExecutionOrigin",
     "ModifyTestCaseRequest",
