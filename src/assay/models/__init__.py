@@ -5,6 +5,8 @@ from assay.models.datasets import DatasetModel, DatasetRowModel
 from assay.models.settings import (
     SettingsModel,
     SettingsSection,
+    TargetCheckModel,
+    TargetCheckStatus,
 )
 from assay.models.stats import StatisticalVerificationModel
 from assay.models.test import (
@@ -40,6 +42,8 @@ __all__ = [
     "SettingsSection",
     "StandaloneRunModel",
     "StatisticalVerificationModel",
+    "TargetCheckModel",
+    "TargetCheckStatus",
     "TestModel",
     "TestPlanEntryModel",
     "TestPlanExecutionModel",

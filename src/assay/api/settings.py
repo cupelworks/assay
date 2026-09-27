@@ -1,11 +1,14 @@
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
-from assay.schemas import TargetSettingsRead, TargetSettingsUpdate
+from assay.schemas import TargetCheck, TargetCheckRequest, TargetSettingsRead, TargetSettingsUpdate
 from assay.services import (
+    create_target_check,
+    get_target_check,
     get_target_settings,
     reset_target_settings,
     update_target_settings,
@@ -73,6 +76,15 @@ _INVALID_SETTINGS = {
         }
     },
 }
+_CHECK_PENDING = {
+    "id": "5b0c9a3e-2f1d-4c1e-9d6b-0f4a1f2e7c11",
+    "status": "pending",
+    "created_at": "2026-09-27T15:12:03+02:00",
+    "completed_at": None,
+    "settings": {k: v for k, v in _SETTINGS_FROM_DATABASE.items()
+                 if k not in ("source", "updated_at")},
+    "ok": None, "status_code": None, "latency_ms": None, "answer": None, "error": None,
+}
 
 
 @router.get(
@@ -91,8 +103,9 @@ async def read_target_settings(session: SessionDep) -> TargetSettingsRead:  # pr
     does (`source: database`) until they're reset with `DELETE`.
 
     Secrets are never returned: a header value holds a `${NAME}` reference to
-    an environment variable of the worker, returned as written; whether that
-    variable is actually set can only be known where it's resolved.
+    an environment variable of the worker, returned as written. Whether that
+    variable is actually set can only be known where it's resolved — run a
+    check (`POST /settings/target/checks`).
     """
     return await get_target_settings(session)
 
@@ -147,3 +160,91 @@ async def delete_target_settings(session: SessionDep) -> TargetSettingsRead:  # 
     the form can refresh from this one call.
     """
     return await reset_target_settings(session)
+
+
+@router.post(
+    path="/settings/target/checks",
+    summary="Check the application-under-test settings on a worker",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        202: {
+            "description": (
+                "The check, `pending` until a worker has made the call — poll "
+                "`GET /settings/target/checks/{check_id}`. Already `completed` "
+                "with `ok: false` if it couldn't be sent to a worker."
+            ),
+            "content": {"application/json": {"example": _CHECK_PENDING}},
+        },
+        422: {**_INVALID_SETTINGS,
+              "description": "The proposed settings break at least one rule. No check "
+                             "is created."},
+    },
+)
+async def post_target_check(
+        request: TargetCheckRequest,
+        session: SessionDep,
+) -> TargetCheck:  # pragma: no cover
+    """Ask a worker to call the application once with `input`, and record
+    what happened.
+
+    The check runs on a worker because that's where runs call the
+    application: same network, same environment — the only place a `${NAME}`
+    in a header can be resolved. It needs Redis and a running worker.
+
+    `settings` optionally proposes fields to try on top of the settings in
+    effect, validated like a PATCH; they're stored on the check and never
+    saved as the settings, so a change can be checked before saving it.
+
+    One attempt, no retries, with the configured timeout. A check still
+    queued after 5 minutes (no worker running) is completed without calling
+    the application, with the reason.
+    """
+    return await create_target_check(request, session)
+
+
+@router.get(
+    path="/settings/target/checks/{check_id}",
+    summary="Read a check of the application-under-test settings",
+    responses={
+        200: {
+            "description": (
+                "The check as far as it has got. Poll until `status` is `completed`, "
+                "then `ok` says whether a usable answer came back: `answer` holds it, "
+                "or `error` says why not (the same reason a run would get). "
+                "`status_code` and `latency_ms` are set whenever a response came back."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "ok": {"summary": "The application answered", "value": {
+                            **_CHECK_PENDING, "status": "completed",
+                            "completed_at": "2026-09-27T15:12:04+02:00", "ok": True,
+                            "status_code": 200, "latency_ms": 412.5,
+                            "answer": "We open at 9am on Saturdays.",
+                        }},
+                        "failed": {"summary": "The application refused the key", "value": {
+                            **_CHECK_PENDING, "status": "completed",
+                            "completed_at": "2026-09-27T15:12:04+02:00", "ok": False,
+                            "status_code": 401, "latency_ms": 88.1,
+                            "error": "application answered HTTP 401",
+                        }},
+                        "pending": {"summary": "Not picked up yet", "value": _CHECK_PENDING},
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "No check exists with the given ID.",
+            "content": {"application/json": {
+                "example": {"detail": "Check with ID '<check_id>' not found"}
+            }},
+        },
+    },
+)
+async def read_target_check(
+        check_id: uuid.UUID,
+        session: SessionDep,
+) -> TargetCheck:  # pragma: no cover
+    """One check, as far as it has got: `pending`, `running` (a worker is
+    calling the application) or `completed` with its outcome."""
+    return await get_target_check(check_id, session)

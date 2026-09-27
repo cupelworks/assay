@@ -2,7 +2,7 @@
 
 The group's row in the settings table, when there is one, is the whole
 truth; with no row, the ASSAY_TARGET_* environment and the code defaults
-are. Shared by the API (GET/PATCH/DELETE /settings/target) and the
+are. Shared by the API (GET/PATCH/DELETE /settings/target, checks) and the
 worker (every run that calls the application), each fetching the row with
 its own kind of session — this only decides what the row, or its absence,
 means.

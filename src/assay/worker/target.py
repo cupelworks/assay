@@ -10,9 +10,9 @@ own minimal contract (POST {"input": ...} -> {"output": ...}); an existing
 application needs only the settings changed.
 
 The settings are an argument, never read from the environment here: a run
-passes the effective ones (saved from the UI, else the environment).
-Error messages therefore name the setting, not an ASSAY_TARGET_* variable,
-since the value may not have come from one.
+passes the effective ones (saved from the UI, else the environment) and a
+check passes its own. Error messages therefore name the setting, not an
+ASSAY_TARGET_* variable, since the value may not have come from one.
 
 Everything that can go wrong is a TargetError with a reason; execute_run
 turns it into NotRan with that reason as the run's error. Retries cover
@@ -52,8 +52,8 @@ class TargetError(Exception):
 
     status and latency_ms describe the last response when one came back (an
     HTTP error, or a 2xx without a usable answer), and are None when nothing
-    did (not configured, a connection error, a timeout), for a caller that
-    reports what came back.
+    did (not configured, a connection error, a timeout) - a check reports
+    them.
     """
 
     def __init__(self, reason: str, *, status: int | None = None,
@@ -83,7 +83,8 @@ def get_answer(
         input_text: The test's input - substituted for every {{input}} in the
             body template's string values, never pasted into raw JSON, so
             quotes and newlines in a prompt can't break the request.
-        settings: How to call the application and read its answer.
+        settings: How to call the application and read its answer; a check
+            passes max_retries=0 for a single attempt.
         transport: Test seam - an httpx transport (e.g. MockTransport) in
             place of the network. Production callers leave it unset.
 

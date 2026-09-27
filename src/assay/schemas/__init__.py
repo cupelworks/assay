@@ -18,6 +18,8 @@ from assay.schemas.datasets import (
 )
 from assay.schemas.settings import (
     SettingsSource,
+    TargetCheck,
+    TargetCheckRequest,
     TargetSettings,
     TargetSettingsRead,
     TargetSettingsUpdate,
@@ -164,6 +166,8 @@ __all__ = [
     "SettingsSource",
     "StandaloneRunCreationMetadata",
     "StandaloneRunDetails",
+    "TargetCheck",
+    "TargetCheckRequest",
     "TargetSettings",
     "TargetSettingsRead",
     "TargetSettingsUpdate",

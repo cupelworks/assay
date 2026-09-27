@@ -2,8 +2,8 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import SettingsModel, SettingsSection
-from assay.schemas import TargetSettings, TargetSettingsUpdate
+from assay.models import SettingsModel, SettingsSection, TargetCheckModel
+from assay.schemas import TargetCheck, TargetSettings, TargetSettingsUpdate
 from assay.schemas.settings import settings_errors
 
 # the fields of the settings themselves, without TargetSettingsRead's source/updated_at
@@ -43,3 +43,18 @@ def _apply_or_422(
         raise RequestValidationError([
             {**error, "loc": (*loc, *error["loc"])} for error in settings_errors(exc)
         ]) from None
+
+
+def _target_check_schema(check: TargetCheckModel) -> TargetCheck:
+    return TargetCheck(
+        id=check.id,
+        status=check.status,
+        created_at=check.created_at,
+        completed_at=check.completed_at,
+        settings=TargetSettings.model_validate(check.settings),
+        ok=check.ok,
+        status_code=check.status_code,
+        latency_ms=check.latency_ms,
+        answer=check.answer,
+        error=check.error,
+    )

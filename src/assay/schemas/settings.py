@@ -2,11 +2,12 @@
 
 TargetSettings is the one definition of the application-under-test
 settings: their shape, defaults and rules. It validates the environment
-fallback (config.py), what PATCH /settings/target saves, and a stored row
-read back — so a value refused in one
+fallback (config.py), what PATCH /settings/target saves, a check's
+proposed settings, and a stored row read back — so a value refused in one
 place can't get in through another.
 """
 import re
+import uuid
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -14,6 +15,8 @@ from urllib.parse import urlparse
 
 from jsonpath_ng import parse as parse_jsonpath
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from assay.models import TargetCheckStatus
 
 INPUT_PLACEHOLDER = "{{input}}"
 ALLOWED_METHODS = ("POST", "PUT", "PATCH")
@@ -194,6 +197,62 @@ class TargetSettingsRead(TargetSettings):
         None,
         description="When the settings were last saved from the UI; null when the "
                     "source is the environment.",
+    )
+
+
+class TargetCheckRequest(BaseModel):
+    """POST /settings/target/checks."""
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "input": "What time does the store open on Saturdays?",
+                "settings": {"output_path": "$.choices[0].message.content"},
+            }
+        },
+    )
+
+    input: str = Field(
+        ..., min_length=1,
+        description="The text sent to the application as `{{input}}`.",
+    )
+    settings: TargetSettingsUpdate | None = Field(
+        None,
+        description="Optional fields to try on top of the current settings, validated "
+                    "like a PATCH. Never saved.",
+    )
+
+
+class TargetCheck(BaseModel):
+    """One check of the application-under-test settings, run on a worker."""
+    id: uuid.UUID
+    status: TargetCheckStatus = Field(
+        ...,
+        description="`pending` until a worker picks it up, `running` while it calls "
+                    "the application, `completed` once the outcome is written.",
+    )
+    created_at: datetime
+    completed_at: datetime | None = None
+    settings: TargetSettings = Field(
+        ..., description="The complete settings this check uses (or used).",
+    )
+    ok: bool | None = Field(
+        None,
+        description="Whether the application gave a usable answer. Null until completed.",
+    )
+    status_code: int | None = Field(
+        None, description="The application's HTTP status, when a response came back.",
+    )
+    latency_ms: float | None = Field(
+        None, description="How long the call took, when a response came back.",
+    )
+    answer: str | None = Field(
+        None, description="The answer found at the output path, when `ok`.",
+    )
+    error: str | None = Field(
+        None,
+        description="Why the check failed, when not `ok` — the same reason a run "
+                    "would get.",
     )
 
 

@@ -28,6 +28,8 @@ from assay.services.runs import (
     get_test_set_execution_run_metadata_all_runs,
 )
 from assay.services.settings import (
+    create_target_check,
+    get_target_check,
     get_target_settings,
     reset_target_settings,
     update_target_settings,
@@ -78,6 +80,7 @@ __all__ = [
     "create_new_test_from_dataset",
     "create_new_test_plan",
     "create_new_test_set",
+    "create_target_check",
     "delete_test_by_id",
     "delete_test_plan_by_id",
     "delete_test_set_by_id",
@@ -105,6 +108,7 @@ __all__ = [
     "get_test_set_execution_metadata_all_executions",
     "get_test_set_execution_run_metadata_all_runs",
     "get_test_types_by_category",
+    "get_target_check",
     "get_target_settings",
     "reset_target_settings",
     "run_z_test",

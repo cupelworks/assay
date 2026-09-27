@@ -180,7 +180,7 @@ def test_downgrade_removes_the_two_run_columns_only(scratch):
     assert {"engine", "engine_settings", "comparison"} <= set(_columns(db_path))
 
 
-# --- a0f4ff4fd23a: settings ---
+# --- a0f4ff4fd23a / 5fd1796fb435: settings and checks ---
 
 
 def _tables(db_path: Path) -> set[str]:
@@ -214,11 +214,28 @@ def test_upgrade_creates_an_empty_settings_table_keyed_by_a_constrained_section(
             )
 
 
-def test_downgrade_removes_the_settings_table_only(scratch):
+def test_upgrade_creates_target_checks_with_a_constrained_status(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO target_checks (id, created_at, status, input, settings) "
+            "VALUES (X'01', '2026-01-01', 'pending', 'q', '{}')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "INSERT INTO target_checks (id, created_at, status, input, settings) "
+                "VALUES (X'02', '2026-01-01', 'lost', 'q', '{}')"
+            )
+
+
+def test_downgrading_both_removes_the_two_tables_only(scratch):
     config, db_path = scratch
     command.upgrade(config, "head")
 
     command.downgrade(config, "c8f2a7d11e94")
 
-    assert "settings" not in _tables(db_path)
+    assert not {"settings", "target_checks"} & _tables(db_path)
     assert {"evaluated_output", "output_source"} <= set(_run_columns(db_path))
