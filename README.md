@@ -218,7 +218,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/tests/{test_case_id}` | Retrieve a single test case by ID |
 | `POST` | `/tests` | Create a single test case manually |
 | `POST` | `/tests/from-dataset` | Bulk-create test cases from all rows in a dataset |
-| `PATCH` | `/tests/{test_case_id}` | Partially update a test case — only sent fields are changed; unknown fields are rejected |
+| `PATCH` | `/tests/{test_case_id}` | Partially update a test case — only sent fields are changed; `expected_output`/`model_output` sent as `null` are cleared, `name`/`input` sent as `null` are left as they are; unknown fields are rejected |
 | `DELETE` | `/tests` | Delete test cases by ID (guards against linked test sets and test runs) |
 
 ### Test sets
@@ -232,7 +232,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/test-sets/{test_set_id}/entries` | List all entries (snapshotted tests) in a test set (paginated) |
 | `GET` | `/test-sets/{test_set_id}/entries/{entry_id}` | Retrieve a single entry by ID |
 | `POST` | `/test-sets/{test_set_id}/entries` | Snapshot one or more tests into a test set as entries |
-| `PATCH` | `/test-sets/{test_set_id}/entries/{entry_id}` | Partially update an entry — only allowed until it has been run at least once (409 otherwise) |
+| `PATCH` | `/test-sets/{test_set_id}/entries/{entry_id}` | Partially update an entry, with the same `null` rules as a test case — only allowed until it has been run at least once (409 otherwise) |
 | `DELETE` | `/test-sets/{test_set_id}/entries` | Bulk-delete one or more entries by ID — all-or-nothing, blocked with a 409 if any target entry has runs |
 | `PATCH` | `/test-sets/{test_set_id}/entries` | Bulk-unlink one or more entries by ID (clears `test_set_id`, entry row and any runs left untouched) — all-or-nothing, no runs guard, unlike the sibling `DELETE` |
 
