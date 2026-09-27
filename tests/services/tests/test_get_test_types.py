@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from assay.models import TestTypes, TestTypesCost
+from assay.models import Comparison, TestTypes, TestTypesCost
 from assay.schemas import ConfigFieldDescriptor
 from assay.services import get_test_types_by_category
 
@@ -37,6 +37,9 @@ def test_correct_mapping_of_test_type_fields():
         {"key": "threshold", "label": "Minimum score to pass", "kind": "numeric",
          "required": True, "min": 0.0, "max": 1.0},
     ]
+    mock_test_type.engine = "rouge"
+    mock_test_type.engine_settings = {"variant": "rougeL", "measure": "f1", "stemmer": True}
+    mock_test_type.comparison = Comparison.gte
 
     session = AsyncMock()
     session.scalars.return_value = [mock_test_type]
@@ -45,6 +48,9 @@ def test_correct_mapping_of_test_type_fields():
 
     assert len(result) == 1
     returned = result[0]
+    assert returned.engine == "rouge"
+    assert returned.engine_settings == {"variant": "rougeL", "measure": "f1", "stemmer": True}
+    assert returned.comparison == Comparison.gte
     assert returned.id == mock_id
     assert returned.name == "ROUGE"
     assert returned.category == TestTypes.nlp_metric
@@ -82,6 +88,11 @@ def test_nullable_fields_pass_through_as_none():
     # config_fields is never null at the model level (NOT NULL, default=list) —
     # unlike the other fields checked here, there's no nullable case to cover for it.
     mock_test_type.config_fields = []
+    # engine and engine_settings are NOT NULL too; comparison is the one new
+    # field with a nullable case (a type not scored against a threshold).
+    mock_test_type.engine = "exact_match"
+    mock_test_type.engine_settings = {}
+    mock_test_type.comparison = None
 
     session = AsyncMock()
     session.scalars.return_value = [mock_test_type]
@@ -95,6 +106,8 @@ def test_nullable_fields_pass_through_as_none():
     assert returned.cost is None
     assert returned.limitations is None
     assert returned.config_fields == []
+    assert returned.engine_settings == {}
+    assert returned.comparison is None
 
 
 def _mock_test_type(name: str) -> MagicMock:
@@ -104,6 +117,7 @@ def _mock_test_type(name: str) -> MagicMock:
         id=uuid.uuid4(), category=TestTypes.nlp_metric,
         description=None, is_active=True, created_at=None,
         best_for=None, cost=TestTypesCost.fast, limitations=None, config_fields=[],
+        engine="rouge", engine_settings={}, comparison=Comparison.gte,
     )
     mock_test_type.name = name
     return mock_test_type

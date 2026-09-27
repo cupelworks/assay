@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from assay.models import ConfigFieldKind, TestTypes, TestTypesCost
+from assay.models import Comparison, ConfigFieldKind, TestTypes, TestTypesCost
 from assay.schemas import DataSetID, Pagination
 
 
@@ -181,5 +181,27 @@ class TestTypesSchema(BaseModel):
     )
     config_fields: list[ConfigFieldDescriptor] = Field(
         description="Config fields this test type needs when assigned, if any. "
-                    "Empty for a self-contained type that needs no extra input."
+                    "Empty for a self-contained type that needs no extra input. A "
+                    "`numeric` field's `min`/`max` are that type's own native score "
+                    "range (e.g. 0–1 for ROUGE, 0–100 for BLEU, −1 to 1 for Cosine "
+                    "Similarity), so a `threshold` is always written on the scale the "
+                    "metric itself reports."
+    )
+    engine: str = Field(
+        description="Read-only. Which evaluator engine scores this type in the worker "
+                    "(e.g. `exact_match`, `rouge`, `llm_judge`). Several types can "
+                    "share one engine and differ only in `engine_settings`."
+    )
+    engine_settings: dict = Field(
+        description="Read-only. The engine's parameters for this type — shape depends "
+                    "on the engine (e.g. `{\"variant\": \"rougeL\"}` for ROUGE, "
+                    "`{\"default_rubric\": \"...\"}` for an LLM-judge type). Empty "
+                    "for an engine that takes nothing."
+    )
+    comparison: Comparison | None = Field(
+        description="Read-only. For a type scored against its `threshold` field, which "
+                    "way it passes: `gte` (score ≥ threshold, higher is better) or "
+                    "`lte` (score ≤ threshold, lower is better). Null for a type that "
+                    "isn't scored against a threshold (deterministic checks, LLM "
+                    "judges)."
     )

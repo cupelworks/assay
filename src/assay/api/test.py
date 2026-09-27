@@ -71,6 +71,13 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                     "max": 1.0,
                                 },
                             ],
+                            "engine": "rouge",
+                            "engine_settings": {
+                                "variant": "rougeL",
+                                "measure": "f1",
+                                "stemmer": True,
+                            },
+                            "comparison": "gte",
                         },
                         {
                             "id": "ede3f4b9-1f31-4296-90ca-f34e6e3adb1f",
@@ -104,6 +111,9 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                     "max": 1.0,
                                 },
                             ],
+                            "engine": "meteor",
+                            "engine_settings": {},
+                            "comparison": "gte",
                         },
                     ]
                 }
@@ -156,6 +166,15 @@ async def get_test_types(
     (`config_fields`). These are the names accepted in `test_type_assignments`
     when creating or updating a test case or test set entry (e.g. `"ROUGE"`,
     `"BERTScore"`).
+
+    Three read-only fields say how the worker evaluates the type: `engine`
+    (which scoring engine runs it), `engine_settings` (that engine's
+    parameters for this type) and `comparison` (`gte`/`lte` — which way a
+    threshold-scored type passes; null for types with no threshold). A
+    `threshold` field's `min`/`max` are the type's own native score range,
+    which differs per type (0–1 for ROUGE, 0–100 for BLEU, −1 to 1 for
+    Cosine Similarity) — bound the input from the descriptor, not a shared
+    constant.
 
     No lookup guards apply — every value of `test_category` is a valid
     category, so this always returns a 200. If no test types exist in that

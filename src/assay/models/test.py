@@ -168,6 +168,18 @@ class TestTypesCost(StrEnum):
     expensive = "expensive"
 
 
+class Comparison(StrEnum):
+    """How a threshold-scored test type turns its score into passed.
+
+    gte: higher is better, passed = score >= threshold (every metric today).
+    lte: lower is better, passed = score <= threshold (a future distance or
+    error-rate metric). Null on the catalogue row for a type that isn't
+    scored against a threshold at all (deterministic checks, LLM judges).
+    """
+    gte = "gte"
+    lte = "lte"
+
+
 class ConfigFieldKind(StrEnum):
     """What kind of value a TestTypesModel.config_fields entry holds.
 
@@ -197,6 +209,15 @@ class TestTypesModel(Base):
     references this model by name rather than UUID. This keeps assignments
     stable if the table is ever reseeded — name is the stable, human-readable
     identifier, while id is internal only.
+
+    A row also says how its type is evaluated, as data: engine names the
+    code that scores it (a small, fixed set of generic engines in
+    worker/evaluators), engine_settings carries that engine's parameters for
+    this type, and comparison says which way a threshold-scored type passes.
+    Engines are the kitchen appliances, rows are the recipes: a new type that
+    only needs an existing engine with different settings (a "ROUGE-1" next
+    to "ROUGE", a case-insensitive "Exact Match") is a new row, not new code
+    (docs/evaluators/dev_notes.md notes 4 and 5).
     """
 
     __tablename__ = "test_types"
@@ -217,6 +238,18 @@ class TestTypesModel(Base):
     # API — see note 8); omitted (→ None) for every other kind. Empty list for
     # a self-contained type that needs no extra input.
     config_fields: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    # Plain text, not an enum: the engine list grows with code, and a row
+    # naming an engine this worker doesn't have must fail that one type at
+    # run time (detail says which engine is missing), never fail to load.
+    engine: Mapped[str] = mapped_column(Text, nullable=False)
+    # The engine's parameters for this type — e.g. {"variant": "rougeL"} for
+    # ROUGE, {"default_rubric": "..."} for a judge type. Shape is per engine;
+    # {} for an engine that takes nothing.
+    engine_settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Only for types scored against their threshold config field; null for
+    # the rest. Together with that field's min/max (the type's native score
+    # range) it fully describes how a score becomes passed.
+    comparison: Mapped[Comparison | None] = mapped_column(SAEnum(Comparison), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=True, default=lambda: datetime.now().astimezone()

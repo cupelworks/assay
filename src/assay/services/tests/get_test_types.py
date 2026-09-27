@@ -39,6 +39,9 @@ async def get_test_types_by_category(
             cost=test_type.cost,
             limitations=test_type.limitations,
             config_fields=test_type.config_fields,
+            engine=test_type.engine,
+            engine_settings=test_type.engine_settings,
+            comparison=test_type.comparison,
         )
         for test_type in found
     ]
