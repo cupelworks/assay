@@ -12,16 +12,16 @@ def _evaluation(answer, substring="Settings", settings=None):
     )
 
 
-def test_present_substring_passes_with_score_1():
+def test_present_substring_passes_with_no_score():
     result = contains.evaluate(_evaluation("Go to Settings → Security"))
 
-    assert result == TestTypeResult(passed=True, score=1.0, detail=None)
+    assert result == TestTypeResult(passed=True, score=None, detail=None)
 
 
-def test_absent_substring_fails_with_score_0_and_a_short_reason():
+def test_absent_substring_fails_with_no_score_and_a_short_reason():
     result = contains.evaluate(_evaluation("Go to Preferences → Security"))
 
-    assert (result.passed, result.score) == (False, 0.0)
+    assert (result.passed, result.score) == (False, None)
     assert result.detail == "required substring not found in the answer"
 
 

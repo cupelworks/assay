@@ -10,6 +10,10 @@ Flags such as case-insensitivity stay in the user's pattern (`(?i)`).
 
 An invalid pattern raises with the compiler's own message (note 3: the
 error is the user's feedback); it is never validated at write time.
+
+No `score`: a deterministic check is pass/fail by nature, with no scale to
+measure on, so `passed` is the whole result (run_execution/dev_notes.md
+note 16).
 """
 import regex
 
@@ -41,5 +45,5 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
         )
 
     if matched:
-        return TestTypeResult(passed=True, score=1.0, detail=None)
-    return TestTypeResult(passed=False, score=0.0, detail=f"pattern did not {mode} the answer")
+        return TestTypeResult(passed=True, score=None, detail=None)
+    return TestTypeResult(passed=False, score=None, detail=f"pattern did not {mode} the answer")

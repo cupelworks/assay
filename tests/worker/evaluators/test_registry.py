@@ -131,4 +131,4 @@ def test_the_deterministic_engines_score_for_real_through_the_registry():
 
     result = evaluate(TestTypeAssignment(name="Exact Match"), row, entry, "hi\n")
 
-    assert (result.passed, result.score, result.engine) == (True, 1.0, "exact_match")
+    assert (result.passed, result.score, result.engine) == (True, None, "exact_match")

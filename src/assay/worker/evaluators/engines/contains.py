@@ -4,6 +4,10 @@ Row settings (docs/evaluators/dev_notes.md note 6): `case_sensitive`, on by
 default, consistent with Exact Match. No trimming — a substring check has
 no edge to trim, and a user who wants surrounding whitespace ignored can
 leave it out of the substring.
+
+No `score`: a deterministic check is pass/fail by nature, with no scale to
+measure on, so `passed` is the whole result (run_execution/dev_notes.md
+note 16).
 """
 from assay.schemas import EvaluationInput, TestTypeResult
 
@@ -18,7 +22,7 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
         answer, substring = answer.casefold(), substring.casefold()
 
     if substring in answer:
-        return TestTypeResult(passed=True, score=1.0, detail=None)
+        return TestTypeResult(passed=True, score=None, detail=None)
     return TestTypeResult(
-        passed=False, score=0.0, detail="required substring not found in the answer",
+        passed=False, score=None, detail="required substring not found in the answer",
     )

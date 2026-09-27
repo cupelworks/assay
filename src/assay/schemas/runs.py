@@ -117,11 +117,14 @@ class TestTypeResult(BaseModel):
         ...,
         description=(
             'The raw numeric result, on the type\'s own native scale (see the '
-            'type\'s `threshold` bounds in `GET /tests/types`) — always for a '
-            'match or metric engine, sometimes for an LLM judge. Only comparable '
-            'within one type. Null when the type has no natural score (e.g. a '
-            'judge verdict with nothing to reduce to a number) or when this type '
-            'failed to evaluate at all (see `detail`).'
+            'type\'s `threshold` bounds in `GET /tests/types`) — set exactly '
+            'when the type measures something on a scale: always for a metric '
+            'type (ROUGE, BLEU, …), sometimes for an LLM judge that returns a '
+            'rating. Only comparable within one type. Null for a deterministic '
+            'type (Exact Match, Contains, Regex Match — pass/fail by nature, '
+            '`passed` is the whole result), for a judge verdict with no '
+            'numeric rating, and when this type failed to evaluate at all (see '
+            '`detail`).'
         ),
     )
     detail: str | None = Field(

@@ -216,7 +216,7 @@ async def get_standalone_run_metadata(
                         },
                         "results": {
                             "Exact Match": {
-                                "passed": True, "score": 1.0, "detail": None,
+                                "passed": True, "score": None, "detail": None,
                                 "engine": "exact_match",
                                 "engine_settings": {"trim": True, "case_sensitive": True},
                             },

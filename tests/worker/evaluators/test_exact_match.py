@@ -11,16 +11,16 @@ def _evaluation(answer, reference="Go to Settings → Security", settings=DEFAUL
                            engine_settings=settings)
 
 
-def test_a_match_passes_with_score_1_and_no_detail():
+def test_a_match_passes_with_no_score_and_no_detail():
     result = exact_match.evaluate(_evaluation("Go to Settings → Security"))
 
-    assert result == TestTypeResult(passed=True, score=1.0, detail=None)
+    assert result == TestTypeResult(passed=True, score=None, detail=None)
 
 
-def test_a_mismatch_fails_with_score_0_and_a_short_reason_not_the_texts():
+def test_a_mismatch_fails_with_no_score_and_a_short_reason_not_the_texts():
     result = exact_match.evaluate(_evaluation("Go to Settings → Privacy"))
 
-    assert (result.passed, result.score) == (False, 0.0)
+    assert (result.passed, result.score) == (False, None)
     assert result.detail == "differs from the expected output"
     assert "Privacy" not in result.detail
 
@@ -63,7 +63,7 @@ def test_settings_default_to_trim_and_case_sensitive_when_the_row_omits_them():
 def test_an_empty_answer_is_a_plain_mismatch_not_an_error():
     result = exact_match.evaluate(_evaluation(""))
 
-    assert (result.passed, result.score) == (False, 0.0)
+    assert (result.passed, result.score) == (False, None)
 
 
 

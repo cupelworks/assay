@@ -16,13 +16,13 @@ def _evaluation(answer, pattern=r"\d{4}-\d{2}-\d{2}", settings=DEFAULTS):
 def test_search_matches_anywhere_in_the_answer():
     result = regex.evaluate(_evaluation("Released on 2026-09-27, see notes"))
 
-    assert result == TestTypeResult(passed=True, score=1.0, detail=None)
+    assert result == TestTypeResult(passed=True, score=None, detail=None)
 
 
-def test_search_miss_fails_with_score_0_and_names_the_mode():
+def test_search_miss_fails_with_no_score_and_names_the_mode():
     result = regex.evaluate(_evaluation("Released last week"))
 
-    assert (result.passed, result.score) == (False, 0.0)
+    assert (result.passed, result.score) == (False, None)
     assert result.detail == "pattern did not search the answer"
 
 
