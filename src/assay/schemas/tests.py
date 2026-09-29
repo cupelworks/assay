@@ -156,8 +156,11 @@ class ConfigFieldDescriptor(BaseModel):
     )
     hint: str | None = Field(
         None,
-        description="A one-line note on how to fill the field in, shown under it. "
-                    "Null when the field has none.",
+        description="A one-line note on how to fill the field in, shown under it: what "
+                    "the value means and what to expect. It never restates what the "
+                    "descriptor already says — the range (`min`/`max`), the pass "
+                    "direction (the type's `comparison`) or whether it's required. Null "
+                    "when the field has none.",
     )
 
 
