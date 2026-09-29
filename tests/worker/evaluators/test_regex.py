@@ -76,3 +76,43 @@ def test_an_unknown_mode_is_a_catalogue_error():
 def test_a_missing_or_empty_pattern_is_this_types_failure(pattern):
     with pytest.raises(ValueError, match="No pattern configured"):
         regex.evaluate(_evaluation("anything", pattern=pattern))
+
+
+# --- negate: "Regex Must Not Match" ---
+
+NEGATED = {"mode": "search", "timeout_seconds": 1, "negate": True}
+CARD_NUMBER = r"\b(?:\d[ -]?){13,16}\b"
+
+
+def test_negated_passes_when_the_pattern_is_absent():
+    result = regex.evaluate(_evaluation("Your order ships Monday.", pattern=CARD_NUMBER,
+                                        settings=NEGATED))
+
+    assert result == TestTypeResult(passed=True, score=None, detail=None)
+
+
+def test_negated_fails_when_the_pattern_is_found_anywhere():
+    result = regex.evaluate(_evaluation("Card on file: 4111 1111 1111 1111, thanks.",
+                                        pattern=CARD_NUMBER, settings=NEGATED))
+
+    assert result == TestTypeResult(passed=False, score=None,
+                                    detail="Forbidden pattern found in the answer")
+
+
+def test_negated_fullmatch_only_fails_when_the_whole_answer_matches():
+    settings = {"mode": "fullmatch", "timeout_seconds": 1, "negate": True}
+
+    assert regex.evaluate(_evaluation("N/A", pattern=r"N/A", settings=settings)) == \
+        TestTypeResult(passed=False, score=None,
+                       detail="The whole answer matches the forbidden pattern")
+    assert regex.evaluate(_evaluation("N/A for now", pattern=r"N/A",
+                                      settings=settings)).passed is True
+
+
+def test_negated_timeout_still_fails():
+    settings = {"mode": "search", "timeout_seconds": 0.2, "negate": True}
+
+    result = regex.evaluate(_evaluation("a" * 45 + "b", pattern=r"(a|aa)+$", settings=settings))
+
+    assert result.passed is False
+    assert result.detail.startswith("Pattern took longer than 0.2 s")
