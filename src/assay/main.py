@@ -18,18 +18,24 @@ _DESCRIPTION = """
 Assay measures how a GenAI-powered application actually behaves, and keeps a reproducible
 record of every measurement.
 
-**What it does.** You bring the prompts you send your application, the outputs it
-produced, and — where you have them — the outputs you expected. Assay scores each case
-with the checks you assign to it:
+**What it does.** You bring the prompts you send your application, the answers it gave
+if you recorded them, and — where you have them — the outputs you expected. When a test
+has no recorded answer, Assay asks your application itself, through its endpoint, and
+scores the reply. Assay scores each case with the checks you assign to it:
 
-- **Deterministic** checks — *Exact Match* against the expected output.
-- **NLP metrics** scored against a threshold you set — *ROUGE*, *BLEU*, *BERTScore*,
-  *Cosine Similarity*.
+- **Deterministic** checks, pass/fail — *Exact Match*, *Contains*, *Regex Match* and
+  their variants (case-insensitive, whitespace-sensitive, full match), the negated
+  *Does Not Contain* and *Regex Must Not Match*, the JSON checks (*Is Valid JSON*,
+  *Matches JSON Schema*, *JSON Field Equals*) and length limits (*Word Count Limit*,
+  *Character Count Limit*).
+- **NLP metrics** scored against a threshold you set — *ROUGE* (and ROUGE-1, ROUGE-2,
+  ROUGE-L Recall, ROUGE-L Precision), *BLEU*, *METEOR*, *BERTScore*, *Cosine Similarity*.
 - **LLM-as-judge** verdicts against a rubric you write — *Correctness*, *Relevance*,
   *Bias*, *Toxicity*, *Hallucination*.
 
-Every check yields a pass/fail with a score or a rationale, and every run rolls up to a
-single outcome.
+Every check yields a pass/fail — with a score when it measures something on a scale, or a
+rationale — and every run rolls up to a single outcome. A check reads the answer by
+default, or any other part of your application's reply you point it at (`answer_path`).
 
 **How the pieces fit.**
 
@@ -50,6 +56,9 @@ single outcome.
   a past run's history.
 - **Statistical verification** — a one-sample z-test over a series of metric scores
   against a threshold, for claims like "this metric holds above 0.8 at α = 0.05".
+- **Settings** — how Assay calls your application (URL, headers, request body, where the
+  answer is in the reply), saved from the UI; and *checks* that make one call through a
+  worker to confirm the settings work before any run depends on them.
 
 **Conventions.** List endpoints paginate with `offset`/`limit` and always return `total`.
 Every response carries an `X-Request-ID` header — send your own to have it reused — and a

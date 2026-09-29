@@ -46,11 +46,13 @@ class CreateTestCaseRequest(BaseModel):
     )
     expected_output: str | None = Field(
         None,
-        description="Expected output of test case",
+        description="What the answer should be — the reference that types with a "
+                    "`reference` field compare against (e.g. Exact Match, ROUGE).",
     )
     model_output: str | None = Field(
         None,
-        description="The real output of the model",
+        description="The answer your application gave, if you recorded it: runs score it "
+                    "as it is. Null: every run asks the application under test instead.",
     )
     test_type_assignments: list[TestTypeAssignment] = Field(
         default_factory=list,
@@ -105,9 +107,9 @@ class ModifyTestCaseRequest(BaseModel):
     )
     model_output: str | None = Field(
         None,
-        description="The real output of the model. Send null to clear it — runs then ask "
-                    "the application under test for the answer; leave the key out to "
-                    "keep it.",
+        description="The answer your application gave, if you recorded it. Send null to "
+                    "clear it — runs then ask the application under test for the answer; "
+                    "leave the key out to keep it.",
     )
     test_type_assignments: list[TestTypeAssignment] | None = Field(
         None,

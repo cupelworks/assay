@@ -252,8 +252,9 @@ class TargetCheck(BaseModel):
     )
     error: str | None = Field(
         None,
-        description="Why the check failed, when not `ok` — the same reason a run "
-                    "would get.",
+        description="Why the check failed, when not `ok`: the reason a run would get "
+                    "for a failed call, or that the answer at the output path was "
+                    "empty (a run scores an empty answer; a check reports it).",
     )
 
 

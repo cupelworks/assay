@@ -25,6 +25,74 @@ router = APIRouter(tags=["run (test-set)"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+_RUN_DETAIL_RECORDED = {
+    "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+    "status": "Green",
+    "created_at": "2026-07-15T16:44:30.163355",
+    "test_set_entry_id": {
+        "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
+    },
+    "test_set_execution_id": {
+        "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12"
+    },
+    "results": {
+        "Exact Match": {
+            "passed": True, "score": None, "detail": None,
+            "engine": "exact_match",
+            "engine_settings": {"trim": True, "case_sensitive": True},
+        },
+        "BLEU": {
+            "passed": True, "score": 42.0, "detail": None,
+            "engine": "bleu", "engine_settings": {"smoothing": True},
+        },
+    },
+    "error": None,
+    "evaluated_output": "Go to Settings → Security and choose Reset password.",
+    "output_source": "recorded",
+    "executed_at": "2026-07-15T16:44:33.981022",
+    "test_case_id": {
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    },
+    "name": "greets the user by name",
+    "input": "Say hello to Alice.",
+    "expected_output": "Hello, Alice!",
+    "model_output": "Hello, Alice!",
+    "test_type_assignments": [
+        {"name": "Exact Match", "config": None},
+        {"name": "BLEU", "config": {"threshold": "0.6"}},
+    ],
+    "test_case_snapshot_at": {
+        "snapshot_at": "2026-07-15T16:40:02.552210"
+    },
+    "test_set_id": {
+        "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+    },
+}
+
+# The same run, answered by the application under test: the whole reply is
+# kept, and the BLEU check reads its own part of it (answer_path).
+_RUN_DETAIL_FROM_APPLICATION = {
+    **_RUN_DETAIL_RECORDED,
+    "results": {
+        **_RUN_DETAIL_RECORDED["results"],
+        "BLEU": {**_RUN_DETAIL_RECORDED["results"]["BLEU"], "answer_path": "$.output.greeting"},
+    },
+    "evaluated_output": '{"greeting": "Hello, Alice!"}',
+    "output_source": "application",
+    "application_reply": {
+        "output": {"greeting": "Hello, Alice!"},
+        "model": "claude-sonnet-5",
+        "stop_reason": "end_turn",
+        "input_tokens": 812,
+        "output_tokens": 64,
+    },
+    "model_output": None,
+    "test_type_assignments": [
+        {"name": "Exact Match", "config": None},
+        {"name": "BLEU", "config": {"threshold": "0.4"}, "answer_path": "$.output.greeting"},
+    ],
+}
+
 @router.post(
     path="/runs/test-sets/{test_set_id}",
     responses={
@@ -33,12 +101,13 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                 "A live execution was triggered: one pending run was created "
                 "per entry currently in the test set, all grouped under a "
                 "single new test set execution, and each one dispatched for "
-                "execution. This endpoint does not call the model, score "
+                "execution. This endpoint doesn't call your application, score "
                 "anything, or write back results itself — every created "
                 "run's `status` is `Pending`, since the worker that does all "
                 "of that runs separately, after this response is returned. "
                 "Dispatch is best-effort per run: a run whose dispatch fails "
-                "(e.g. the broker is unreachable) simply stays `Pending`. "
+                "(e.g. the broker is unreachable) stays `Pending` until the "
+                "reconciliation scan re-sends it. "
                 "Once picked up, the worker promotes each run to `Running`, "
                 "then a terminal outcome (`Green`, `Amber`, `Red`, or "
                 "`NotRan`)."
@@ -156,12 +225,13 @@ async def run_live_test_set_entries(
                 "have no effect, and an entry that has since been unlinked "
                 "from the set is still included, since its content stays "
                 "frozen either way, and each new run is dispatched for "
-                "execution. This endpoint does not call the model, score "
+                "execution. This endpoint doesn't call your application, score "
                 "anything, or write back results itself — every created "
                 "run's `status` is `Pending`, since the worker that does all "
                 "of that runs separately, after this response is returned. "
                 "Dispatch is best-effort per run: a run whose dispatch fails "
-                "(e.g. the broker is unreachable) simply stays `Pending`. "
+                "(e.g. the broker is unreachable) stays `Pending` until the "
+                "reconciliation scan re-sends it. "
                 "Once picked up, the worker promotes each run to `Running`, "
                 "then a terminal outcome (`Green`, `Amber`, `Red`, or "
                 "`NotRan`)."
@@ -257,8 +327,11 @@ async def replay_previous_test_set_execution(
     apples-to-apples comparison against a fixed historical scope (e.g. "did
     the model regress against exactly what was tested last time"), which a
     live re-run can't guarantee once the set's entries have changed.
+    An entry with no recorded answer asks the application under test again,
+    with the settings in effect now, so its answer — and score — can differ
+    from the original run's.
 
-    Three guards run before anything is created:
+    Four guards run before anything is created:
     - The test set must exist (404).
     - The referenced test set execution must exist (404).
     - That execution must belong to this test set (404) — prevents
@@ -480,53 +553,20 @@ async def get_test_set_execution_run_metadata(
                 "Full details for the run, including the snapshotted test set "
                 "entry it ran against and its post-execution results. `results`, "
                 "`error`, and `executed_at` are null until the run reaches a "
-                "terminal status (`Green`, `Amber`, `Red`, or `NotRan`) — this "
-                "example shows a run where every assigned test type passed."
+                "terminal status (`Green`, `Amber`, `Red`, or `NotRan`). The two "
+                "examples show a run scored from the entry's recorded answer, "
+                "and one scored from the application's reply, kept whole in "
+                "`application_reply`, where one check reads its own part of it "
+                "(`answer_path`)."
             ),
             "content": {
                 "application/json": {
-                    "example": {
-                        "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-                        "status": "Green",
-                        "created_at": "2026-07-15T16:44:30.163355",
-                        "test_set_entry_id": {
-                            "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
-                        },
-                        "test_set_execution_id": {
-                            "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12"
-                        },
-                        "results": {
-                            "Exact Match": {
-                                "passed": True, "score": None, "detail": None,
-                                "engine": "exact_match",
-                                "engine_settings": {"trim": True, "case_sensitive": True},
-                            },
-                            "BLEU": {
-                                "passed": True, "score": 42.0, "detail": None,
-                                "engine": "bleu", "engine_settings": {"smoothing": True},
-                            },
-                        },
-                        "error": None,
-                        "evaluated_output": "Go to Settings → Security and choose Reset password.",
-                        "output_source": "recorded",
-                        "executed_at": "2026-07-15T16:44:33.981022",
-                        "test_case_id": {
-                            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                        },
-                        "name": "greets the user by name",
-                        "input": "Say hello to Alice.",
-                        "expected_output": "Hello, Alice!",
-                        "model_output": "Hello, Alice!",
-                        "test_type_assignments": [
-                            {"name": "Exact Match", "config": None},
-                            {"name": "BLEU", "config": {"threshold": "0.6"}},
-                        ],
-                        "test_case_snapshot_at": {
-                            "snapshot_at": "2026-07-15T16:40:02.552210"
-                        },
-                        "test_set_id": {
-                            "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901"
-                        },
+                    "examples": {
+                        "recorded": {"summary": "The test's recorded answer was scored",
+                                     "value": _RUN_DETAIL_RECORDED},
+                        "application": {"summary": "Scored from the application's reply; one "
+                                                   "check reads its own part of it",
+                                        "value": _RUN_DETAIL_FROM_APPLICATION},
                     }
                 }
             },
@@ -617,6 +657,18 @@ async def get_test_set_execution_run_details(
     (`Green`, `Amber`, `Red`, or `NotRan`), and `results`/`error` are
     mutually exclusive even then: `error` is only ever set for `NotRan`,
     `results` for the other three.
+
+    Also returns what was scored: `evaluated_output`, the answer every check
+    reads by default — the test's recorded `model_output`, or, when it has
+    none, the application's answer at the settings' output path (JSON text
+    for a structured answer, `""` when the application answered with
+    nothing) — and `output_source` (`recorded` / `application`). When the
+    answer came from the application, `application_reply` holds its whole
+    reply, and a check whose assignment set an `answer_path` read that part
+    of it instead; each result records the `answer_path` it read (null: the
+    default answer). All three are null until a terminal status and for
+    `NotRan`.
+
     Also returns the snapshotted test set entry the run executed against —
     `test_case_id` (the live test it was originally snapshotted from),
     `name`, `input`, `expected_output`, `model_output`, `test_type_assignments`,

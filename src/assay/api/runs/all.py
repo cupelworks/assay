@@ -144,12 +144,11 @@ async def get_all_run_metadata(
     Pass `status` to restrict the feed to one status at a time (`Pending`,
     `Running`, `Green`, `Amber`, `Red`, or `NotRan`) — both `total` and the
     returned page are scoped to it. Omit it to see every run regardless of
-    status, the endpoint's original behavior.
+    status.
 
     Pass `origin` to restrict the feed to one origin at a time (`Standalone`,
-    `TestSet`, or `TestPlan`) the same way — an IS NOT NULL check on
-    whichever FK column that origin implies, no join needed. Combines with
-    `status`: passing both filters on their intersection.
+    `TestSet`, or `TestPlan`) the same way. Combines with `status`: passing
+    both filters on their intersection.
     """
     return await get_run_metadata_all_runs(session, offset, limit, status, origin)
 

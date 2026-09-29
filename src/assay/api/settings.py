@@ -210,7 +210,9 @@ async def post_target_check(
             "description": (
                 "The check as far as it has got. Poll until `status` is `completed`, "
                 "then `ok` says whether a usable answer came back: `answer` holds it, "
-                "or `error` says why not (the same reason a run would get). "
+                "or `error` says why not — the reason a run would get for a failed "
+                "call, or that the answer was empty, which a run scores but a check "
+                "reports. "
                 "`status_code` and `latency_ms` are set whenever a response came back."
             ),
             "content": {

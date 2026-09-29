@@ -84,7 +84,7 @@ class DataSetRowSchema(BaseModel):
     )
     model_output: str = Field(
         ...,
-        description="The answer of the model.",
+        description="The answer your application gave for this prompt.",
     )
 
 

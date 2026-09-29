@@ -21,6 +21,65 @@ router = APIRouter(tags=["run (standalone)"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+_RUN_DETAIL_RECORDED = {
+    "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+    "status": "Green",
+    "created_at": "2026-07-14T18:03:21.123456",
+    "test_case_id": {
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    },
+    "results": {
+        "Exact Match": {
+            "passed": True, "score": None, "detail": None,
+            "engine": "exact_match",
+            "engine_settings": {"trim": True, "case_sensitive": True},
+        },
+        "BLEU": {
+            "passed": True, "score": 42.0, "detail": None,
+            "engine": "bleu", "engine_settings": {"smoothing": True},
+        },
+    },
+    "error": None,
+    "evaluated_output": "Go to Settings → Security and choose Reset password.",
+    "output_source": "recorded",
+    "executed_at": "2026-07-14T18:03:24.981022",
+    "name": "greets the user by name",
+    "input": "Say hello to Alice.",
+    "expected_output": "Hello, Alice!",
+    "model_output": "Hello, Alice!",
+    "test_type_assignments": [
+        {"name": "Exact Match", "config": None},
+        {"name": "BLEU", "config": {"threshold": "0.4"}},
+    ],
+    "test_case_snapshot_at": {
+        "snapshot_at": "2026-07-14T18:03:21.123456"
+    },
+}
+
+# The same run, answered by the application under test: the whole reply is
+# kept, and the BLEU check reads its own part of it (answer_path).
+_RUN_DETAIL_FROM_APPLICATION = {
+    **_RUN_DETAIL_RECORDED,
+    "results": {
+        **_RUN_DETAIL_RECORDED["results"],
+        "BLEU": {**_RUN_DETAIL_RECORDED["results"]["BLEU"], "answer_path": "$.output.greeting"},
+    },
+    "evaluated_output": '{"greeting": "Hello, Alice!"}',
+    "output_source": "application",
+    "application_reply": {
+        "output": {"greeting": "Hello, Alice!"},
+        "model": "claude-sonnet-5",
+        "stop_reason": "end_turn",
+        "input_tokens": 812,
+        "output_tokens": 64,
+    },
+    "model_output": None,
+    "test_type_assignments": [
+        {"name": "Exact Match", "config": None},
+        {"name": "BLEU", "config": {"threshold": "0.4"}, "answer_path": "$.output.greeting"},
+    ],
+}
+
 @router.post(
     path="/runs/standalone/{test_id}",
     responses={
@@ -30,13 +89,14 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                 "execution. The run keeps its own copy of the test as it is "
                 "right now (see the run's detail), so editing the test later "
                 "never changes what this run was judged against. This "
-                "endpoint does not call the model, score "
+                "endpoint doesn't call your application, score "
                 "anything, or write back results itself — `status` is always "
                 "`Pending` in the response, since the worker that does all of "
                 "that runs separately, after this response is returned. "
                 "Dispatch is best-effort: if it fails (e.g. the broker is "
-                "unreachable), the run simply stays `Pending`. Once picked up, "
-                "the worker promotes it to `Running`, then a terminal outcome "
+                "unreachable), the run stays `Pending` until the "
+                "reconciliation scan re-sends it. Once picked up, the worker "
+                "promotes it to `Running`, then a terminal outcome "
                 "(`Green`, `Amber`, `Red`, or `NotRan`)."
             ),
             "content": {
@@ -202,44 +262,19 @@ async def get_standalone_run_metadata(
                 "edits to the live test never change what this shows. "
                 "`results`, `error`, and `executed_at` are null until the "
                 "run reaches a terminal status (`Green`, `Amber`, `Red`, or "
-                "`NotRan`) — this example shows a run where every assigned "
-                "test type passed."
+                "`NotRan`). The two examples show a run scored from the "
+                "test's recorded answer, and one scored from the "
+                "application's reply, kept whole in `application_reply`, "
+                "where one check reads its own part of it (`answer_path`)."
             ),
             "content": {
                 "application/json": {
-                    "example": {
-                        "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-                        "status": "Green",
-                        "created_at": "2026-07-14T18:03:21.123456",
-                        "test_case_id": {
-                            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                        },
-                        "results": {
-                            "Exact Match": {
-                                "passed": True, "score": None, "detail": None,
-                                "engine": "exact_match",
-                                "engine_settings": {"trim": True, "case_sensitive": True},
-                            },
-                            "BLEU": {
-                                "passed": True, "score": 42.0, "detail": None,
-                                "engine": "bleu", "engine_settings": {"smoothing": True},
-                            },
-                        },
-                        "error": None,
-                        "evaluated_output": "Go to Settings → Security and choose Reset password.",
-                        "output_source": "recorded",
-                        "executed_at": "2026-07-14T18:03:24.981022",
-                        "name": "greets the user by name",
-                        "input": "Say hello to Alice.",
-                        "expected_output": "Hello, Alice!",
-                        "model_output": "Hello, Alice!",
-                        "test_type_assignments": [
-                            {"name": "Exact Match", "config": None},
-                            {"name": "BLEU", "config": {"threshold": "0.4"}},
-                        ],
-                        "test_case_snapshot_at": {
-                            "snapshot_at": "2026-07-14T18:03:21.123456"
-                        },
+                    "examples": {
+                        "recorded": {"summary": "The test's recorded answer was scored",
+                                     "value": _RUN_DETAIL_RECORDED},
+                        "application": {"summary": "Scored from the application's reply; one "
+                                                   "check reads its own part of it",
+                                        "value": _RUN_DETAIL_FROM_APPLICATION},
                     }
                 }
             },
@@ -305,6 +340,17 @@ async def get_standalone_run_details(
     until the run reaches a terminal status (`Green`, `Amber`, `Red`, or
     `NotRan`), and `results`/`error` are mutually exclusive even then:
     `error` is only ever set for `NotRan`, `results` for the other three.
+
+    Also returns what was scored: `evaluated_output`, the answer every check
+    reads by default — the test's recorded `model_output`, or, when it has
+    none, the application's answer at the settings' output path (JSON text
+    for a structured answer, `""` when the application answered with
+    nothing) — and `output_source` (`recorded` / `application`). When the
+    answer came from the application, `application_reply` holds its whole
+    reply, and a check whose assignment set an `answer_path` read that part
+    of it instead; each result records the `answer_path` it read (null: the
+    default answer). All three are null until a terminal status and for
+    `NotRan`.
 
     Also returns the frozen copy of the test taken when the run was created
     — `name`, `input`, `expected_output`, `model_output`,

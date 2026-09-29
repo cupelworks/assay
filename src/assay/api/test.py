@@ -363,7 +363,8 @@ async def get_test_types(
             "description": (
                 "Validation error — either an unknown field was sent in the request body, "
                 "one or more test type names are not in the catalogue, an assignment "
-                "is missing a required config field, or a reference-required type "
+                "is missing a required config field, a `json`/`jsonpath` value "
+                "or an `answer_path` doesn't parse, or a reference-required type "
                 "(e.g. Exact Match, ROUGE) is left with no `expected_output` once this "
                 "update is applied — considering both the request and whatever the test "
                 "case already had for any field this request doesn't touch."
@@ -386,6 +387,15 @@ async def get_test_types(
                         "unknown_test_type": {
                             "summary": "Unknown test type name",
                             "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "unparseable_value": {
+                            "summary": "A json/jsonpath value or an answer_path that doesn't parse",
+                            "value": {"detail": (
+                                "'JSON Field Equals' config field 'value' is not valid JSON: "
+                                "Expecting value: line 1 column 1 (char 0); 'Contains' "
+                                "answer_path is not a valid JSONPath: Parse error near the "
+                                "end of string!"
+                            )},
                         },
                         "missing_expected_output": {
                             "summary": "Reference-required type with no expected_output",
@@ -429,7 +439,8 @@ async def update_test(
 
     Returns a 404 if no test case with the given ID exists.
     Returns a 422 if any unknown field is sent, if any test type name is not in the
-    catalogue, or if — considering the effective state after this update — a type
+    catalogue, if a `json`/`jsonpath` config value or an assignment's `answer_path`
+    doesn't parse, or if — considering the effective state after this update — a type
     requiring a reference is assigned while `expected_output` is empty.
     """
     return await modify_test_by_id(test_case_id, request, session)
@@ -550,7 +561,9 @@ async def get_all_tests(
         },
         422: {
             "description": "One or more test type names are not in the catalogue, "
-                           "an assignment is missing a required config field, or a "
+                           "an assignment is missing a required config field, a "
+                           "`json`/`jsonpath` value or an `answer_path` doesn't "
+                           "parse, or a "
                            "type requiring a reference (e.g. Exact Match, ROUGE) is "
                            "assigned while `expected_output` is empty.",
             "content": {
@@ -559,6 +572,15 @@ async def get_all_tests(
                         "unknown_test_type": {
                             "summary": "Unknown test type name",
                             "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "unparseable_value": {
+                            "summary": "A json/jsonpath value or an answer_path that doesn't parse",
+                            "value": {"detail": (
+                                "'JSON Field Equals' config field 'value' is not valid JSON: "
+                                "Expecting value: line 1 column 1 (char 0); 'Contains' "
+                                "answer_path is not a valid JSONPath: Parse error near the "
+                                "end of string!"
+                            )},
                         },
                         "missing_expected_output": {
                             "summary": "Reference-required type with no expected_output",
@@ -585,15 +607,23 @@ async def create_test_manually(
     The test is immediately available for standalone execution or inclusion in a test set.
 
     `name` defaults to a fresh UUID if omitted.
-    `expected_output` is required by test types that compare against a reference (e.g. NLP metrics,
-    LLM-as-judge). Leave it `null` for deterministic checks that do not need one.
-    `model_output` can be pre-populated if the model response is already known;
-    otherwise leave it `null` and it will be filled in when the test is run.
+    `expected_output` is what the answer should be. It's required by the test types that
+    compare against it — those with a `reference` field in `config_fields`, e.g. Exact
+    Match, ROUGE, Correctness — and can be left `null` when none is assigned.
+    `model_output` is the answer your application gave, if you recorded it: runs then score
+    it as it is. Leave it `null` to have every run ask the application under test for the
+    answer instead; the answer a run scored is recorded on the run (`evaluated_output`),
+    never written back to the test.
     `test_type_assignments` is an optional list of evaluation strategies to assign, each with
     any config it needs. Each name must exist in the test types catalogue and satisfy that
     type's required config fields — a 422 is returned otherwise. A type with a required
     reference field (e.g. Exact Match, ROUGE) also requires a non-empty `expected_output`
     on this same request — a 422 is returned if one isn't provided.
+    Each assignment can also set `answer_path` — a JSONPath naming the part of the
+    application's reply that check reads instead of the default answer, e.g.
+    `$.stop_reason` (or, on a recorded answer that is JSON, the part of it). Leave it out
+    for almost every check. A `json`/`jsonpath` config value and an `answer_path` must
+    parse — a 422 otherwise.
 
     On success, returns the created test case with its generated `id` and all input fields.
     """
@@ -647,7 +677,9 @@ async def create_test_manually(
         },
         422: {
             "description": "One or more test type names are not in the catalogue, "
-                           "an assignment is missing a required config field, or a "
+                           "an assignment is missing a required config field, a "
+                           "`json`/`jsonpath` value or an `answer_path` doesn't "
+                           "parse, or a "
                            "type requiring a reference (e.g. Exact Match, ROUGE) is "
                            "assigned while one or more dataset rows have an empty "
                            "`expected_output`.",
@@ -657,6 +689,15 @@ async def create_test_manually(
                         "unknown_test_type": {
                             "summary": "Unknown test type name",
                             "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "unparseable_value": {
+                            "summary": "A json/jsonpath value or an answer_path that doesn't parse",
+                            "value": {"detail": (
+                                "'JSON Field Equals' config field 'value' is not valid JSON: "
+                                "Expecting value: line 1 column 1 (char 0); 'Contains' "
+                                "answer_path is not a valid JSONPath: Parse error near the "
+                                "end of string!"
+                            )},
                         },
                         "missing_expected_output": {
                             "summary": "Reference-required type with rows missing expected_output",
@@ -693,6 +734,11 @@ async def create_test_from_dataset(
     reference field (e.g. Exact Match, ROUGE) also requires every row in the dataset to
     already have a non-empty `expected_output` — a 422 is returned listing every row that
     doesn't, all-or-nothing.
+    Each assignment can also set `answer_path` — a JSONPath naming the part of the
+    application's reply that check reads instead of the default answer, e.g.
+    `$.stop_reason` (or, on a recorded answer that is JSON, the part of it). Leave it out
+    for almost every check. A `json`/`jsonpath` config value and an `answer_path` must
+    parse — a 422 otherwise.
 
     Returns a 404 if the dataset does not exist or has no rows.
 
@@ -759,7 +805,8 @@ async def delete_test(
 
     Returns a 409 if any test cannot be safely deleted:
     - if the test is included in a test set, it must be unlinked from the set first.
-    - if the test has past execution records (test runs), those must be deleted first.
+    - if the test has been run (standalone runs), it's kept: its runs record what they
+      scored and refer back to it.
     """
     await delete_test_by_id(request, session)
     return {}

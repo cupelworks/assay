@@ -421,7 +421,8 @@ async def delete_a_test_set(
         422: {
             "description": (
                 "One or more test type names are not in the catalogue, an assignment "
-                "is missing a required config field, or a reference-required type "
+                "is missing a required config field, a `json`/`jsonpath` value "
+                "or an `answer_path` doesn't parse, or a reference-required type "
                 "(e.g. Exact Match, ROUGE) is left with no `expected_output` once this "
                 "update is applied — considering both the request and whatever the "
                 "entry already had for any field this request doesn't touch."
@@ -432,6 +433,15 @@ async def delete_a_test_set(
                         "unknown_test_type": {
                             "summary": "Unknown test type name",
                             "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "unparseable_value": {
+                            "summary": "A json/jsonpath value or an answer_path that doesn't parse",
+                            "value": {"detail": (
+                                "'JSON Field Equals' config field 'value' is not valid JSON: "
+                                "Expecting value: line 1 column 1 (char 0); 'Contains' "
+                                "answer_path is not a valid JSONPath: Parse error near the "
+                                "end of string!"
+                            )},
                         },
                         "missing_expected_output": {
                             "summary": "Reference-required type with no expected_output",
@@ -477,7 +487,9 @@ async def update_a_test_set_entry(
     is returned otherwise. Considering the effective state after this update, a type
     requiring a reference (e.g. Exact Match, ROUGE) also requires a non-empty
     `expected_output` — a 422 is returned if that's not the case, even if this
-    particular request doesn't touch either field directly.
+    particular request doesn't touch either field directly. An assignment's optional
+    `answer_path` (the part of the application's reply that check reads) and any
+    `json`/`jsonpath` config value must parse — a 422 otherwise.
 
     Returns the full updated entry, so no follow-up GET is needed.
     """

@@ -106,8 +106,9 @@ class TestTypeResult(BaseModel):
     passed: bool = Field(
         ...,
         description=(
-            'Whether this test type\'s own pass criterion was met — a match for '
-            'an exact/regex/substring engine, `score` against the assignment\'s '
+            'Whether this test type\'s own pass criterion was met — the check\'s '
+            'own rule for a deterministic engine (a match, a substring, a '
+            'pattern, valid JSON, a length limit), `score` against the assignment\'s '
             '`threshold` (in the direction of the type\'s `comparison`) for a '
             'metric engine, or the judge\'s own verdict for an LLM-judge engine. '
             'Always present; every test type must resolve to a boolean, '
@@ -121,8 +122,9 @@ class TestTypeResult(BaseModel):
             'type\'s `threshold` bounds in `GET /tests/types`) — set exactly '
             'when the type measures something on a scale: always for a metric '
             'type (ROUGE, BLEU, …), sometimes for an LLM judge that returns a '
-            'rating. Only comparable within one type. Null for a deterministic '
-            'type (Exact Match, Contains, Regex Match — pass/fail by nature, '
+            'rating. Only comparable within one type. Null for every '
+            'deterministic type (Exact Match, Contains, Regex Match, the JSON '
+            'checks, the length limits and their variants — pass/fail by nature, '
             '`passed` is the whole result), for a judge verdict with no '
             'numeric rating, and when this type failed to evaluate at all (see '
             '`detail`).'
@@ -192,7 +194,10 @@ class RunError(BaseModel):
         ...,
         description=(
             'Error message describing why the run could not be executed at '
-            'all — the model couldn\'t be called, the entry couldn\'t be read. '
+            'all — the application under test couldn\'t be reached, failed, '
+            'or had nothing at the output path; the saved settings are '
+            'invalid; the entry couldn\'t be read. An application that answers '
+            'with nothing is not an error: that empty answer is scored. '
             'Populated only when the run reaches `NotRan`; mutually exclusive '
             'with `results`, which stays null in that case. Never set for an '
             'individual test type failing its own pass criterion — that shows '
@@ -206,11 +211,14 @@ class RunEvaluatedOutput(BaseModel):
     evaluated_output: str | None = Field(
         ...,
         description=(
-            'The answer this run actually scored — what every entry in `results` '
-            'describes. Set once the run reaches `Green`, `Amber` or `Red`, '
-            'whether the answer was the test\'s recorded `model_output` (copied '
-            'here, so the results always sit next to the exact text they judged) '
-            'or was obtained from the application under test during the run. '
+            'The answer this run scored — what every check in `results` reads, '
+            'unless its own `answer_path` pointed it at another part of '
+            '`application_reply`. Set once the run reaches `Green`, `Amber` or '
+            '`Red`, whether the answer was the test\'s recorded `model_output` '
+            '(copied here, so the results always sit next to the exact text they '
+            'judged) or was obtained from the application under test during the '
+            'run: the value at the settings\' output path, as JSON text when it\'s '
+            'structured, `""` when the application answered with nothing. '
             'Null while `Pending`/`Running`, for `NotRan`, and on runs executed '
             'before this field existed.'
         ),
@@ -220,8 +228,9 @@ class RunEvaluatedOutput(BaseModel):
         description=(
             'Where `evaluated_output` came from: `recorded` — the test already had '
             'a `model_output` and the run scored that; `application` — the test '
-            'had none, so the run called the application under test '
-            '(`ASSAY_TARGET_*` settings) and scored its reply, which is why two '
+            'had none, so the run called the application under test (with the '
+            'settings saved from the UI, else `ASSAY_TARGET_*`) and scored its '
+            'reply, which is why two '
             'runs of the same test can legitimately differ. Null whenever '
             '`evaluated_output` is.'
         ),
