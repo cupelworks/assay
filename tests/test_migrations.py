@@ -55,7 +55,8 @@ def _columns(db_path: Path) -> list[str]:
 def test_upgrade_seeds_an_engine_for_every_catalogue_row(scratch):
     config, db_path = scratch
 
-    command.upgrade(config, "head")
+    # the thirteen original rows, as this migration left them
+    command.upgrade(config, "b4e1c9d27a58")
 
     rows = _test_types(db_path)
     assert len(rows) == 13
@@ -239,3 +240,81 @@ def test_downgrading_both_removes_the_two_tables_only(scratch):
 
     assert not {"settings", "target_checks"} & _tables(db_path)
     assert {"evaluated_output", "output_source"} <= set(_run_columns(db_path))
+
+
+# --- dbc67550f049: deterministic variants ---
+
+_VARIANTS = {
+    "Exact Match (case-insensitive)": ("exact_match", {"trim": True, "case_sensitive": False},
+                                       "reference"),
+    "Exact Match (strict)": ("exact_match", {"trim": False, "case_sensitive": True},
+                             "reference"),
+    "Contains (case-insensitive)": ("contains", {"case_sensitive": False}, "substring"),
+    "Regex Full Match": ("regex", {"mode": "fullmatch", "timeout_seconds": 1}, "pattern"),
+    "Does Not Contain": ("contains", {"case_sensitive": True, "negate": True}, "substring"),
+    "Does Not Contain (case-insensitive)": ("contains",
+                                            {"case_sensitive": False, "negate": True},
+                                            "substring"),
+    "Regex Must Not Match": ("regex", {"mode": "search", "timeout_seconds": 1, "negate": True},
+                             "pattern"),
+}
+
+
+def test_upgrade_seeds_the_deterministic_variants_on_existing_engines(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    rows = _test_types(db_path)
+    assert len(rows) == 20
+    for name, (engine, engine_settings, field) in _VARIANTS.items():
+        row = rows[name]
+        assert (row["engine"], json.loads(row["engine_settings"])) == (engine,
+                                                                        engine_settings), name
+        assert (row["category"], row["cost"], row["comparison"]) == (
+            "deterministic", "very_fast", None), name
+        assert row["is_active"] == 1, name
+        assert [f["key"] for f in json.loads(row["config_fields"])] == [field], name
+
+
+def test_every_seeded_variant_scores_through_the_registry(scratch):
+    from assay.models import TestTypesModel
+    from assay.schemas import TestTypeAssignment
+    from assay.worker.evaluators import evaluate
+
+    config, db_path = scratch
+    command.upgrade(config, "head")
+    rows = _test_types(db_path)
+
+    def outcome(name, answer, reference="Paris", **config_values):
+        row = rows[name]
+        catalogue_row = TestTypesModel(name=name, engine=row["engine"],
+                                       engine_settings=json.loads(row["engine_settings"]),
+                                       comparison=None)
+        entry = type("Entry", (), {"input": "q", "expected_output": reference})()
+        return evaluate(TestTypeAssignment(name=name, config=config_values or None),
+                        catalogue_row, entry, answer).passed
+
+    assert outcome("Exact Match (case-insensitive)", " paris\n") is True
+    assert outcome("Exact Match (strict)", "Paris\n") is False
+    assert outcome("Contains (case-insensitive)", "the REFUND is on its way",
+                   substring="refund") is True
+    assert outcome("Regex Full Match", "2026-09-29", pattern=r"\d{4}-\d{2}-\d{2}") is True
+    assert outcome("Regex Full Match", "on 2026-09-29", pattern=r"\d{4}-\d{2}-\d{2}") is False
+    assert outcome("Does Not Contain", "As an AI, I can't", substring="As an AI") is False
+    assert outcome("Does Not Contain", "Here you go", substring="As an AI") is True
+    assert outcome("Does Not Contain (case-insensitive)", "as an ai, I can't",
+                   substring="As an AI") is False
+    assert outcome("Regex Must Not Match", "Card 4111 1111 1111 1111",
+                   pattern=r"\b(?:\d[ -]?){13,16}\b") is False
+
+
+def test_downgrade_removes_the_variants_only(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "5fd1796fb435")
+
+    rows = _test_types(db_path)
+    assert len(rows) == 13
+    assert not set(_VARIANTS) & set(rows)
