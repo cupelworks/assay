@@ -80,12 +80,13 @@ def test_upgrade_sets_comparison_only_on_threshold_scored_types(scratch):
     command.upgrade(config, "head")
 
     rows = _test_types(db_path)
-    threshold_scored = {"ROUGE", "BLEU", "METEOR", "BERTScore", "Cosine Similarity"}
+    # exactly the types that declare a threshold field have a comparison —
+    # the five original metrics and every row added on their engines since
+    threshold_scored = {name for name, row in rows.items() if _threshold_range(row)}
+    assert {"ROUGE", "BLEU", "METEOR", "BERTScore", "Cosine Similarity"} <= threshold_scored
     assert {name for name, row in rows.items() if row["comparison"] == "gte"} == threshold_scored
     assert all(row["comparison"] is None for name, row in rows.items()
                if name not in threshold_scored)
-    # the same set is exactly the set of types that declare a threshold field
-    assert {name for name, row in rows.items() if _threshold_range(row)} == threshold_scored
 
 
 def test_upgrade_moves_bleu_and_cosine_to_their_native_ranges_only(scratch):
@@ -469,7 +470,7 @@ _LENGTH_LIMITS = {"Word Count Limit": "words", "Character Count Limit": "charact
 def test_upgrade_seeds_the_length_limits_on_the_length_engine(scratch):
     config, db_path = scratch
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "fc7d91b00c18")
 
     rows = _test_types(db_path)
     assert len(rows) == 25
@@ -490,7 +491,7 @@ def test_every_length_limit_scores_through_the_registry(scratch):
     from assay.worker.evaluators import evaluate
 
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "fc7d91b00c18")
     rows = _test_types(db_path)
 
     def outcome(name, answer, **config_values):
@@ -510,7 +511,7 @@ def test_every_length_limit_scores_through_the_registry(scratch):
 
 def test_downgrade_removes_the_length_limits_only(scratch):
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "fc7d91b00c18")
 
     command.downgrade(config, "43a7467fc3bf")
 
@@ -529,7 +530,7 @@ def _fields(db_path: Path, name: str) -> dict[str, dict]:
 def test_upgrade_gives_the_json_fields_their_kinds_and_every_new_field_a_hint(scratch):
     config, db_path = scratch
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "812acbc349ad")
 
     schema = _fields(db_path, "Matches JSON Schema")["schema"]
     path, value = (_fields(db_path, "JSON Field Equals")[key] for key in ("path", "value"))
@@ -545,10 +546,80 @@ def test_upgrade_gives_the_json_fields_their_kinds_and_every_new_field_a_hint(sc
 
 def test_downgrade_restores_the_fields_as_seeded(scratch):
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "812acbc349ad")
 
     command.downgrade(config, "fc7d91b00c18")
 
     path = _fields(db_path, "JSON Field Equals")["path"]
     assert path == {"key": "path", "label": "JSONPath", "kind": "multiline", "required": True}
     assert "placeholder" not in _fields(db_path, "Word Count Limit")["max"]
+
+
+# --- 954995a8255b: ROUGE variants and threshold hints ---
+
+_ROUGE_VARIANTS = {
+    "ROUGE-1": ("rouge1", "f1"),
+    "ROUGE-2": ("rouge2", "f1"),
+    "ROUGE-L Recall": ("rougeL", "recall"),
+    "ROUGE-L Precision": ("rougeL", "precision"),
+}
+
+
+def test_upgrade_seeds_the_rouge_variants_with_their_threshold_hints(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    rows = _test_types(db_path)
+    assert len(rows) == 29
+    for name, (variant, measure) in _ROUGE_VARIANTS.items():
+        row = rows[name]
+        assert (row["engine"], json.loads(row["engine_settings"])) == (
+            "rouge", {"variant": variant, "measure": measure, "stemmer": True}), name
+        assert (row["category"], row["cost"], row["comparison"]) == (
+            "nlp_metric", "fast", "gte"), name
+        reference, threshold = json.loads(row["config_fields"])
+        assert reference["kind"] == "reference", name
+        assert (threshold["key"], threshold["min"], threshold["max"]) == ("threshold", 0.0, 1.0)
+        assert threshold["placeholder"] and threshold["hint"].startswith("0 to 1:"), name
+    assert _fields(db_path, "ROUGE")["threshold"]["placeholder"] == "0.5"
+    # the other metrics' thresholds are untouched
+    assert "hint" not in _fields(db_path, "BLEU")["threshold"]
+
+
+def test_every_rouge_variant_scores_through_the_registry(scratch):
+    from assay.models import Comparison, TestTypesModel
+    from assay.schemas import TestTypeAssignment
+    from assay.worker.evaluators import evaluate
+
+    config, db_path = scratch
+    command.upgrade(config, "head")
+    rows = _test_types(db_path)
+    reference = "Reset your password from Settings, then Security."
+    covers_and_adds = ("To reset your password, open Settings, go to Security, and choose "
+                       "Reset password. You'll get an email to confirm.")
+
+    def score(name):
+        row = rows[name]
+        catalogue_row = TestTypesModel(name=name, engine=row["engine"],
+                                       engine_settings=json.loads(row["engine_settings"]),
+                                       comparison=Comparison.gte)
+        entry = type("Entry", (), {"input": "q", "expected_output": reference})()
+        return evaluate(TestTypeAssignment(name=name, config={"threshold": "0"}),
+                        catalogue_row, entry, covers_and_adds).score
+
+    # an answer that covers everything and adds a lot: high recall, low precision
+    assert score("ROUGE-L Recall") == 0.7143
+    assert score("ROUGE-L Precision") == 0.25
+    assert score("ROUGE-1") > score("ROUGE-2")
+
+
+def test_downgrade_removes_the_variants_and_restores_rouges_threshold(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "812acbc349ad")
+
+    rows = _test_types(db_path)
+    assert not set(_ROUGE_VARIANTS) & set(rows)
+    assert "placeholder" not in _fields(db_path, "ROUGE")["threshold"]
