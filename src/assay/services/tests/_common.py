@@ -1,6 +1,8 @@
+import json
 import uuid
 
 from fastapi import HTTPException
+from jsonpath_ng import parse as parse_jsonpath
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -131,13 +133,15 @@ async def _find_test_by_id_or_404(
 async def _validate_test_type_assignments(
         session: AsyncSession,
         assignments: list[TestTypeAssignment]) -> None:
-    """Checks that every assigned test type exists in the catalogue and that
+    """Checks that every assigned test type exists in the catalogue, that
     each assignment supplies a value for every required config field its
-    type declares.
+    type declares, and that a value given for a `json` or `jsonpath` field
+    parses as one.
 
     A config_fields entry of kind "reference" is never checked here — it
     resolves from the test case's own expected_output, not from an
-    assignment's config.
+    assignment's config. Other kinds are free text the engine interprets
+    when a run executes, so a bad value there is that type's failure then.
 
     Args:
         session: Async SQLAlchemy session.
@@ -145,10 +149,11 @@ async def _validate_test_type_assignments(
             type's name and any per-field config values supplied for it.
 
     Raises:
-        HTTPException: 422 listing unknown test type names and/or
-            assignments missing a required (non-reference) config field,
-            if either problem is found. Both are reported together in one
-            exception rather than failing on whichever is found first.
+        HTTPException: 422 listing unknown test type names, assignments
+            missing a required (non-reference) config field, and values
+            that don't parse as their field's kind, if any is found. All
+            are reported together in one exception rather than failing on
+            whichever is found first.
     """
     requested_names = [assignment.name for assignment in assignments]
 
@@ -160,7 +165,7 @@ async def _validate_test_type_assignments(
 
     unknown_names = set(requested_names) - set(config_fields_by_name)
 
-    missing_required_fields = []
+    field_problems = []
     for assignment in assignments:
         config_fields = config_fields_by_name.get(assignment.name)
         if config_fields is None:
@@ -168,25 +173,49 @@ async def _validate_test_type_assignments(
 
         config = assignment.config or {}
         for field in config_fields:
-            if field["kind"] == ConfigFieldKind.reference or not field["required"]:
+            if field["kind"] == ConfigFieldKind.reference:
                 continue
-            if not config.get(field["key"]):
-                missing_required_fields.append(
-                    f"'{assignment.name}' is missing required config field '{field['key']}'"
+            value = config.get(field["key"])
+            if not value:
+                if field["required"]:
+                    field_problems.append(
+                        f"'{assignment.name}' is missing required config field '{field['key']}'"
+                    )
+                continue
+            reason = _unparseable_reason(field["kind"], value)
+            if reason:
+                field_problems.append(
+                    f"'{assignment.name}' config field '{field['key']}' {reason}"
                 )
 
-    if not unknown_names and not missing_required_fields:
+    if not unknown_names and not field_problems:
         return
 
     problems = []
     if unknown_names:
         problems.append(f"Unknown test types: {sorted(unknown_names)}")
-    problems.extend(missing_required_fields)
+    problems.extend(field_problems)
 
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail="; ".join(problems),
     )
+
+
+def _unparseable_reason(kind: str, value: str) -> str | None:
+    """Why value doesn't parse as its field's kind, or None when it does (or
+    the kind is free text)."""
+    if kind == ConfigFieldKind.json:
+        try:
+            json.loads(value)
+        except json.JSONDecodeError as exc:
+            return f"is not valid JSON: {exc}"
+    elif kind == ConfigFieldKind.jsonpath:
+        try:
+            parse_jsonpath(value)
+        except Exception as exc:  # jsonpath-ng's parser raises assorted exception types
+            return f"is not a valid JSONPath: {exc}"
+    return None
 
 
 async def _find_test_type_names_needing_reference(

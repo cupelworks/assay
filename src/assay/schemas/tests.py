@@ -130,7 +130,9 @@ class ConfigFieldDescriptor(BaseModel):
     kind: ConfigFieldKind = Field(
         description="What kind of value this field holds. `reference` is reserved — "
                     "it resolves to the test case's own expected_output rather than "
-                    "being stored per assignment."
+                    "being stored per assignment. `json` holds JSON text and "
+                    "`jsonpath` a JSONPath expression: both are checked when the type "
+                    "is assigned, and a value that doesn't parse is a 422."
     )
     required: bool = Field(
         description="Whether this field must be filled in when the type is assigned."
@@ -146,6 +148,16 @@ class ConfigFieldDescriptor(BaseModel):
         None,
         description="Maximum allowed value, for `kind: \"numeric\"` fields only. "
                     "Null for every other kind. Advisory only, same as `min`.",
+    )
+    placeholder: str | None = Field(
+        None,
+        description="An example value to show in the empty input, e.g. `$.status`. "
+                    "Null when the field has none.",
+    )
+    hint: str | None = Field(
+        None,
+        description="A one-line note on how to fill the field in, shown under it. "
+                    "Null when the field has none.",
     )
 
 

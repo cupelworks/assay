@@ -72,6 +72,37 @@ def test_correct_mapping_of_test_type_fields():
     # a non-numeric field's min/max must default to None, not 0
     assert returned.config_fields[0].min is None
     assert returned.config_fields[0].max is None
+    # a field stored without a placeholder or hint reads back with both null
+    assert (returned.config_fields[0].placeholder, returned.config_fields[0].hint) == (None, None)
+
+
+def test_json_kinds_placeholders_and_hints_round_trip():
+    mock_test_type = MagicMock()
+    mock_test_type.id = uuid.uuid4()
+    mock_test_type.name = "JSON Field Equals"
+    mock_test_type.category = TestTypes.deterministic
+    mock_test_type.created_at = datetime.now().astimezone()
+    mock_test_type.is_active = True
+    mock_test_type.cost = TestTypesCost.very_fast
+    mock_test_type.description = mock_test_type.best_for = mock_test_type.limitations = None
+    mock_test_type.config_fields = [
+        {"key": "path", "label": "JSONPath", "kind": "jsonpath", "required": True,
+         "placeholder": "$.status", "hint": "Where the value is."},
+        {"key": "value", "label": "Expected value (JSON)", "kind": "json", "required": True,
+         "placeholder": '"approved"', "hint": None},
+    ]
+    mock_test_type.engine = "json"
+    mock_test_type.engine_settings = {"check": "field", "strip_fences": True}
+    mock_test_type.comparison = None
+    session = AsyncMock()
+    session.scalars.return_value = [mock_test_type]
+
+    (returned,) = asyncio.run(get_test_types_by_category(TestTypes.deterministic, session))
+
+    path, value = returned.config_fields
+    assert (path.kind, path.placeholder, path.hint) == ("jsonpath", "$.status",
+                                                        "Where the value is.")
+    assert (value.kind, value.placeholder, value.hint) == ("json", '"approved"', None)
 
 
 def test_nullable_fields_pass_through_as_none():

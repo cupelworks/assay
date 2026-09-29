@@ -232,12 +232,92 @@ def test_validate_does_not_check_threshold_format():
         ])])
     )
 
-    # The API only checks presence, never format — a non-numeric
-    # string is the FE's problem to catch, not the API's.
+    # A numeric field is checked for presence only, never format — a
+    # non-numeric string is the FE's problem to catch, not the API's.
     asyncio.run(_validate_test_type_assignments(
         mock_session,
         [TestTypeAssignment(name="ROUGE", config={"threshold": "not a number"})],
     ))  # no raise
+
+
+# -- json / jsonpath fields: checked to parse on save --
+
+_JSON_FIELD_EQUALS = [
+    {"key": "path", "label": "JSONPath", "kind": "jsonpath", "required": True},
+    {"key": "value", "label": "Expected value (JSON)", "kind": "json", "required": True},
+]
+
+
+def _json_field_equals_session():
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row("JSON Field Equals", _JSON_FIELD_EQUALS)])
+    )
+    return session
+
+
+@pytest.mark.parametrize("value", ['"approved"', "42", "true", "null", '{"a": [1, 2]}'])
+def test_validate_passes_a_json_field_that_parses(value):
+    asyncio.run(_validate_test_type_assignments(
+        _json_field_equals_session(),
+        [TestTypeAssignment(name="JSON Field Equals",
+                            config={"path": "$.status", "value": value})],
+    ))  # no raise
+
+
+def test_validate_raises_for_a_json_field_that_does_not_parse():
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_validate_test_type_assignments(
+            _json_field_equals_session(),
+            [TestTypeAssignment(name="JSON Field Equals",
+                                config={"path": "$.status", "value": "approved"})],
+        ))
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == (
+        "'JSON Field Equals' config field 'value' is not valid JSON: "
+        "Expecting value: line 1 column 1 (char 0)"
+    )
+
+
+def test_validate_raises_for_a_jsonpath_field_that_does_not_parse():
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_validate_test_type_assignments(
+            _json_field_equals_session(),
+            [TestTypeAssignment(name="JSON Field Equals",
+                                config={"path": "$[", "value": '"approved"'})],
+        ))
+
+    assert exc.value.detail.startswith(
+        "'JSON Field Equals' config field 'path' is not a valid JSONPath: ")
+
+
+def test_validate_lists_every_problem_together():
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_validate_test_type_assignments(
+            _json_field_equals_session(),
+            [TestTypeAssignment(name="JSON Field Equals",
+                                config={"path": "$[", "value": "approved"})],
+        ))
+
+    problems = exc.value.detail.split("; ")
+    assert [p.split(" is not")[0] for p in problems] == [
+        "'JSON Field Equals' config field 'path'",
+        "'JSON Field Equals' config field 'value'",
+    ]
+
+
+def test_validate_checks_an_optional_json_field_only_when_given():
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[_catalogue_row(
+        "Optional JSON", [{"key": "extra", "label": "Extra", "kind": "json", "required": False}],
+    )]))
+
+    asyncio.run(_validate_test_type_assignments(
+        session, [TestTypeAssignment(name="Optional JSON")]))  # left out: no raise
+    with pytest.raises(HTTPException):
+        asyncio.run(_validate_test_type_assignments(
+            session, [TestTypeAssignment(name="Optional JSON", config={"extra": "{oops"})]))
 
 
 # -- _check_reference_required_types_have_expected_output_or_422 --

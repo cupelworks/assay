@@ -203,6 +203,12 @@ class ConfigFieldKind(StrEnum):
     multiline = "multiline"
     rubric = "rubric"
     numeric = "numeric"
+    # A JSON document or value, written as JSON text; checked to parse when
+    # the type is assigned.
+    json = "json"
+    # A JSONPath expression, e.g. $.status; checked to parse when the type is
+    # assigned.
+    jsonpath = "jsonpath"
 
 
 class TestTypesModel(Base):
