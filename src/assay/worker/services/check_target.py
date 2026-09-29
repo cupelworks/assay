@@ -61,7 +61,10 @@ def check_target(check_id: uuid.UUID, session: Session) -> None:
         _complete(check, ok=False, error=sentence(str(exc)), status_code=exc.status,
                   latency_ms=exc.latency_ms)
     else:
-        _complete(check, ok=True, answer=response.answer, status_code=response.status,
+        # A run scores an empty answer; a check reports it, since its question
+        # is whether these settings get a usable answer out of the application.
+        _complete(check, ok=not response.empty, answer=response.answer or None,
+                  error=response.empty, status_code=response.status,
                   latency_ms=response.latency_ms)
     session.commit()
 

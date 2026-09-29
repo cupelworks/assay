@@ -542,3 +542,53 @@ def test_an_evaluator_failure_is_a_warning_with_the_traceback_and_the_engine(cap
     )
     assert warning.exc_info[0] is RuntimeError
     assert (warning.test_type, warning.engine) == ("Toxicity", "llm_judge")
+
+
+# --- what the application answered ---
+
+
+def _application_run(reply):
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    resolved = (_recorded_entry(model_output=None),
+                [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+    return run_id, run, session, resolved
+
+
+def test_an_empty_answer_is_scored_not_dropped(caplog):
+    reply = TargetResponse(answer="", status=200, latency_ms=5.0, attempts=1,
+                           empty="The value at output path '$.output' is null")
+    run_id, run, session, resolved = _application_run(reply)
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
+            patch(_PATCH_GET_ANSWER, return_value=reply), \
+            patch(_PATCH_EVALUATE, side_effect=_fake_evaluate(set())) as evaluate, \
+            caplog.at_level(logging.WARNING, logger=_LOGGER):
+        execute_run(run_id, session)
+
+    evaluate.assert_called_once()
+    assert evaluate.call_args.args[3] == ""
+    assert run.status == TestStatus.red
+    assert (run.error, run.evaluated_output, run.output_source) == (
+        None, "", OutputSource.application)
+    (warning,) = [r for r in _records(caplog) if r.levelno == logging.WARNING]
+    assert warning.getMessage() == (
+        f"Run {run_id}: the application's answer is empty (The value at output path "
+        "'$.output' is null); scoring it as an empty answer"
+    )
+
+
+def test_a_structured_answer_is_scored_as_its_json_text():
+    reply = TargetResponse(answer='{"category": "fraud"}', status=200, latency_ms=5.0,
+                           attempts=1)
+    run_id, run, session, resolved = _application_run(reply)
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
+            patch(_PATCH_GET_ANSWER, return_value=reply), \
+            patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match"})) as evaluate:
+        execute_run(run_id, session)
+
+    assert evaluate.call_args.args[3] == '{"category": "fraud"}'
+    assert (run.status, run.evaluated_output) == (TestStatus.green, '{"category": "fraud"}')

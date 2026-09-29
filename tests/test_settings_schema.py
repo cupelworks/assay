@@ -92,6 +92,11 @@ def test_a_body_without_the_placeholder_is_refused(body):
 # --- output_path, timeout, retries ---
 
 
+@pytest.mark.parametrize("path", ["$", "$.output", "$.result.category", "$.items[0].sku"])
+def test_a_valid_jsonpath_is_accepted_including_the_root(path):
+    assert TargetSettings(output_path=path).output_path == path
+
+
 @pytest.mark.parametrize("path", ["$[", "foo bar", "$.a[?"])
 def test_an_invalid_jsonpath_is_refused(path):
     assert _problems(output_path=path)["output_path"].startswith("Not a valid JSONPath")

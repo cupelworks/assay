@@ -120,3 +120,16 @@ def test_a_failure_with_no_response_is_logged_as_such(caplog):
 
     (record,) = caplog.records
     assert record.getMessage() == f"Check {check.id} completed: failed (no response)"
+
+
+def test_an_empty_answer_fails_the_check_with_the_reason():
+    # a run scores an empty answer; a check says these settings got none
+    check = _check()
+    reply = TargetResponse(answer="", status=200, latency_ms=5.0, attempts=1,
+                           empty="The value at output path '$.output' is null")
+
+    with patch(_PATCH_GET_ANSWER, return_value=reply):
+        check_target(check.id, _claimed(check))
+
+    assert (check.ok, check.answer, check.status_code) == (False, None, 200)
+    assert check.error == "The value at output path '$.output' is null"

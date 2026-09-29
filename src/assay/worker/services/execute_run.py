@@ -80,7 +80,9 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     # environment - read per run so a change applies without restarting the
     # worker. A failed call, or saved settings that no longer validate, means
     # nothing can be evaluated - NotRan with the reason, evaluated_output
-    # left null.
+    # left null. An empty answer is not a failed call: the application
+    # answered with nothing (a refusal, a cut-off reply), and it's scored
+    # like any other answer, so it counts in the results.
     settings_source = None
     if entry.model_output is not None:
         answer, output_source = entry.model_output, OutputSource.recorded
@@ -90,7 +92,8 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
                 session.get(SettingsModel, SettingsSection.target)
             )
             settings_source = target_settings.source
-            answer = target.get_answer(entry.input, target_settings).answer
+            response = target.get_answer(entry.input, target_settings)
+            answer = response.answer
         except (target.TargetError, ValidationError) as exc:
             # target.py already logged a failing call itself
             reason = (
@@ -104,6 +107,11 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
             session.commit()
             return
         output_source = OutputSource.application
+        if response.empty:
+            logger.warning(
+                "Run %s: the application's answer is empty (%s); scoring it as an empty answer",
+                run_id, response.empty,
+            )
 
     # evaluators.evaluate() is expected to return a TestTypeResult - the
     # same schema the API reads results back as (schemas/runs.py), so both

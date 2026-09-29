@@ -122,18 +122,55 @@ def test_a_nested_output_path_finds_the_answer(configured):
     assert response.answer == "nested"
 
 
-@pytest.mark.parametrize("payload,expected", [
-    ({"answer": "x"}, "Nothing found at output path '\\$.output'"),
-    ({"output": None}, "is NoneType, not a text answer"),
-    ({"output": ""}, "is empty, not a text answer"),
-    ({"output": "   "}, "is empty, not a text answer"),
-    ({"output": 42}, "is int, not a text answer"),
-    ({"output": {"text": "x"}}, "is dict, not a text answer"),
+def test_nothing_at_the_path_is_a_failure_naming_the_path(configured):
+    with pytest.raises(TargetError, match="Nothing found at output path '\\$.output'"):
+        get_answer("q", SETTINGS, transport=_ok({"answer": "x"}))
+
+
+@pytest.mark.parametrize("value,answer", [
+    ({"category": "fraud", "urgency": "high"}, '{"category": "fraud", "urgency": "high"}'),
+    ([{"sku": "A1"}], '[{"sku": "A1"}]'),
+    (42, "42"),
+    (3.5, "3.5"),
+    (True, "true"),
+    ({"città": "Roma"}, '{"città": "Roma"}'),   # non-ASCII kept as it is
 ])
-def test_no_usable_answer_at_the_path_is_a_failure_naming_the_path(configured, payload,
-                                                                    expected):
-    with pytest.raises(TargetError, match=expected):
-        get_answer("q", SETTINGS, transport=_ok(payload))
+def test_a_structured_value_is_the_answer_as_json_text(configured, value, answer):
+    response = get_answer("q", SETTINGS, transport=_ok({"output": value}))
+
+    assert (response.answer, response.empty) == (answer, None)
+
+
+@pytest.mark.parametrize("reply,answer", [
+    ({"output": "Hi", "model": "m", "input_tokens": 12},
+     '{"output": "Hi", "model": "m", "input_tokens": 12}'),
+    ("Just a string", "Just a string"),
+    ([1, 2], "[1, 2]"),
+])
+def test_the_root_path_makes_the_whole_reply_the_answer(configured, reply, answer):
+    response = get_answer("q", _settings(output_path="$"),
+                          transport=_transport(lambda r: httpx.Response(200, json=reply)))
+
+    assert (response.answer, response.empty) == (answer, None)
+
+
+def test_a_path_into_a_structured_answer_reads_the_field(configured):
+    settings = _settings(output_path="$.output.category")
+
+    response = get_answer("q", settings, transport=_ok({"output": {"category": "fraud"}}))
+
+    assert response.answer == "fraud"
+
+
+@pytest.mark.parametrize("value,reason", [
+    (None, "The value at output path '$.output' is null"),
+    ("", "The value at output path '$.output' is empty"),
+    ("  \n", "The value at output path '$.output' is empty"),
+])
+def test_a_null_or_blank_value_is_an_empty_answer_with_the_reason(configured, value, reason):
+    response = get_answer("q", SETTINGS, transport=_ok({"output": value, "stop_reason": "x"}))
+
+    assert (response.answer, response.empty, response.status) == ("", reason, 200)
 
 
 def test_a_non_json_reply_is_a_failure(configured):

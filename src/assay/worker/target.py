@@ -14,8 +14,14 @@ passes the effective ones (saved from the UI, else the environment) and a
 check passes its own. Error messages therefore name the setting, not an
 ASSAY_TARGET_* variable, since the value may not have come from one.
 
-Everything that can go wrong is a TargetError with a reason; execute_run
-turns it into NotRan with that reason as the run's error. Retries cover
+The answer is the string at the output path, or the JSON text of a
+structured value there (an object, as structured outputs produce), so the
+JSON checks can parse it. A null or blank value is an empty answer, not an
+error: the application answered, with nothing in it — a refusal, a cut-off
+reply — and a run scores it like any other answer so it counts in the
+results. Everything else that can go wrong is a TargetError with a reason;
+execute_run turns it into NotRan with that reason as the run's error.
+Retries cover
 only failures that say "try again" (connection error, timeout, 5xx, 429),
 with exponential backoff, honouring Retry-After when the application sends
 one; any other 4xx is final on the first attempt, since a 400 or 401 won't
@@ -25,6 +31,7 @@ Nothing here logs the prompt or the answer - only status, latency and
 attempt counts. The per-call details belong in a per-run audit table once
 one exists; until then the log line is their home.
 """
+import json
 import logging
 import os
 import re
@@ -65,10 +72,16 @@ class TargetError(Exception):
 
 @dataclass(frozen=True)
 class TargetResponse:
+    """What the application answered. `answer` is the text scored: the string
+    at the output path, or the JSON text of a structured value there. When
+    the value is null or blank, `answer` is "" and `empty` says so — the
+    application answered, with nothing in it (a refusal, a cut-off reply),
+    which a run scores like any other answer."""
     answer: str
     status: int
     latency_ms: float
     attempts: int
+    empty: str | None = None
 
 
 def get_answer(
@@ -91,8 +104,9 @@ def get_answer(
     Raises:
         TargetError: no application configured, an unresolvable ${VAR} in a
             header, an invalid output path, a non-retryable HTTP error, the
-            retries exhausted, a non-JSON reply, or no usable answer at the
-            output path.
+            retries exhausted, a non-JSON reply, or nothing at the output
+            path. A null or blank value there is not an error: it comes back
+            as an empty answer, with the reason in `empty`.
     """
     if not settings.url:
         raise TargetError("No application configured: no URL is set")
@@ -119,15 +133,16 @@ def get_answer(
                 latency_ms = round((time.perf_counter() - started) * 1000, 1)
                 status = response.status_code
                 if 200 <= response.status_code < 300:
-                    answer = _extract_answer(response, output_path, settings.output_path,
-                                             latency_ms)
+                    answer, empty = _extract_answer(response, output_path, settings.output_path,
+                                                    latency_ms)
                     logger.info(
                         "Application answered HTTP %d in %.1f ms (attempt %d of %d)",
                         response.status_code, latency_ms, attempt, attempts,
                         extra={"status": response.status_code, "latency_ms": latency_ms,
                                "attempt": attempt, "attempts": attempts},
                     )
-                    return TargetResponse(answer, response.status_code, latency_ms, attempt)
+                    return TargetResponse(answer, response.status_code, latency_ms, attempt,
+                                          empty)
                 reason = f"Application answered HTTP {response.status_code}"
                 if response.status_code not in RETRYABLE_STATUSES:
                     logger.error("%s; not retried", reason,
@@ -184,7 +199,16 @@ def _compile_output_path(path: str):
 
 
 def _extract_answer(response: httpx.Response, output_path, path: str,
-                    latency_ms: float) -> str:
+                    latency_ms: float) -> tuple[str, str | None]:
+    """The answer at the output path, and why it's empty when it is.
+
+    A string is the answer as it is. A structured value — an object, an
+    array, a number, a boolean, as structured outputs produce — is the
+    answer as JSON text, so the JSON checks can parse it back. A null or
+    blank value is an empty answer, with the reason. A reply that isn't
+    JSON, or has nothing at the path, is a TargetError: that's the
+    application or the settings, not an answer.
+    """
     def fail(reason: str) -> TargetError:
         return TargetError(reason, status=response.status_code, latency_ms=latency_ms)
 
@@ -196,10 +220,13 @@ def _extract_answer(response: httpx.Response, output_path, path: str,
     if not matches:
         raise fail(f"Nothing found at output path {path!r} in the application's reply")
     value = matches[0].value
-    if not isinstance(value, str) or not value.strip():
-        kind = "empty" if isinstance(value, str) else type(value).__name__
-        raise fail(f"The value at output path {path!r} is {kind}, not a text answer")
-    return value
+    if value is None:
+        return "", f"The value at output path {path!r} is null"
+    if isinstance(value, str):
+        if not value.strip():
+            return "", f"The value at output path {path!r} is empty"
+        return value, None
+    return json.dumps(value, ensure_ascii=False), None
 
 
 def _backoff(attempt: int, retry_after: str | None) -> float:
