@@ -409,7 +409,7 @@ _JSON_CHECKS = {
 def test_upgrade_seeds_the_json_checks_on_the_json_engine(scratch):
     config, db_path = scratch
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "43a7467fc3bf")
 
     rows = _test_types(db_path)
     assert len(rows) == 23
@@ -428,7 +428,7 @@ def test_every_json_check_scores_through_the_registry(scratch):
     from assay.worker.evaluators import evaluate
 
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "43a7467fc3bf")
     rows = _test_types(db_path)
 
     def outcome(name, answer, **config_values):
@@ -452,10 +452,68 @@ def test_every_json_check_scores_through_the_registry(scratch):
 
 def test_downgrade_removes_the_json_checks_only(scratch):
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "43a7467fc3bf")
 
     command.downgrade(config, "5e3f74c874ae")
 
     rows = _test_types(db_path)
     assert len(rows) == 20
     assert not set(_JSON_CHECKS) & set(rows)
+
+
+# --- fc7d91b00c18: length limits ---
+
+_LENGTH_LIMITS = {"Word Count Limit": "words", "Character Count Limit": "characters"}
+
+
+def test_upgrade_seeds_the_length_limits_on_the_length_engine(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    rows = _test_types(db_path)
+    assert len(rows) == 25
+    for name, unit in _LENGTH_LIMITS.items():
+        row = rows[name]
+        assert (row["engine"], json.loads(row["engine_settings"])) == ("length", {"unit": unit})
+        assert (row["category"], row["cost"], row["comparison"]) == (
+            "deterministic", "very_fast", None)
+        fields = {f["key"]: f for f in json.loads(row["config_fields"])}
+        assert (fields["max"]["required"], fields["min"]["required"]) == (True, False)
+        assert all((f["kind"], f["min"], f["max"]) == ("numeric", 0.0, None)
+                   for f in fields.values())
+
+
+def test_every_length_limit_scores_through_the_registry(scratch):
+    from assay.models import TestTypesModel
+    from assay.schemas import TestTypeAssignment
+    from assay.worker.evaluators import evaluate
+
+    config, db_path = scratch
+    command.upgrade(config, "head")
+    rows = _test_types(db_path)
+
+    def outcome(name, answer, **config_values):
+        row = rows[name]
+        catalogue_row = TestTypesModel(name=name, engine=row["engine"],
+                                       engine_settings=json.loads(row["engine_settings"]),
+                                       comparison=None)
+        entry = type("Entry", (), {"input": "q", "expected_output": None})()
+        return evaluate(TestTypeAssignment(name=name, config=config_values),
+                        catalogue_row, entry, answer).passed
+
+    assert outcome("Word Count Limit", "one two three", max="3") is True
+    assert outcome("Word Count Limit", "one two three", max="5", min="4") is False
+    assert outcome("Character Count Limit", "x" * 160, max="160") is True
+    assert outcome("Character Count Limit", "x" * 161, max="160") is False
+
+
+def test_downgrade_removes_the_length_limits_only(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "43a7467fc3bf")
+
+    rows = _test_types(db_path)
+    assert len(rows) == 23
+    assert not set(_LENGTH_LIMITS) & set(rows)
