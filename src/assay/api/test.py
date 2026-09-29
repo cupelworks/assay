@@ -48,8 +48,9 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                     "id": "696bf21b-6263-4024-8182-ddaba33d5b30",
                                     "name": "ROUGE",
                                     "category": "nlp_metric",
-                                    "description": "Measures n-gram overlap between output "
-                                                   "and expected text.",
+                                    "description": "Measures the longest sequence of words "
+                                                   "the output shares with the expected "
+                                                   "text, in order (ROUGE-L F1).",
                                     "is_active": True,
                                     "created_at": "2026-05-27T19:36:01.272322",
                                     "best_for": "Summarization tasks.",

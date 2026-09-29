@@ -701,3 +701,28 @@ def test_downgrade_removes_both_columns(scratch):
 
     assert "answer_path" not in _assignment_columns(db_path)
     assert "application_reply" not in _run_columns(db_path)
+
+
+# --- 1d1fddd1a247: ROUGE's description ---
+
+
+def test_upgrade_describes_rouge_as_rouge_l_f1(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    assert _test_types(db_path)["ROUGE"]["description"] == (
+        "Measures the longest sequence of words the output shares with the expected text, "
+        "in order (ROUGE-L F1)."
+    )
+
+
+def test_downgrade_restores_rouges_old_description(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "5ff0acda2b2c")
+
+    assert _test_types(db_path)["ROUGE"]["description"] == (
+        "Measures n-gram overlap between output and expected text."
+    )
