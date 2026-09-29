@@ -32,6 +32,7 @@ dev = [
     "flower>=2.0",      # Web dashboard for Celery task/worker history — celery -A assay.worker flower
     "regex>=2024.0",    # The worker's Regex Match engine (see the worker extra) — the test suite
                         # imports the evaluator engines, so it needs it too
+    "jsonschema>=4.18", # Same reason: the worker's JSON checks
 ]
 anthropic = [
     "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)
@@ -45,6 +46,8 @@ worker = [
                              # for the stdlib `re` that supports a per-call timeout, so a
                              # catastrophically backtracking user pattern fails that one type
                              # instead of hanging a worker thread forever
+    "jsonschema>=4.18",      # The JSON checks' "Matches JSON Schema" (worker/evaluators/engines/
+                             # json_check.py) — any JSON Schema draft the schema declares
     "psycopg2-binary>=2.9",  # Sync PostgreSQL driver for assay.worker.db — the worker's tasks use a
                              # sync SQLAlchemy session (see docs/run_execution/dev_notes.md note 4),
                              # never asyncpg. Only needed against production Postgres; SQLite's sync

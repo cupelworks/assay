@@ -15,10 +15,10 @@ ENTRY = TestSetEntryModel(input="Summarise the article", expected_output="A shor
 
 
 def test_every_seeded_engine_name_is_registered():
-    # the nine names migration b4e1c9d27a58 seeds — a row naming anything
-    # else fails at run time, per type, with UnknownEngineError below
+    # every engine a catalogue row names — a row naming anything else fails
+    # at run time, per type, with UnknownEngineError below
     assert set(ENGINES) == {
-        "exact_match", "contains", "regex", "rouge", "bleu", "meteor",
+        "exact_match", "contains", "regex", "json", "rouge", "bleu", "meteor",
         "bertscore", "embedding_cosine", "llm_judge",
     }
     assert all(callable(engine) for engine in ENGINES.values())
