@@ -55,17 +55,12 @@ def passes(score: float, threshold: float, comparison: Comparison | None) -> boo
             )
 
 
-def against_threshold(
-        score: float,
-        evaluation: EvaluationInput,
-        context: str | None = None,
-) -> TestTypeResult:
+def against_threshold(score: float, evaluation: EvaluationInput) -> TestTypeResult:
     """The result of a scored type: its score, and whether it meets the
     assignment's threshold in the direction the catalogue row declares.
 
     The score is kept to four decimals. On a miss, detail says by how much
-    ("0.4123 is below the threshold 0.5"), followed by context when given —
-    related figures that help read the score, never the texts themselves.
+    ("0.4123 is below the threshold 0.5") and nothing else.
 
     Raises:
         ValueError: no threshold configured, a non-numeric one, or a row
@@ -76,7 +71,5 @@ def against_threshold(
     if passes(score, threshold, evaluation.comparison):
         return TestTypeResult(passed=True, score=score, detail=None)
     side = "below" if evaluation.comparison == Comparison.gte else "above"
-    detail = f"{score:g} is {side} the threshold {threshold:g}"
-    if context:
-        detail = f"{detail} ({context})"
-    return TestTypeResult(passed=False, score=score, detail=detail)
+    return TestTypeResult(passed=False, score=score,
+                          detail=f"{score:g} is {side} the threshold {threshold:g}")

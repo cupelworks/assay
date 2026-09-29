@@ -30,13 +30,11 @@ def test_an_identical_answer_scores_1():
     assert _evaluate(REFERENCE).score == 1.0
 
 
-def test_an_unrelated_answer_scores_low_and_fails_with_context():
+def test_an_unrelated_answer_scores_low_and_fails():
     result = _evaluate("The weather in Rome is sunny today.")
 
     assert result.passed is False
-    assert result.detail.startswith("0.")
-    assert result.detail.endswith("is below the threshold 0.5 (ROUGE-1 F1 0.19, "
-                                  "ROUGE-2 F1 0.00)")
+    assert result.detail == f"{result.score:g} is below the threshold 0.5"
 
 
 def test_an_empty_answer_scores_0():
@@ -46,12 +44,11 @@ def test_an_empty_answer_scores_0():
 # --- threshold ---
 
 
-def test_a_miss_says_by_how_much_and_adds_rouge_1_and_2():
+def test_a_miss_says_by_how_much_and_nothing_else():
     result = _evaluate(PARAPHRASE, threshold="0.7")
 
     assert result == TestTypeResult(
-        passed=False, score=0.6154,
-        detail="0.6154 is below the threshold 0.7 (ROUGE-1 F1 0.62, ROUGE-2 F1 0.33)",
+        passed=False, score=0.6154, detail="0.6154 is below the threshold 0.7",
     )
 
 
@@ -62,7 +59,7 @@ def test_equality_passes():
 def test_an_lte_row_passes_at_or_below_and_says_above_on_a_miss():
     assert _evaluate(PARAPHRASE, threshold="0.7", comparison=Comparison.lte).passed is True
     result = _evaluate(PARAPHRASE, threshold="0.5", comparison=Comparison.lte)
-    assert result.detail.startswith("0.6154 is above the threshold 0.5")
+    assert result.detail == "0.6154 is above the threshold 0.5"
 
 
 @pytest.mark.parametrize("threshold,message", [
@@ -89,11 +86,11 @@ def test_the_stemmer_matches_word_forms():
     assert without < _evaluate(PARAPHRASE).score
 
 
-def test_another_variant_scores_by_it_and_leaves_itself_out_of_the_context():
+def test_another_variant_scores_by_it():
     result = _evaluate(PARAPHRASE, settings={**DEFAULTS, "variant": "rouge2"})
 
     assert result.score == 0.3333
-    assert result.detail == "0.3333 is below the threshold 0.5 (ROUGE-1 F1 0.62)"
+    assert result.detail == "0.3333 is below the threshold 0.5"
 
 
 @pytest.mark.parametrize("measure,score", [("precision", 0.6667), ("recall", 0.5714)])

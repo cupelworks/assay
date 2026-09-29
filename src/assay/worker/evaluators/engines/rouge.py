@@ -9,9 +9,6 @@ reference) or `recall` (how much of the reference is in the answer);
 ROUGE's native 0–1 scale and passes against the assignment's `threshold`
 in the direction the row's `comparison` declares.
 
-On a miss, the detail adds ROUGE-1 and ROUGE-2 F1 for context: how many
-single words and word pairs the two texts share.
-
 The library's tokenizer keeps only the letters a–z and digits, lower-cased,
 so ROUGE is effectively English-only: "città" becomes "citt".
 """
@@ -22,7 +19,6 @@ from assay.worker.evaluators._common import against_threshold, require_reference
 
 _VARIANT = re.compile(r"^rouge(?:[1-9]|L|Lsum)$")
 _MEASURES = {"f1": "fmeasure", "precision": "precision", "recall": "recall"}
-_CONTEXT_VARIANTS = ("rouge1", "rouge2")
 
 
 def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
@@ -43,14 +39,7 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
             "(the rouge-score package)"
         ) from None
 
-    variants = [variant, *(v for v in _CONTEXT_VARIANTS if v != variant)]
     scores = rouge_scorer.RougeScorer(
-        variants, use_stemmer=settings.get("stemmer", True),
+        [variant], use_stemmer=settings.get("stemmer", True),
     ).score(reference, evaluation.answer)
-
-    context = ", ".join(
-        f"ROUGE-{v.removeprefix('rouge')} F1 {scores[v].fmeasure:.2f}"
-        for v in _CONTEXT_VARIANTS if v != variant
-    )
-    return against_threshold(getattr(scores[variant], _MEASURES[measure]), evaluation,
-                             context=context)
+    return against_threshold(getattr(scores[variant], _MEASURES[measure]), evaluation)
