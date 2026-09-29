@@ -18,7 +18,7 @@ def test_every_seeded_engine_name_is_registered():
     # every engine a catalogue row names — a row naming anything else fails
     # at run time, per type, with UnknownEngineError below
     assert set(ENGINES) == {
-        "exact_match", "contains", "regex", "json", "rouge", "bleu", "meteor",
+        "exact_match", "contains", "regex", "json", "length", "rouge", "bleu", "meteor",
         "bertscore", "embedding_cosine", "llm_judge",
     }
     assert all(callable(engine) for engine in ENGINES.values())
