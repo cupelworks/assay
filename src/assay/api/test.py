@@ -40,82 +40,193 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                            "ordered by name (descending).",
             "content": {
                 "application/json": {
-                    "example": [
-                        {
-                            "id": "696bf21b-6263-4024-8182-ddaba33d5b30",
-                            "name": "ROUGE",
-                            "category": "nlp_metric",
-                            "description": "Measures n-gram overlap between output "
-                                            "and expected text.",
-                            "is_active": True,
-                            "created_at": "2026-05-27T19:36:01.272322",
-                            "best_for": "Summarization tasks.",
-                            "cost": "fast",
-                            "limitations": "Doesn't account for semantic meaning; "
-                                           "penalizes valid paraphrases.",
-                            "config_fields": [
+                    "examples": {
+                        "nlp_metric": {
+                            "summary": "NLP metrics: a threshold with and without a hint",
+                            "value": [
                                 {
-                                    "key": "reference",
-                                    "label": "Reference text",
-                                    "kind": "reference",
-                                    "required": True,
-                                    "min": None,
-                                    "max": None,
+                                    "id": "696bf21b-6263-4024-8182-ddaba33d5b30",
+                                    "name": "ROUGE",
+                                    "category": "nlp_metric",
+                                    "description": "Measures n-gram overlap between output "
+                                                   "and expected text.",
+                                    "is_active": True,
+                                    "created_at": "2026-05-27T19:36:01.272322",
+                                    "best_for": "Summarization tasks.",
+                                    "cost": "fast",
+                                    "limitations": "Doesn't account for semantic meaning; "
+                                                   "penalizes valid paraphrases.",
+                                    "config_fields": [
+                                        {
+                                            "key": "reference",
+                                            "label": "Reference text",
+                                            "kind": "reference",
+                                            "required": True,
+                                            "min": None,
+                                            "max": None,
+                                            "placeholder": None,
+                                            "hint": None,
+                                        },
+                                        {
+                                            "key": "threshold",
+                                            "label": "Minimum score to pass",
+                                            "kind": "numeric",
+                                            "required": True,
+                                            "min": 0.0,
+                                            "max": 1.0,
+                                            "placeholder": "0.5",
+                                            "hint": "Shared wording, in order. A close "
+                                                    "paraphrase scores about 0.6, an "
+                                                    "unrelated answer about 0.2.",
+                                        },
+                                    ],
+                                    "engine": "rouge",
+                                    "engine_settings": {
+                                        "variant": "rougeL",
+                                        "measure": "f1",
+                                        "stemmer": True,
+                                    },
+                                    "comparison": "gte",
                                 },
                                 {
-                                    "key": "threshold",
-                                    "label": "Minimum score to pass",
-                                    "kind": "numeric",
-                                    "required": True,
-                                    "min": 0.0,
-                                    "max": 1.0,
+                                    "id": "ede3f4b9-1f31-4296-90ca-f34e6e3adb1f",
+                                    "name": "METEOR",
+                                    "category": "nlp_metric",
+                                    "description": "Measures alignment between output and "
+                                                   "reference, accounting for synonyms and "
+                                                   "stemming.",
+                                    "is_active": True,
+                                    "created_at": "2026-05-27T19:36:01.272322",
+                                    "best_for": "Tasks where paraphrasing and word "
+                                                "variations are common.",
+                                    "cost": "fast",
+                                    "limitations": "More complex to compute than "
+                                                   "BLEU/ROUGE; language support varies.",
+                                    "config_fields": [
+                                        {
+                                            "key": "reference",
+                                            "label": "Reference text",
+                                            "kind": "reference",
+                                            "required": True,
+                                            "min": None,
+                                            "max": None,
+                                            "placeholder": None,
+                                            "hint": None,
+                                        },
+                                        {
+                                            "key": "threshold",
+                                            "label": "Minimum score to pass",
+                                            "kind": "numeric",
+                                            "required": True,
+                                            "min": 0.0,
+                                            "max": 1.0,
+                                            "placeholder": None,
+                                            "hint": None,
+                                        },
+                                    ],
+                                    "engine": "meteor",
+                                    "engine_settings": {},
+                                    "comparison": "gte",
                                 },
                             ],
-                            "engine": "rouge",
-                            "engine_settings": {
-                                "variant": "rougeL",
-                                "measure": "f1",
-                                "stemmer": True,
-                            },
-                            "comparison": "gte",
                         },
-                        {
-                            "id": "ede3f4b9-1f31-4296-90ca-f34e6e3adb1f",
-                            "name": "METEOR",
-                            "category": "nlp_metric",
-                            "description": "Measures alignment between output and "
-                                            "reference, accounting for synonyms and "
-                                            "stemming.",
-                            "is_active": True,
-                            "created_at": "2026-05-27T19:36:01.272322",
-                            "best_for": "Tasks where paraphrasing and word variations "
-                                        "are common.",
-                            "cost": "fast",
-                            "limitations": "More complex to compute than BLEU/ROUGE; "
-                                           "language support varies.",
-                            "config_fields": [
+                        "deterministic": {
+                            "summary": "Deterministic checks: json/jsonpath fields, an "
+                                       "open-ended numeric bound",
+                            "value": [
                                 {
-                                    "key": "reference",
-                                    "label": "Reference text",
-                                    "kind": "reference",
-                                    "required": True,
-                                    "min": None,
-                                    "max": None,
+                                    "id": "6417a3dd-253e-482b-af8d-21672a5e925c",
+                                    "name": "Word Count Limit",
+                                    "category": "deterministic",
+                                    "description": "Checks that the output has at most a "
+                                                   "maximum number of words, and optionally "
+                                                   "at least a minimum.",
+                                    "is_active": True,
+                                    "created_at": "2026-09-29T21:50:26.040821",
+                                    "best_for": "Length requirements on prose: summaries, "
+                                                "descriptions, short answers that must "
+                                                "fit a card or a screen.",
+                                    "cost": "very_fast",
+                                    "limitations": "Words are whitespace-separated, so a "
+                                                   "hyphenated term or a number counts as "
+                                                   "one; says nothing about what the words "
+                                                   "say.",
+                                    "config_fields": [
+                                        {
+                                            "key": "max",
+                                            "label": "Maximum words",
+                                            "kind": "numeric",
+                                            "required": True,
+                                            "min": 0.0,
+                                            "max": None,
+                                            "placeholder": "100",
+                                            "hint": "A whole number; an answer of exactly "
+                                                    "this length meets it.",
+                                        },
+                                        {
+                                            "key": "min",
+                                            "label": "Minimum words",
+                                            "kind": "numeric",
+                                            "required": False,
+                                            "min": 0.0,
+                                            "max": None,
+                                            "placeholder": None,
+                                            "hint": "Optional. A whole number; leave it "
+                                                    "empty for no minimum.",
+                                        },
+                                    ],
+                                    "engine": "length",
+                                    "engine_settings": {"unit": "words"},
+                                    "comparison": None,
                                 },
                                 {
-                                    "key": "threshold",
-                                    "label": "Minimum score to pass",
-                                    "kind": "numeric",
-                                    "required": True,
-                                    "min": 0.0,
-                                    "max": 1.0,
+                                    "id": "f11d56e9-61a3-4d28-b64f-43d039332947",
+                                    "name": "JSON Field Equals",
+                                    "category": "deterministic",
+                                    "description": "Checks that the output is valid JSON "
+                                                   "with an expected value at a JSONPath, "
+                                                   "compared type for type.",
+                                    "is_active": True,
+                                    "created_at": "2026-09-29T21:44:14.362617",
+                                    "best_for": "One decisive field in a structured answer: "
+                                                "a status, a category, a flag, an amount.",
+                                    "cost": "very_fast",
+                                    "limitations": "Checks one value — the first match at "
+                                                   "the path; several fields need several "
+                                                   "checks or a schema.",
+                                    "config_fields": [
+                                        {
+                                            "key": "path",
+                                            "label": "JSONPath",
+                                            "kind": "jsonpath",
+                                            "required": True,
+                                            "min": None,
+                                            "max": None,
+                                            "placeholder": "$.status",
+                                            "hint": "Where the value is in the answer, "
+                                                    "e.g. $.items[0].sku.",
+                                        },
+                                        {
+                                            "key": "value",
+                                            "label": "Expected value (JSON)",
+                                            "kind": "json",
+                                            "required": True,
+                                            "min": None,
+                                            "max": None,
+                                            "placeholder": '"approved"',
+                                            "hint": 'A JSON value: strings in double '
+                                                    'quotes, e.g. "approved"; 42, true '
+                                                    'and null as they are.',
+                                        },
+                                    ],
+                                    "engine": "json",
+                                    "engine_settings": {"check": "field",
+                                                        "strip_fences": True},
+                                    "comparison": None,
                                 },
                             ],
-                            "engine": "meteor",
-                            "engine_settings": {},
-                            "comparison": "gte",
                         },
-                    ]
+                    }
                 }
             },
         },
@@ -173,7 +284,18 @@ async def get_test_types(
     type passes; null for types with no threshold). A `threshold` field's
     `min`/`max` are the type's own native score range, which differs per
     type (0–1 for ROUGE, 0–100 for BLEU, −1 to 1 for Cosine Similarity) —
-    bound the input from the descriptor, not a shared constant.
+    bound the input from the descriptor, not a shared constant; a `max` of
+    null means no upper bound (e.g. a word-count limit).
+
+    Each `config_fields` entry's `kind` says what the value is: `reference`
+    (read from the test's `expected_output`, never stored in `config`),
+    `multiline` or `rubric` (free text), `numeric`, `json` (JSON text) or
+    `jsonpath` (a JSONPath expression). A `json` or `jsonpath` value is
+    checked to parse when the type is assigned — a 422 otherwise. Every entry
+    also carries `placeholder` (an example value for the empty input) and
+    `hint` (a one-line note on what the value means and what to expect), both
+    null when the field has none; a hint never repeats the range or the pass
+    rule, which the descriptor and `comparison` already give.
 
     `comparison` is one of:
     - `gte` (greater than or equal) — **higher is better**: the check passes
