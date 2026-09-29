@@ -10,6 +10,7 @@ pointed at the scratch file — an environment variable set now would come
 too late to reach it.
 """
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -568,7 +569,7 @@ _ROUGE_VARIANTS = {
 def test_upgrade_seeds_the_rouge_variants_with_their_threshold_hints(scratch):
     config, db_path = scratch
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "954995a8255b")
 
     rows = _test_types(db_path)
     assert len(rows) == 29
@@ -593,7 +594,7 @@ def test_every_rouge_variant_scores_through_the_registry(scratch):
     from assay.worker.evaluators import evaluate
 
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "954995a8255b")
     rows = _test_types(db_path)
     reference = "Reset your password from Settings, then Security."
     covers_and_adds = ("To reset your password, open Settings, go to Security, and choose "
@@ -616,10 +617,56 @@ def test_every_rouge_variant_scores_through_the_registry(scratch):
 
 def test_downgrade_removes_the_variants_and_restores_rouges_threshold(scratch):
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "954995a8255b")
 
     command.downgrade(config, "812acbc349ad")
 
     rows = _test_types(db_path)
     assert not set(_ROUGE_VARIANTS) & set(rows)
     assert "placeholder" not in _fields(db_path, "ROUGE")["threshold"]
+
+
+# --- 1aac7a522b8c: hints without the range ---
+
+_RANGE_FIRST = re.compile(r"^-?\d+(\.\d+)? to -?\d+(\.\d+)?")
+
+
+def test_upgrade_starts_the_rouge_hints_at_the_explanation(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    assert _fields(db_path, "ROUGE-1")["threshold"]["hint"] == (
+        "Shared words, in any order. A close paraphrase scores about 0.6, an unrelated "
+        "answer about 0.2."
+    )
+    assert _fields(db_path, "ROUGE-L Recall")["threshold"]["hint"].startswith(
+        "How much of the expected text the answer covers.")
+
+
+def test_no_hint_restates_its_fields_range(scratch):
+    # the FE shows the range on the label, from min/max: a hint explains the
+    # value instead of repeating it
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    hints = {
+        (name, field["key"]): field["hint"]
+        for name, row in _test_types(db_path).items()
+        for field in json.loads(row["config_fields"]) if field.get("hint")
+    }
+    assert hints
+    assert not {where: hint for where, hint in hints.items() if _RANGE_FIRST.match(hint)}
+
+
+def test_downgrade_puts_the_range_back(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "954995a8255b")
+
+    assert _fields(db_path, "ROUGE-2")["threshold"]["hint"] == (
+        "0 to 1: shared word pairs, so lower than ROUGE-1. A close paraphrase scores about "
+        "0.3, an unrelated answer 0."
+    )
