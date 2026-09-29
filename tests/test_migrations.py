@@ -362,7 +362,7 @@ def _where_it_is_used(db_path: Path) -> tuple[list[str], list[str]]:
 def test_upgrade_renames_strict_with_clearer_texts_and_the_same_engine(scratch):
     config, db_path = scratch
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "5e3f74c874ae")
 
     rows = _test_types(db_path)
     assert _STRICT not in rows
@@ -378,14 +378,14 @@ def test_upgrade_moves_assignments_and_entry_copies_to_the_new_name(scratch):
     command.upgrade(config, "dbc67550f049")
     _assign_everywhere(db_path, _STRICT)
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "5e3f74c874ae")
 
     assert _where_it_is_used(db_path) == ([_WHITESPACE], [_WHITESPACE, "Contains"])
 
 
 def test_downgrade_restores_the_old_name_everywhere(scratch):
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "5e3f74c874ae")
     _assign_everywhere(db_path, _WHITESPACE)
 
     command.downgrade(config, "dbc67550f049")
@@ -395,3 +395,67 @@ def test_downgrade_restores_the_old_name_everywhere(scratch):
     assert rows[_STRICT]["description"].startswith("Checks if the output equals the expected "
                                                    "string character for character")
     assert _where_it_is_used(db_path) == ([_STRICT], [_STRICT, "Contains"])
+
+
+# --- 43a7467fc3bf: JSON checks ---
+
+_JSON_CHECKS = {
+    "Is Valid JSON": ("valid", []),
+    "Matches JSON Schema": ("schema", ["schema"]),
+    "JSON Field Equals": ("field", ["path", "value"]),
+}
+
+
+def test_upgrade_seeds_the_json_checks_on_the_json_engine(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    rows = _test_types(db_path)
+    assert len(rows) == 23
+    for name, (check, fields) in _JSON_CHECKS.items():
+        row = rows[name]
+        assert (row["engine"], json.loads(row["engine_settings"])) == (
+            "json", {"check": check, "strip_fences": True}), name
+        assert (row["category"], row["cost"], row["comparison"]) == (
+            "deterministic", "very_fast", None), name
+        assert [f["key"] for f in json.loads(row["config_fields"])] == fields, name
+
+
+def test_every_json_check_scores_through_the_registry(scratch):
+    from assay.models import TestTypesModel
+    from assay.schemas import TestTypeAssignment
+    from assay.worker.evaluators import evaluate
+
+    config, db_path = scratch
+    command.upgrade(config, "head")
+    rows = _test_types(db_path)
+
+    def outcome(name, answer, **config_values):
+        row = rows[name]
+        catalogue_row = TestTypesModel(name=name, engine=row["engine"],
+                                       engine_settings=json.loads(row["engine_settings"]),
+                                       comparison=None)
+        entry = type("Entry", (), {"input": "q", "expected_output": None})()
+        return evaluate(TestTypeAssignment(name=name, config=config_values or None),
+                        catalogue_row, entry, answer).passed
+
+    fenced = '```json\n{"status": "approved"}\n```'
+    schema = '{"type": "object", "required": ["status"]}'
+    assert outcome("Is Valid JSON", fenced) is True
+    assert outcome("Is Valid JSON", "not json") is False
+    assert outcome("Matches JSON Schema", fenced, schema=schema) is True
+    assert outcome("Matches JSON Schema", "{}", schema=schema) is False
+    assert outcome("JSON Field Equals", fenced, path="$.status", value='"approved"') is True
+    assert outcome("JSON Field Equals", fenced, path="$.status", value='"rejected"') is False
+
+
+def test_downgrade_removes_the_json_checks_only(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "5e3f74c874ae")
+
+    rows = _test_types(db_path)
+    assert len(rows) == 20
+    assert not set(_JSON_CHECKS) & set(rows)
