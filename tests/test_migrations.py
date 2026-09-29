@@ -263,7 +263,7 @@ _VARIANTS = {
 def test_upgrade_seeds_the_deterministic_variants_on_existing_engines(scratch):
     config, db_path = scratch
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "dbc67550f049")
 
     rows = _test_types(db_path)
     assert len(rows) == 20
@@ -283,7 +283,7 @@ def test_every_seeded_variant_scores_through_the_registry(scratch):
     from assay.worker.evaluators import evaluate
 
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "dbc67550f049")
     rows = _test_types(db_path)
 
     def outcome(name, answer, reference="Paris", **config_values):
@@ -311,10 +311,87 @@ def test_every_seeded_variant_scores_through_the_registry(scratch):
 
 def test_downgrade_removes_the_variants_only(scratch):
     config, db_path = scratch
-    command.upgrade(config, "head")
+    command.upgrade(config, "dbc67550f049")
 
     command.downgrade(config, "5fd1796fb435")
 
     rows = _test_types(db_path)
     assert len(rows) == 13
     assert not set(_VARIANTS) & set(rows)
+
+
+# --- 5e3f74c874ae: Exact Match (strict) renamed ---
+
+_STRICT = "Exact Match (strict)"
+_WHITESPACE = "Exact Match (whitespace-sensitive)"
+
+
+_TEST_ID, _ENTRY_ID = "a1" + "0" * 30, "e1" + "0" * 30
+
+
+def _assign_everywhere(db_path: Path, name: str) -> None:
+    """A test with the type assigned, and a test set entry whose copy lists it."""
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO tests (id, name, input, created_at) "
+            "VALUES (?, 'Uses it', 'q', '2026-01-01')",
+            (_TEST_ID,),
+        )
+        connection.execute(
+            "INSERT INTO test_type_assignments (test_id, test_type_name) VALUES (?, ?)",
+            (_TEST_ID, name),
+        )
+        connection.execute(
+            "INSERT INTO test_set_entries (id, test_id, input, snapshot_at, name, "
+            "test_type_assignments) VALUES (?, ?, 'q', '2026-01-01', 'Uses it', ?)",
+            (_ENTRY_ID, _TEST_ID, json.dumps([{"name": name, "config": None},
+                                              {"name": "Contains",
+                                               "config": {"substring": "x"}}])),
+        )
+
+
+def _where_it_is_used(db_path: Path) -> tuple[list[str], list[str]]:
+    with sqlite3.connect(db_path) as connection:
+        assigned = [r[0] for r in connection.execute(
+            "SELECT test_type_name FROM test_type_assignments")]
+        (copy,) = connection.execute(
+            "SELECT test_type_assignments FROM test_set_entries").fetchone()
+    return assigned, [item["name"] for item in json.loads(copy)]
+
+
+def test_upgrade_renames_strict_with_clearer_texts_and_the_same_engine(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    rows = _test_types(db_path)
+    assert _STRICT not in rows
+    renamed = rows[_WHITESPACE]
+    assert (renamed["engine"], json.loads(renamed["engine_settings"])) == (
+        "exact_match", {"trim": False, "case_sensitive": True})
+    assert "spaces, tabs or newlines at the start or end" in renamed["description"]
+    assert len(rows) == 20
+
+
+def test_upgrade_moves_assignments_and_entry_copies_to_the_new_name(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "dbc67550f049")
+    _assign_everywhere(db_path, _STRICT)
+
+    command.upgrade(config, "head")
+
+    assert _where_it_is_used(db_path) == ([_WHITESPACE], [_WHITESPACE, "Contains"])
+
+
+def test_downgrade_restores_the_old_name_everywhere(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+    _assign_everywhere(db_path, _WHITESPACE)
+
+    command.downgrade(config, "dbc67550f049")
+
+    rows = _test_types(db_path)
+    assert _WHITESPACE not in rows
+    assert rows[_STRICT]["description"].startswith("Checks if the output equals the expected "
+                                                   "string character for character")
+    assert _where_it_is_used(db_path) == ([_STRICT], [_STRICT, "Contains"])
