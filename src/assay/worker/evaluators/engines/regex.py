@@ -35,6 +35,7 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
 
     compiled = regex.compile(pattern)  # regex.error on an invalid pattern, message included
     try:
+        # noinspection PyCallingNonCallable
         matched = match_with(compiled, answer, timeout=timeout) is not None
     except TimeoutError:
         return TestTypeResult(
