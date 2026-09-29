@@ -33,12 +33,18 @@ dev = [
     "regex>=2024.0",    # The worker's Regex Match engine (see the worker extra) — the test suite
                         # imports the evaluator engines, so it needs it too
     "jsonschema>=4.18", # Same reason: the worker's JSON checks
+    "rouge-score>=0.1.2", # Same reason: the worker's ROUGE engine (see the nlp extra)
 ]
 anthropic = [
     "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)
 ]
 openai = [
     "openai>=1.35",  # OpenAI Chat Completions client (used by OpenAIClient in llm.py)
+]
+nlp = [
+    "rouge-score>=0.1.2",  # ROUGE (worker/evaluators/engines/rouge.py): Google's reference
+                           # implementation; imported only when a ROUGE check runs, so a worker
+                           # without this extra fails just that check, with the reason
 ]
 worker = [
     "httpx>=0.27",           # The adapter that calls the application under test (worker/target.py)

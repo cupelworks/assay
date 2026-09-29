@@ -5,7 +5,7 @@ says exactly what was wrong, and the per-assignment catch in execute_run
 turns that message into the type's own detail. Nothing here sanitizes or falls back to a default.
 """
 from assay.models import Comparison
-from assay.schemas import EvaluationInput
+from assay.schemas import EvaluationInput, TestTypeResult
 
 
 def require_reference(evaluation: EvaluationInput) -> str:
@@ -53,3 +53,30 @@ def passes(score: float, threshold: float, comparison: Comparison | None) -> boo
                 "This test type's catalogue row declares no comparison (gte/lte), "
                 "so its score can't be turned into passed"
             )
+
+
+def against_threshold(
+        score: float,
+        evaluation: EvaluationInput,
+        context: str | None = None,
+) -> TestTypeResult:
+    """The result of a scored type: its score, and whether it meets the
+    assignment's threshold in the direction the catalogue row declares.
+
+    The score is kept to four decimals. On a miss, detail says by how much
+    ("0.4123 is below the threshold 0.5"), followed by context when given —
+    related figures that help read the score, never the texts themselves.
+
+    Raises:
+        ValueError: no threshold configured, a non-numeric one, or a row
+            with no comparison — this type's failure, with the reason.
+    """
+    score = round(score, 4)
+    threshold = parse_threshold(evaluation.config)
+    if passes(score, threshold, evaluation.comparison):
+        return TestTypeResult(passed=True, score=score, detail=None)
+    side = "below" if evaluation.comparison == Comparison.gte else "above"
+    detail = f"{score:g} is {side} the threshold {threshold:g}"
+    if context:
+        detail = f"{detail} ({context})"
+    return TestTypeResult(passed=False, score=score, detail=detail)
