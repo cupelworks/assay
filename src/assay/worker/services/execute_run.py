@@ -1,7 +1,9 @@
+import json
 import logging
 import time
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import select, update
@@ -84,6 +86,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     # answered with nothing (a refusal, a cut-off reply), and it's scored
     # like any other answer, so it counts in the results.
     settings_source = None
+    reply = None
     if entry.model_output is not None:
         answer, output_source = entry.model_output, OutputSource.recorded
     else:
@@ -93,7 +96,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
             )
             settings_source = target_settings.source
             response = target.get_answer(entry.input, target_settings)
-            answer = response.answer
+            answer, reply = response.answer, response.reply
         except (target.TargetError, ValidationError) as exc:
             # target.py already logged a failing call itself
             reason = (
@@ -126,7 +129,8 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         engine = catalogue_row.engine if catalogue_row is not None else None
         try:
             results[assignment.name] = evaluators.evaluate(
-                assignment, catalogue_row, entry, answer,
+                assignment, catalogue_row, entry,
+                _answer_for(assignment.answer_path, answer, reply, output_source),
             )
         except Exception as exc:
             logger.warning(
@@ -137,6 +141,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
             results[assignment.name] = TestTypeResult(
                 passed=False, score=None, detail=sentence(str(exc)), engine=engine,
                 engine_settings=catalogue_row.engine_settings if catalogue_row else None,
+                answer_path=assignment.answer_path,
             )
 
     passed_flags = [result.passed for result in results.values()]
@@ -150,6 +155,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     run.results = {name: result.model_dump() for name, result in results.items()}
     run.evaluated_output = answer
     run.output_source = output_source
+    run.application_reply = reply
     run.status = status
     run.executed_at = datetime.now().astimezone()
     session.commit()
@@ -168,6 +174,36 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
             "duration_ms": duration_ms,
         },
     )
+
+
+def _answer_for(path: str | None, answer: str, reply: Any,
+                output_source: OutputSource) -> str:
+    """The text one check scores: the run's answer, or — when its assignment
+    names an answer_path — that part of the application's whole reply, or
+    of the recorded answer parsed as JSON, read by the same rules as the
+    output path (a string as it is, a structured value as JSON text, null
+    or blank as "").
+
+    Raises:
+        ValueError: nothing at the path, an invalid path, or a recorded
+            answer that isn't JSON — that check's failure, with the reason.
+    """
+    if not path:
+        return answer
+    if output_source == OutputSource.application:
+        source, where = reply, "the application's reply"
+    else:
+        try:
+            source = json.loads(answer)
+        except json.JSONDecodeError:
+            raise ValueError(
+                f"This check reads {path}, but the recorded answer isn't JSON"
+            ) from None
+        where = "the recorded answer"
+    found = target.read_answer(source, path)
+    if found is None:
+        raise ValueError(f"Nothing found at {path} in {where}")
+    return found[0]
 
 
 def _resolve_content(
@@ -199,7 +235,8 @@ def _resolve_content(
     }
     return entry, [
         (
-            TestTypeAssignment(name=raw.get("name"), config=raw.get("config")),
+            TestTypeAssignment(name=raw.get("name"), config=raw.get("config"),
+                               answer_path=raw.get("answer_path")),
             rows_by_name.get(raw.get("name")),
         )
         for raw in raw_assignments

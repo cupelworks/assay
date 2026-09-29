@@ -52,7 +52,8 @@ def test_sends_the_input_inside_the_json_template_and_reads_the_answer(configure
     assert str(request.url) == URL
     assert json.loads(request.content) == {"input": "How do I reset?"}
     assert response == TargetResponse(answer="Go to Settings", status=200,
-                                      latency_ms=response.latency_ms, attempts=1)
+                                      latency_ms=response.latency_ms, attempts=1,
+                                      reply={"output": "Go to Settings"})
 
 
 def test_quotes_and_newlines_in_the_input_cannot_break_or_inject_into_the_body(configured):
@@ -363,3 +364,34 @@ def test_a_failure_with_no_response_carries_no_status(configured):
         get_answer("q", _settings(max_retries=0), transport=_transport(refuse))
 
     assert (unreachable.value.status, unreachable.value.latency_ms) == (None, None)
+
+
+# --- the whole reply, and reading any part of it ---
+
+
+def test_the_parsed_reply_comes_back_with_the_answer(configured):
+    reply = {"output": "Hi", "stop_reason": "end_turn", "input_tokens": 12}
+
+    response = get_answer("q", SETTINGS, transport=_ok(reply))
+
+    assert (response.answer, response.reply) == ("Hi", reply)
+
+
+@pytest.mark.parametrize("path,expected", [
+    ("$.stop_reason", ("end_turn", None)),
+    ("$.output", ('{"category": "fraud"}', None)),
+    ("$.output.category", ("fraud", None)),
+    ("$.input_tokens", ("12", None)),
+    ("$.missing", None),
+    ("$.empty", ("", "The value at output path '$.empty' is empty")),
+])
+def test_read_answer_reads_any_part_of_a_reply_by_the_same_rules(path, expected):
+    reply = {"output": {"category": "fraud"}, "stop_reason": "end_turn", "input_tokens": 12,
+             "empty": "  "}
+
+    assert target.read_answer(reply, path) == expected
+
+
+def test_read_answer_refuses_an_invalid_path():
+    with pytest.raises(ValueError, match="'\\$\\[' is not a valid JSONPath"):
+        target.read_answer({}, "$[")

@@ -97,6 +97,7 @@ async def _apply_test_type_assignments_update(
                 test_id=found.id,
                 test_type_name=assignment.name,
                 config=assignment.config,
+                answer_path=assignment.answer_path,
             )
             for assignment in request.test_type_assignments
         ]
@@ -143,7 +144,8 @@ async def modify_test_by_id(
     effective_assignments = (
         request.test_type_assignments if request.test_type_assignments is not None
         else [
-            TestTypeAssignment(name=a.test_type_name, config=a.config)
+            TestTypeAssignment(name=a.test_type_name, config=a.config,
+                               answer_path=a.answer_path)
             for a in found.test_type_assignments
         ]
     )
@@ -168,7 +170,8 @@ async def modify_test_by_id(
         model_output=found.model_output,
         expected_output=found.expected_output,
         test_type_assignments=[
-            TestTypeAssignment(name=a.test_type_name, config=a.config)
+            TestTypeAssignment(name=a.test_type_name, config=a.config,
+                               answer_path=a.answer_path)
             for a in found.test_type_assignments
         ],
     )

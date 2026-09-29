@@ -670,3 +670,34 @@ def test_downgrade_puts_the_range_back(scratch):
         "0 to 1: shared word pairs, so lower than ROUGE-1. A close paraphrase scores about "
         "0.3, an unrelated answer 0."
     )
+
+
+# --- 5ff0acda2b2c: answer_path and application_reply ---
+
+
+def _assignment_columns(db_path: Path) -> list[str]:
+    with sqlite3.connect(db_path) as connection:
+        return [row[1] for row in connection.execute("PRAGMA table_info(test_type_assignments)")]
+
+
+def test_upgrade_adds_answer_path_and_application_reply_both_nullable(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    assert "answer_path" in _assignment_columns(db_path)
+    assert "application_reply" in _run_columns(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO test_runs (id, status, created_at) VALUES (X'05', 'pending', '2026-01-01')"
+        )
+
+
+def test_downgrade_removes_both_columns(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "1aac7a522b8c")
+
+    assert "answer_path" not in _assignment_columns(db_path)
+    assert "application_reply" not in _run_columns(db_path)

@@ -24,6 +24,15 @@ class TestTypeAssignment(BaseModel):
                     "Omit or null if the type has no non-reference config fields.",
         examples=[{"pattern": "^\\d{3}-\\d{4}$"}],
     )
+    answer_path: str | None = Field(
+        None,
+        description="Which part of the answer this check reads, as a JSONPath: into the "
+                    "application's whole reply (e.g. `$.stop_reason`, `$.output.category`), "
+                    "or into a recorded `model_output` that is JSON. Omit or null to read "
+                    "the answer at the settings' output path, like every other check. "
+                    "Checked to parse on save — a 422 otherwise.",
+        examples=["$.stop_reason"],
+    )
 
 
 class CreateTestCaseRequest(BaseModel):

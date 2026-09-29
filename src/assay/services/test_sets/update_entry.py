@@ -82,7 +82,8 @@ async def modify_entry_by_id(
     if request.test_type_assignments is not None:
         await _validate_test_type_assignments(session, request.test_type_assignments)
         found.test_type_assignments = [
-            {"name": assignment.name, "config": assignment.config}
+            {"name": assignment.name, "config": assignment.config,
+             "answer_path": assignment.answer_path}
             for assignment in request.test_type_assignments
         ]
 

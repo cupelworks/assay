@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy import Enum as SAEnum
@@ -374,6 +374,10 @@ class TestTypeAssignmentModel(Base):
     # field is never stored here — it always resolves to the live test's own
     # expected_output.
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Which part of the answer this check reads, as a JSONPath into the
+    # application's reply (or into a recorded answer that is JSON). Null:
+    # the answer at the settings' output path, like every other check.
+    answer_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     test: Mapped["TestModel"] = relationship(back_populates="test_type_assignments",
                                              overlaps="test_types")
@@ -742,6 +746,11 @@ class TestRunModel(Base):
     output_source: Mapped[OutputSource | None] = mapped_column(
         SAEnum(OutputSource), nullable=True
     )
+    # The application's whole reply, parsed, when the answer came from the
+    # application — the model's output together with the application's own
+    # fields (stop_reason, token counts, model). A check with an answer_path
+    # reads its part of it. Null for a recorded answer and for NotRan.
+    application_reply: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     statistical_verifications: Mapped[list["StatisticalVerificationModel"]] = relationship(
         back_populates="test_run",

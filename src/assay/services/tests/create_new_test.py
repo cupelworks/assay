@@ -93,6 +93,7 @@ async def create_new_test(
             test_id=test.id,
             test_type_name=assignment.name,
             config=assignment.config,
+            answer_path=assignment.answer_path,
         )
         for assignment in request.test_type_assignments
     ]
@@ -173,6 +174,7 @@ async def create_new_test_from_dataset(
             test_id=test.id,
             test_type_name=assignment.name,
             config=assignment.config,
+            answer_path=assignment.answer_path,
         )
         for test in tests for assignment in request.test_type_assignments
     ]

@@ -98,4 +98,5 @@ def evaluate(
     return result.model_copy(update={
         "engine": catalogue_row.engine,
         "engine_settings": catalogue_row.engine_settings,
+        "answer_path": assignment.answer_path,
     })

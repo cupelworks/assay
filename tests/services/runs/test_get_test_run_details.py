@@ -94,6 +94,7 @@ def _standalone_row(**overrides):
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=datetime.now().astimezone(),
         name="greets the user by name",
         input="Say hello to Alice.",
@@ -128,6 +129,7 @@ def test_get_run_details_by_test_and_run_id_happy_path():
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=row.executed_at,
         name=row.name,
         input=row.input,
@@ -288,6 +290,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=executed_at,
         test_id=test_case_id,
         name="greets the user by name",
@@ -319,6 +322,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=executed_at,
         test_case_id=TestCaseID(id=test_case_id),
         name="greets the user by name",
@@ -369,6 +373,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_reachable_after_unlink
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=executed_at,
         test_id=test_case_id,
         name="greets the user by name",
@@ -417,6 +422,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_termina
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=None,
         test_id=test_case_id,
         name="greets the user by name",
@@ -445,6 +451,7 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_termina
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=None,
         test_case_id=TestCaseID(id=test_case_id),
         name="greets the user by name",
@@ -581,6 +588,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path():
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=executed_at,
         test_id=test_case_id,
         test_set_id=test_set_id,
@@ -613,6 +621,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path():
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=executed_at,
         test_case_id=TestCaseID(id=test_case_id),
         name="greets the user by name",
@@ -652,6 +661,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=None,
         test_id=test_case_id,
         test_set_id=test_set_id,
@@ -681,6 +691,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=None,
         test_case_id=TestCaseID(id=test_case_id),
         name="greets the user by name",
@@ -732,6 +743,7 @@ def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlin
         error=None,
         evaluated_output=None,
         output_source=None,
+        application_reply=None,
         executed_at=executed_at,
         test_id=test_case_id,
         test_set_id=None,
@@ -777,3 +789,16 @@ def test_standalone_details_carry_the_evaluated_output_and_its_source():
 
     assert response.evaluated_output == "Hello, Alice!"
     assert response.output_source == OutputSource.application
+
+
+def test_standalone_details_carry_the_applications_whole_reply():
+    test_id = uuid.uuid4()
+    test_run_id = uuid.uuid4()
+    reply = {"output": "Hello, Alice!", "stop_reason": "end_turn", "input_tokens": 12}
+    row = _standalone_row(evaluated_output="Hello, Alice!",
+                          output_source=OutputSource.application, application_reply=reply)
+    session = _standalone_session(test_id, test_run_id, row)
+
+    response = asyncio.run(get_run_details_by_test_and_run_id(test_id, test_run_id, session))
+
+    assert response.application_reply == reply

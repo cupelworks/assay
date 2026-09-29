@@ -644,3 +644,56 @@ def test_dataset_import_422_when_any_row_missing_expected_output_for_reference_r
     assert exc.value.status_code == 422
     assert str(bad_row.id) in str(exc.value.detail)
     assert str(good_row.id) not in str(exc.value.detail)
+
+
+# -- answer_path: which part of the answer a check reads --
+
+
+def test_create_stores_each_assignments_answer_path():
+    request = CreateTestCaseRequest(
+        input=model_input,
+        test_type_assignments=[
+            TestTypeAssignment(name="JSON Field Equals", answer_path="$.stop_reason",
+                               config={"path": "$", "value": '"end_turn"'}),
+            TestTypeAssignment(name="Contains", config={"substring": "refund"}),
+        ],
+    )
+    mock_session = AsyncMock()
+    mock_session.add_all = MagicMock()
+
+    with patch("assay.services.tests.create_new_test._validate_test_type_assignments",
+               new=AsyncMock()), \
+            patch("assay.services.tests.create_new_test."
+                  "_check_reference_required_types_have_expected_output_or_422", new=AsyncMock()):
+        response = asyncio.run(create_new_test(request, mock_session))
+
+    stored = mock_session.add_all.call_args.args[0]
+    assert [(a.test_type_name, a.answer_path) for a in stored] == [
+        ("JSON Field Equals", "$.stop_reason"), ("Contains", None)]
+    assert [a.answer_path for a in response.test_type_assignments] == ["$.stop_reason", None]
+
+
+def _contains_session():
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[_catalogue_row(
+        "Contains", [{"key": "substring", "label": "Required substring", "kind": "multiline",
+                      "required": True}],
+    )]))
+    return session
+
+
+def test_validate_passes_a_valid_answer_path():
+    asyncio.run(_validate_test_type_assignments(_contains_session(), [
+        TestTypeAssignment(name="Contains", config={"substring": "x"},
+                           answer_path="$.result.category"),
+    ]))  # no raise
+
+
+def test_validate_raises_for_an_answer_path_that_does_not_parse():
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_validate_test_type_assignments(_contains_session(), [
+            TestTypeAssignment(name="Contains", config={"substring": "x"}, answer_path="$["),
+        ]))
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail.startswith("'Contains' answer_path is not a valid JSONPath: ")

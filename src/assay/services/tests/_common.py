@@ -16,10 +16,11 @@ def _frozen_test_type_assignments(test: TestModel) -> list[dict]:
     """The test's assigned types with their config, in the frozen JSON shape
     every snapshot of a test stores — a TestSetEntryModel when the test is
     added to a set, a StandaloneRunModel when a standalone run is created:
-    `[{"name": ..., "config": ...}]`. The test's assignments must be loaded.
+    `[{"name": ..., "config": ..., "answer_path": ...}]`. The test's assignments must be loaded.
     """
     return [
-        {"name": assignment.test_type_name, "config": assignment.config}
+        {"name": assignment.test_type_name, "config": assignment.config,
+         "answer_path": assignment.answer_path}
         for assignment in test.test_type_assignments
     ]
 
@@ -136,7 +137,7 @@ async def _validate_test_type_assignments(
     """Checks that every assigned test type exists in the catalogue, that
     each assignment supplies a value for every required config field its
     type declares, and that a value given for a `json` or `jsonpath` field
-    parses as one.
+    — or an assignment's own answer_path — parses as one.
 
     A config_fields entry of kind "reference" is never checked here — it
     resolves from the test case's own expected_output, not from an
@@ -170,6 +171,11 @@ async def _validate_test_type_assignments(
         config_fields = config_fields_by_name.get(assignment.name)
         if config_fields is None:
             continue  # already reported via unknown_names
+
+        if assignment.answer_path:
+            reason = _unparseable_reason(ConfigFieldKind.jsonpath, assignment.answer_path)
+            if reason:
+                field_problems.append(f"'{assignment.name}' answer_path {reason}")
 
         config = assignment.config or {}
         for field in config_fields:

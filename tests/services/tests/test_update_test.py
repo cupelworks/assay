@@ -135,6 +135,7 @@ def test_modify_test_type_assignments_none_leaves_assignments_untouched():
     mock_assignment = MagicMock()
     mock_assignment.test_type_name = "ROUGE"
     mock_assignment.config = None
+    mock_assignment.answer_path = None
     mock_test.test_type_assignments = [mock_assignment]
     mock_request = ModifyTestCaseRequest()  # noqa
     session = _get_session(mock_test)
@@ -153,6 +154,7 @@ def test_modify_raises_422_when_clearing_expected_output_with_reference_required
     mock_assignment = MagicMock()
     mock_assignment.test_type_name = "Exact Match"
     mock_assignment.config = None
+    mock_assignment.answer_path = None
     mock_test.test_type_assignments = [mock_assignment]
     # this request only clears expected_output — test_type_assignments isn't
     # touched at all, so the *existing* Exact Match assignment stays in
@@ -252,6 +254,7 @@ def test_modify_raises_422_when_nulling_expected_output_with_reference_required_
     mock_assignment = MagicMock()
     mock_assignment.test_type_name = "Exact Match"
     mock_assignment.config = None
+    mock_assignment.answer_path = None
     mock_test.test_type_assignments = [mock_assignment]
     mock_request = ModifyTestCaseRequest.model_validate({"expected_output": None})
     session = _get_session(mock_test)

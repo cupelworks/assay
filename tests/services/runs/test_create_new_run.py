@@ -119,7 +119,7 @@ def test_standalone_happy_path():
     assert frozen_copy.expected_output == "Test Expected Output"
     assert frozen_copy.model_output == "Test Model Output"
     assert frozen_copy.test_type_assignments == [
-        {"name": "ROUGE", "config": {"threshold": "0.7"}},
+        {"name": "ROUGE", "config": {"threshold": "0.7"}, "answer_path": None},
     ]
 
 

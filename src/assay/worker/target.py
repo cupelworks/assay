@@ -39,6 +39,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from typing import Any
 
 import httpx
 from jsonpath_ng import parse as parse_jsonpath
@@ -82,6 +83,10 @@ class TargetResponse:
     latency_ms: float
     attempts: int
     empty: str | None = None
+    # The whole reply, parsed: the model's output together with the
+    # application's own fields. A run keeps it; a check with its own
+    # answer_path reads its part of it.
+    reply: Any = None
 
 
 def get_answer(
@@ -133,8 +138,8 @@ def get_answer(
                 latency_ms = round((time.perf_counter() - started) * 1000, 1)
                 status = response.status_code
                 if 200 <= response.status_code < 300:
-                    answer, empty = _extract_answer(response, output_path, settings.output_path,
-                                                    latency_ms)
+                    answer, empty, reply = _extract_answer(response, output_path,
+                                                           settings.output_path, latency_ms)
                     logger.info(
                         "Application answered HTTP %d in %.1f ms (attempt %d of %d)",
                         response.status_code, latency_ms, attempt, attempts,
@@ -142,7 +147,7 @@ def get_answer(
                                "attempt": attempt, "attempts": attempts},
                     )
                     return TargetResponse(answer, response.status_code, latency_ms, attempt,
-                                          empty)
+                                          empty, reply)
                 reason = f"Application answered HTTP {response.status_code}"
                 if response.status_code not in RETRYABLE_STATUSES:
                     logger.error("%s; not retried", reason,
@@ -198,17 +203,30 @@ def _compile_output_path(path: str):
         raise TargetError(f"Output path {path!r} is not a valid JSONPath: {exc}") from None
 
 
-def _extract_answer(response: httpx.Response, output_path, path: str,
-                    latency_ms: float) -> tuple[str, str | None]:
-    """The answer at the output path, and why it's empty when it is.
+def read_answer(payload: Any, path: str) -> tuple[str, str | None] | None:
+    """The answer at path in an already-parsed reply, by the same rules as
+    the output path — for a check that reads its own part of the reply
+    (its assignment's answer_path), or of a recorded answer that is JSON.
 
-    A string is the answer as it is. A structured value — an object, an
-    array, a number, a boolean, as structured outputs produce — is the
-    answer as JSON text, so the JSON checks can parse it back. A null or
-    blank value is an empty answer, with the reason. A reply that isn't
-    JSON, or has nothing at the path, is a TargetError: that's the
-    application or the settings, not an answer.
+    Returns (answer, why it's empty) as _answer_at does, or None when
+    nothing is at the path.
+
+    Raises:
+        ValueError: path isn't a valid JSONPath.
     """
+    try:
+        compiled = parse_jsonpath(path)
+    except Exception as exc:  # jsonpath-ng's parser raises assorted exception types
+        raise ValueError(f"{path!r} is not a valid JSONPath: {exc}") from None
+    return _answer_at(compiled, payload, path)
+
+
+def _extract_answer(response: httpx.Response, output_path, path: str,
+                    latency_ms: float) -> tuple[str, str | None, Any]:
+    """The answer at the output path, why it's empty when it is, and the
+    whole parsed reply. A reply that isn't JSON, or has nothing at the path,
+    is a TargetError: that's the application or the settings, not an
+    answer."""
     def fail(reason: str) -> TargetError:
         return TargetError(reason, status=response.status_code, latency_ms=latency_ms)
 
@@ -216,9 +234,25 @@ def _extract_answer(response: httpx.Response, output_path, path: str,
         payload = response.json()
     except ValueError:
         raise fail("The application's reply is not JSON") from None
-    matches = output_path.find(payload)
-    if not matches:
+    found = _answer_at(output_path, payload, path)
+    if found is None:
         raise fail(f"Nothing found at output path {path!r} in the application's reply")
+    answer, empty = found
+    return answer, empty, payload
+
+
+def _answer_at(compiled, payload: Any, path: str) -> tuple[str, str | None] | None:
+    """The answer at a compiled path, and why it's empty when it is; None
+    when nothing is there.
+
+    A string is the answer as it is. A structured value — an object, an
+    array, a number, a boolean, as structured outputs produce — is the
+    answer as JSON text, so the JSON checks can parse it back. A null or
+    blank value is an empty answer, with the reason.
+    """
+    matches = compiled.find(payload)
+    if not matches:
+        return None
     value = matches[0].value
     if value is None:
         return "", f"The value at output path {path!r} is null"

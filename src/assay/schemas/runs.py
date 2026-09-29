@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -157,6 +158,15 @@ class TestTypeResult(BaseModel):
             '`engine_settings`). Null in the same two cases as `engine`.'
         ),
     )
+    answer_path: str | None = Field(
+        default=None,
+        description=(
+            'The part of the answer this check read, when its assignment set one '
+            '(a JSONPath into `application_reply`, or into a recorded answer that '
+            'is JSON). Null: it read `evaluated_output`, the answer at the '
+            'settings\' output path, like every check without its own path.'
+        ),
+    )
 
 
 class RunResults(BaseModel):
@@ -214,6 +224,16 @@ class RunEvaluatedOutput(BaseModel):
             '(`ASSAY_TARGET_*` settings) and scored its reply, which is why two '
             'runs of the same test can legitimately differ. Null whenever '
             '`evaluated_output` is.'
+        ),
+    )
+    application_reply: Any = Field(
+        None,
+        description=(
+            'The application\'s whole reply, parsed, when `output_source` is '
+            '`application`: the model\'s output together with the application\'s '
+            'own fields (e.g. `stop_reason`, token counts, `model`). A check with '
+            'its own `answer_path` read its part of this. Null for a recorded '
+            'answer, for `NotRan`, and on runs executed before it was kept.'
         ),
     )
 

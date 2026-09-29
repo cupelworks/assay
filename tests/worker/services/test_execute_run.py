@@ -55,7 +55,7 @@ def _stamped(passed: bool, row: TestTypesModel, score=None, detail=None) -> dict
     """What a result looks like once the registry has stamped the engine on it."""
     return {
         "passed": passed, "score": score, "detail": detail,
-        "engine": row.engine, "engine_settings": row.engine_settings,
+        "engine": row.engine, "engine_settings": row.engine_settings, "answer_path": None,
     }
 
 
@@ -227,7 +227,7 @@ def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
     assert run.results["Retired Type"] == {
         "passed": False, "score": None,
         "detail": "Test type 'Retired Type' is not in the catalogue",
-        "engine": None, "engine_settings": None,
+        "engine": None, "engine_settings": None, "answer_path": None,
     }
 
 
@@ -592,3 +592,89 @@ def test_a_structured_answer_is_scored_as_its_json_text():
 
     assert evaluate.call_args.args[3] == '{"category": "fraud"}'
     assert (run.status, run.evaluated_output) == (TestStatus.green, '{"category": "fraud"}')
+
+
+# --- a check reading its own part of the answer (answer_path) ---
+
+
+def _capture_answers():
+    """A fake evaluate recording which answer each check was handed; every
+    check passes, and the path it read is stamped as the registry does."""
+    seen = {}
+
+    def fake(assignment, catalogue_row, entry, answer):
+        seen[assignment.name] = answer
+        return TestTypeResult(passed=True, score=None, detail=None, engine=catalogue_row.engine,
+                              engine_settings=catalogue_row.engine_settings,
+                              answer_path=assignment.answer_path)
+    return seen, fake
+
+
+_REPLY = {"output": "We refunded order 4471.", "stop_reason": "end_turn",
+          "result": {"category": "refund"}}
+
+
+def _run_with(entry, assignments, reply=None):
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    response = TargetResponse(answer="We refunded order 4471.", status=200, latency_ms=5.0,
+                              attempts=1, reply=reply)
+    seen, fake = _capture_answers()
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=(entry, assignments)), \
+            patch(_PATCH_GET_ANSWER, return_value=response), \
+            patch(_PATCH_EVALUATE, side_effect=fake):
+        execute_run(run_id, session)
+    return run, seen
+
+
+def test_a_check_with_an_answer_path_reads_that_part_of_the_reply_the_others_the_answer():
+    run, seen = _run_with(_recorded_entry(model_output=None), [
+        (TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
+        (TestTypeAssignment(name="Toxicity", answer_path="$.stop_reason"), TOXICITY),
+        (TestTypeAssignment(name="ROUGE", answer_path="$.result"), ROUGE),
+    ], reply=_REPLY)
+
+    assert seen == {"Exact Match": "We refunded order 4471.", "Toxicity": "end_turn",
+                    "ROUGE": '{"category": "refund"}'}
+    assert run.results["Toxicity"]["answer_path"] == "$.stop_reason"
+    assert run.results["Exact Match"]["answer_path"] is None
+    assert run.application_reply == _REPLY
+    assert run.evaluated_output == "We refunded order 4471."
+
+
+def test_nothing_at_a_checks_path_fails_that_check_only():
+    run, _ = _run_with(_recorded_entry(model_output=None), [
+        (TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
+        (TestTypeAssignment(name="Toxicity", answer_path="$.usage.tokens"), TOXICITY),
+    ], reply=_REPLY)
+
+    assert run.status == TestStatus.amber
+    assert run.results["Toxicity"] == {
+        "passed": False, "score": None,
+        "detail": "Nothing found at $.usage.tokens in the application's reply",
+        "engine": "llm_judge", "engine_settings": TOXICITY.engine_settings,
+        "answer_path": "$.usage.tokens",
+    }
+
+
+def test_a_recorded_json_answer_is_read_by_the_checks_path():
+    entry = _recorded_entry(model_output='{"category": "refund", "urgency": "high"}')
+
+    run, seen = _run_with(entry, [
+        (TestTypeAssignment(name="Exact Match", answer_path="$.category"), EXACT_MATCH),
+    ])
+
+    assert seen == {"Exact Match": "refund"}
+    assert run.application_reply is None
+
+
+def test_a_recorded_answer_that_isnt_json_fails_a_check_with_a_path():
+    run, _ = _run_with(_recorded_entry(model_output="Go to Settings"), [
+        (TestTypeAssignment(name="Exact Match", answer_path="$.category"), EXACT_MATCH),
+    ])
+
+    assert run.results["Exact Match"]["detail"] == (
+        "This check reads $.category, but the recorded answer isn't JSON")
+    assert run.status == TestStatus.red

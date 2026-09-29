@@ -35,6 +35,7 @@ def test_correct_mapping_of_test_fields():
     mock_assignment = MagicMock()
     mock_assignment.test_type_name = "ROUGE"
     mock_assignment.config = None
+    mock_assignment.answer_path = None
 
     mock_test.test_type_assignments = [mock_assignment]
 
