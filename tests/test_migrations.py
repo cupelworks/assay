@@ -517,3 +517,38 @@ def test_downgrade_removes_the_length_limits_only(scratch):
     rows = _test_types(db_path)
     assert len(rows) == 23
     assert not set(_LENGTH_LIMITS) & set(rows)
+
+
+# --- 812acbc349ad: field kinds, placeholders and hints ---
+
+
+def _fields(db_path: Path, name: str) -> dict[str, dict]:
+    return {f["key"]: f for f in json.loads(_test_types(db_path)[name]["config_fields"])}
+
+
+def test_upgrade_gives_the_json_fields_their_kinds_and_every_new_field_a_hint(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "head")
+
+    schema = _fields(db_path, "Matches JSON Schema")["schema"]
+    path, value = (_fields(db_path, "JSON Field Equals")[key] for key in ("path", "value"))
+    assert (schema["kind"], path["kind"], value["kind"]) == ("json", "jsonpath", "json")
+    assert (path["placeholder"], value["placeholder"]) == ("$.status", '"approved"')
+    assert value["hint"].startswith("A JSON value: strings in double quotes")
+    maximum = _fields(db_path, "Word Count Limit")["max"]
+    assert (maximum["kind"], maximum["placeholder"], maximum["min"]) == ("numeric", "100", 0.0)
+    assert _fields(db_path, "Character Count Limit")["min"]["hint"].startswith("Optional.")
+    # rows this migration doesn't name are untouched
+    assert "hint" not in _fields(db_path, "Regex Match")["pattern"]
+
+
+def test_downgrade_restores_the_fields_as_seeded(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "head")
+
+    command.downgrade(config, "fc7d91b00c18")
+
+    path = _fields(db_path, "JSON Field Equals")["path"]
+    assert path == {"key": "path", "label": "JSONPath", "kind": "multiline", "required": True}
+    assert "placeholder" not in _fields(db_path, "Word Count Limit")["max"]
