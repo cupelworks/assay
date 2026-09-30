@@ -389,6 +389,18 @@ Broker and result backend are controlled by `ASSAY_CELERY_BROKER_URL`/`ASSAY_CEL
 
 **Note on hosting.** An Azure Web App is a good fit for the API (it's a standard containerized HTTP service — this repo already has a `Dockerfile`), but not for the worker: Web Apps are built around serving HTTP traffic, and a Celery worker just polls its broker forever without binding a port. [Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/overview) (no ingress) or a continuous [WebJob](https://learn.microsoft.com/en-us/azure/app-service/webjobs-create) are the more natural fit for a long-running background process like this one.
 
+### Worker image
+
+`Dockerfile.worker` builds the worker's own image, separate from the API's `Dockerfile`: Python 3.11, the `worker` and `nlp` extras (never `dev`), and NLTK's WordNet data downloaded at build time, so METEOR works from the first run with no download at run time. It runs as a non-root user and logs JSON by default (`ASSAY_LOG_FORMAT`, overridable). Beat uses the same image with another command; run exactly one per environment.
+
+```bash
+docker build -f Dockerfile.worker -t assay-worker .
+docker run --env-file .env assay-worker                                         # the worker
+docker run --env-file .env assay-worker celery -A assay.worker beat --loglevel=info  # Beat
+```
+
+The container needs the same settings as the API — at least `ASSAY_DATABASE_URL` and the Celery broker/result URLs, pointing at services it can reach (not `localhost`, which inside a container is the container itself).
+
 ### Task history — Flower
 
 The app's own audit trail (`GET /runs` and friends — see [Runs](#runs)) is the real history of what happened to a *run*: it persists in the database regardless of whether Celery or Redis are even still running, and it's what a client should actually read. [Flower](https://flower.readthedocs.io/) is a separate, worker-level view on top of that — a web dashboard over the queue itself: every task's args, state, runtime, which worker handled it, retries, and the raw traceback if the task process itself failed (distinct from a run merely scoring badly). Useful for debugging the worker, not a replacement for the app's own history.
