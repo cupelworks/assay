@@ -112,14 +112,11 @@ def test_a_type_missing_from_the_catalogue_is_that_types_failure():
         evaluate(TestTypeAssignment(name="Retired"), None, ENTRY, "x")
 
 
-def test_the_remaining_stubs_keep_their_fixed_outcomes():
-    # The deterministic engines, ROUGE, BLEU and METEOR score for real; the
-    # other metric and judge engines still return one fixed outcome each,
-    # until they're replaced one at a time.
+def test_the_judge_stub_keeps_its_fixed_outcome():
+    # Every deterministic and metric engine scores for real; the judge engine
+    # still returns one fixed outcome until it's replaced.
     evaluation = EvaluationInput(input="q", reference="a", answer="a")
 
-    for name in ("bertscore", "embedding_cosine"):
-        assert ENGINES[name](evaluation) == TestTypeResult(passed=True, score=1.0, detail=None)
     assert ENGINES["llm_judge"](evaluation) == TestTypeResult(passed=True, score=None,
                                                                detail="Testing")
 

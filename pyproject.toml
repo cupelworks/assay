@@ -53,6 +53,12 @@ nlp = [
     "nltk>=3.9",           # METEOR (worker/evaluators/engines/meteor.py), likewise. Needs NLTK's
                            # WordNet data too, downloaded separately:
                            # python -m nltk.downloader wordnet
+    "sentence-transformers>=3.0",  # Cosine Similarity (engines/embedding_cosine.py), on CPU
+    "transformers>=4.41",  # BERTScore (engines/bertscore.py): the reference algorithm on a
+                           # BERT-style model, on CPU
+    "torch>=2.2",          # Both, through the two above. The worker image installs the CPU-only
+                           # build; the models are Hugging Face downloads (worker/evaluators/
+                           # models.py), cached under HF_HOME
 ]
 worker = [
     "httpx>=0.27",           # The adapter that calls the application under test (worker/target.py)
@@ -87,3 +93,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "G", "LOG"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "slow: scores with the real embedding models (the nlp extra, and a download the first time); run with pytest -m slow",
+]
+addopts = "-m 'not slow'"
