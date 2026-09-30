@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+from contextlib import contextmanager
 
 from assay.config import settings
 from assay.logging_config import (
@@ -11,6 +12,21 @@ from assay.logging_config import (
     request_id_var,
     run_id_var,
 )
+
+
+@contextmanager
+def _root_records():
+    """The records reaching the root logger. pytest's caplog can't see them
+    after configure_logging: its dictConfig replaces the root's handlers,
+    caplog's among them."""
+    records = []
+    collector = logging.Handler()
+    collector.emit = records.append
+    logging.getLogger().addHandler(collector)
+    try:
+        yield records
+    finally:
+        logging.getLogger().removeHandler(collector)
 
 
 def _record(message="hello", level=logging.INFO, extra=None, exc_info=None):
@@ -51,15 +67,14 @@ def test_record_factory_carries_the_run_id_only_while_one_is_set():
         run_id_var.reset(token)
 
 
-def test_run_id_is_an_ordinary_extra_outside_a_task(caplog):
+def test_run_id_is_an_ordinary_extra_outside_a_task():
     # the API's run-creation lines pass run_id in extra= — must not collide
     # with the factory (logging refuses to overwrite a stamped attribute)
     configure_logging(settings.log_level, settings.log_format)
-    with caplog.at_level(logging.INFO, logger="assay.test"):
-        logging.getLogger("assay.test").info("created", extra={"run_id": "run-api"})
+    with _root_records() as records:
+        logging.getLogger("assay.test").warning("created", extra={"run_id": "run-api"})
 
-    record = caplog.records[-1]
-    assert json.loads(JsonFormatter().format(record))["run_id"] == "run-api"
+    assert json.loads(JsonFormatter().format(records[-1]))["run_id"] == "run-api"
 
 
 # --- JsonFormatter ---
@@ -189,19 +204,15 @@ def test_a_rouge_check_logs_nothing_from_its_library():
     from assay.schemas import EvaluationInput
     from assay.worker.evaluators.engines import rouge
 
-    records = []
-    collector = logging.Handler()
-    collector.emit = records.append
     try:
         configure_logging("INFO", "text")
-        logging.getLogger().addHandler(collector)
-        rouge.evaluate(EvaluationInput(
-            input="q", reference="a b", answer="a b", config={"threshold": "0"},
-            engine_settings={"variant": "rougeL", "measure": "f1", "stemmer": True},
-            comparison=Comparison.gte,
-        ))
+        with _root_records() as records:
+            rouge.evaluate(EvaluationInput(
+                input="q", reference="a b", answer="a b", config={"threshold": "0"},
+                engine_settings={"variant": "rougeL", "measure": "f1", "stemmer": True},
+                comparison=Comparison.gte,
+            ))
 
         assert not [record for record in records if record.name == "absl"]
     finally:
-        logging.getLogger().removeHandler(collector)
         _restore()
