@@ -1,7 +1,7 @@
-# The worker's image: the Celery worker with the `worker` and `nlp` extras and
-# NLTK's WordNet data, so every implemented evaluator works from the first run,
-# with no download at run time. Beat runs from the same image with another
-# command; one Beat per environment.
+# The worker's image: the Celery worker with the `worker` and `nlp` extras,
+# NLTK's WordNet data and the embedding models, so every metric works from the
+# first run, offline. Beat runs from the same image with another command; one
+# Beat per environment.
 #
 #   docker build -f Dockerfile.worker -t assay-worker .
 #   docker run --env-file .env assay-worker
@@ -16,10 +16,22 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 
-RUN uv pip install --system --no-cache ".[worker,nlp]"
+# CPU-only PyTorch: the default build pulls ~2 GB of GPU libraries
+RUN uv pip install --system --no-cache --torch-backend cpu ".[worker,nlp]"
 
 # METEOR's synonym dictionary (10 MB), in a folder NLTK searches by default
 RUN python -m nltk.downloader -d /usr/share/nltk_data wordnet
+
+# The catalogue's embedding models (Cosine Similarity, its multilingual row,
+# BERTScore; ~800 MB), readable by every user; the worker then never goes online
+# for them. A row naming another model needs it added here.
+ENV HF_HOME=/opt/huggingface
+RUN python -c "from sentence_transformers import SentenceTransformer; \
+from transformers import AutoModel, AutoTokenizer; \
+[SentenceTransformer(name) for name in ('all-MiniLM-L6-v2', 'paraphrase-multilingual-MiniLM-L12-v2')]; \
+AutoTokenizer.from_pretrained('distilbert-base-uncased'); \
+AutoModel.from_pretrained('distilbert-base-uncased')"
+ENV HF_HUB_OFFLINE=1
 
 # The worker needs no privileges; Beat writes its schedule file to /app
 RUN useradd --create-home assay && chown assay /app
@@ -29,6 +41,7 @@ USER assay
 # still overrides this.
 ENV ASSAY_LOG_FORMAT=json
 
-# Threads, not processes: an engine's data (WordNet today) is loaded once per
-# process and shared by every thread.
+# Threads, not processes: an engine's data (WordNet, the embedding models,
+# ~1.3 GB with all three loaded) is loaded once per process and shared by every
+# thread.
 CMD ["celery", "-A", "assay.worker", "worker", "--loglevel=info", "--pool=threads"]
