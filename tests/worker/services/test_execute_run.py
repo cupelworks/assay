@@ -60,7 +60,7 @@ def _stamped(passed: bool, row: TestTypesModel, score=None, detail=None) -> dict
 
 
 def _fake_evaluate(passed_for: set[str]):
-    def fake(assignment, catalogue_row, entry, answer):
+    def fake(assignment, catalogue_row, entry, answer, judge=None):
         return TestTypeResult(
             passed=assignment.name in passed_for, score=None, detail=None,
             engine=catalogue_row.engine, engine_settings=catalogue_row.engine_settings,
@@ -137,7 +137,8 @@ def test_evaluate_is_handed_the_assignment_its_catalogue_row_and_the_entry():
             patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"ROUGE"})) as mock_evaluate:
         execute_run(run_id, session)
 
-    mock_evaluate.assert_called_once_with(assignment, ROUGE, entry, "the recorded answer")
+    mock_evaluate.assert_called_once_with(assignment, ROUGE, entry, "the recorded answer",
+                                          judge=None)
 
 
 def test_every_type_failing_rolls_up_to_red():
@@ -185,7 +186,7 @@ def test_one_assignments_own_evaluator_failure_does_not_fail_the_whole_run():
          (TestTypeAssignment(name="Toxicity"), TOXICITY)],
     )
 
-    def fake_evaluate(assignment, catalogue_row, entry, answer):
+    def fake_evaluate(assignment, catalogue_row, entry, answer, judge=None):
         if assignment.name == "Toxicity":
             raise RuntimeError("judge API timed out")
         return _fake_evaluate({"Exact Match"})(assignment, catalogue_row, entry, answer)
@@ -214,7 +215,7 @@ def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
          (TestTypeAssignment(name="Retired Type"), None)],
     )
 
-    def fake_evaluate(assignment, catalogue_row, entry, answer):
+    def fake_evaluate(assignment, catalogue_row, entry, answer, judge=None):
         if catalogue_row is None:
             raise LookupError("Test type 'Retired Type' is not in the catalogue")
         return _fake_evaluate({"Exact Match"})(assignment, catalogue_row, entry, answer)
@@ -272,7 +273,8 @@ def test_without_a_recorded_answer_the_application_is_asked_and_its_reply_scored
     assert input_text == "How do I reset?"
     assert settings.source == SettingsSource.environment
     session.get.assert_called_once_with(SettingsModel, SettingsSection.target)
-    evaluate.assert_called_once_with(assignment, EXACT_MATCH, entry, "Go to Settings")
+    evaluate.assert_called_once_with(assignment, EXACT_MATCH, entry, "Go to Settings",
+                                     judge=None)
     assert run.evaluated_output == "Go to Settings"
     assert run.output_source == OutputSource.application
     assert run.status == TestStatus.green
@@ -602,7 +604,7 @@ def _capture_answers():
     check passes, and the path it read is stamped as the registry does."""
     seen = {}
 
-    def fake(assignment, catalogue_row, entry, answer):
+    def fake(assignment, catalogue_row, entry, answer, judge=None):
         seen[assignment.name] = answer
         return TestTypeResult(passed=True, score=None, detail=None, engine=catalogue_row.engine,
                               engine_settings=catalogue_row.engine_settings,
@@ -678,3 +680,69 @@ def test_a_recorded_answer_that_isnt_json_fails_a_check_with_a_path():
     assert run.results["Exact Match"]["detail"] == (
         "This check reads $.category, but the recorded answer isn't JSON")
     assert run.status == TestStatus.red
+
+
+# --- the judge settings ---
+
+
+def _judge_run(assignments, session_get=None):
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    if session_get is not None:
+        session.get.side_effect = session_get
+    return run_id, run, session, (_recorded_entry(), assignments)
+
+
+def test_a_run_with_a_judge_check_reads_the_judge_settings_once_and_hands_them_over(
+        monkeypatch):
+    from assay.config import settings
+    monkeypatch.setattr(settings, "judge_provider", "anthropic")
+    monkeypatch.setattr(settings, "judge_model", "claude-sonnet-5-5")
+    run_id, run, session, resolved = _judge_run(
+        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
+         (TestTypeAssignment(name="Toxicity"), TOXICITY)])
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
+            patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match", "Toxicity"})) \
+            as evaluate:
+        execute_run(run_id, session)
+
+    session.get.assert_called_once_with(SettingsModel, SettingsSection.judge)
+    judges = {call.kwargs["judge"] for call in evaluate.call_args_list}
+    (judge,) = judges
+    assert (judge.provider, judge.model) == ("anthropic", "claude-sonnet-5-5")
+
+
+def test_a_run_without_a_judge_check_never_reads_the_judge_settings():
+    run_id, run, session, resolved = _judge_run(
+        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
+            patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match"})) as evaluate:
+        execute_run(run_id, session)
+
+    session.get.assert_not_called()
+    assert evaluate.call_args.kwargs["judge"] is None
+
+
+def test_invalid_saved_judge_settings_fail_the_judge_checks_only():
+    broken = SettingsModel(section=SettingsSection.judge, value={"provider": "anthropic"})
+    run_id, run, session, resolved = _judge_run(
+        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
+         (TestTypeAssignment(name="Toxicity"), TOXICITY)],
+        session_get=lambda model, key: broken if key == SettingsSection.judge else None,
+    )
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
+            patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match", "Toxicity"})):
+        execute_run(run_id, session)
+
+    assert run.status == TestStatus.amber
+    assert run.results["Exact Match"]["passed"] is True
+    toxicity = run.results["Toxicity"]
+    assert toxicity["passed"] is False
+    assert toxicity["detail"] == ("The saved judge settings are invalid: model: Required when "
+                                  "a provider is set")
+    assert toxicity["engine"] == "llm_judge"

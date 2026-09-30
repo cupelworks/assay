@@ -2,18 +2,18 @@
 
 The Celery app itself, configured against Redis (or the local SQLite
 alternative) as broker and result backend, imported from the same
-settings the API process already uses. Three tasks are registered:
-`execute_run` (tasks/execute_run.py — runs one TestRunModel end to end; the
-deterministic engines score for real, the metric and judge engines are
-still stubs), `reconcile_runs`
+settings the API process already uses. Four tasks are registered:
+`execute_run` (tasks/execute_run.py — runs one TestRunModel end to end,
+every assigned check scored by its engine), `reconcile_runs`
 (tasks/reconcile_runs.py — the Beat-scheduled safety net that re-publishes
-Pending runs whose original dispatch was lost) and `check_target`
+Pending runs whose original dispatch was lost), `check_target`
 (tasks/check_target.py — one call to the application under test, to check
-its settings from the UI).
+its settings from the UI) and `check_judge` (tasks/check_judge.py — one
+question to the judge model, to check its settings).
 
 The API process imports this app only to publish tasks by name
 (services/runs/_common.py's _dispatch_runs, services/settings/
-create_target_check.py); it never imports the task or
+create_target_check.py and create_judge_check.py); it never imports the task or
 evaluator modules, and this never imports assay.main. Run with:
 
     celery -A assay.worker worker --loglevel=info
@@ -67,6 +67,7 @@ app = Celery(
         "assay.worker.tasks.execute_run",
         "assay.worker.tasks.reconcile_runs",
         "assay.worker.tasks.check_target",
+        "assay.worker.tasks.check_judge",
     ],
 )
 

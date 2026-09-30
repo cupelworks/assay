@@ -12,7 +12,7 @@ type that an existing engine can score is a new row, not a new entry here.
 from collections.abc import Callable
 
 from assay.models import TestTypesModel
-from assay.schemas import EvaluationInput, TestTypeAssignment, TestTypeResult
+from assay.schemas import EvaluationInput, JudgeSettings, TestTypeAssignment, TestTypeResult
 from assay.worker.evaluators.engines import (
     bertscore,
     bleu,
@@ -54,6 +54,7 @@ def evaluate(
         catalogue_row: TestTypesModel | None,
         entry,
         answer: str,
+        judge: JudgeSettings | None = None,
 ) -> TestTypeResult:
     """Score one assigned test type against the run's frozen copy of the test.
 
@@ -77,6 +78,8 @@ def evaluate(
             recorded model_output, or the application's reply), not read
             from the entry here, so every engine scores the same answer the
             run records as evaluated_output.
+        judge: The judge settings in effect for this run, which the
+            LLM-judge engine calls with; None when the run has no judge check.
     """
     if catalogue_row is None:
         raise LookupError(f"Test type '{assignment.name}' is not in the catalogue")
@@ -93,6 +96,7 @@ def evaluate(
         config=assignment.config or {},
         engine_settings=catalogue_row.engine_settings,
         comparison=catalogue_row.comparison,
+        judge=judge,
     )
     result = engine(evaluation)
     return result.model_copy(update={

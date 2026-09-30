@@ -38,12 +38,6 @@ dev = [
     "nltk>=3.9",        # Same reason: the worker's METEOR engine (see the nlp extra); its
                         # scoring tests skip unless WordNet is downloaded
 ]
-anthropic = [
-    "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)
-]
-openai = [
-    "openai>=1.35",  # OpenAI Chat Completions client (used by OpenAIClient in llm.py)
-]
 nlp = [
     "rouge-score>=0.1.2",  # ROUGE (worker/evaluators/engines/rouge.py): Google's reference
                            # implementation; imported only when a ROUGE check runs, so a worker

@@ -15,6 +15,7 @@ from assay.schemas import (
     TestSetEntryID,
     TestSetID,
 )
+from assay.schemas.settings import JudgeSettings
 
 
 class RunID(BaseModel):
@@ -98,6 +99,13 @@ class EvaluationInput(BaseModel):
         description=(
             'The catalogue row\'s `comparison` — how a threshold-scored engine turns '
             'its score into `passed`. Null for a type not scored against a threshold.'
+        ),
+    )
+    judge: JudgeSettings | None = Field(
+        default=None,
+        description=(
+            'The judge settings in effect for this run, for the LLM-judge engine — read '
+            'once per run that has a judge check. Null for every other engine.'
         ),
     )
 

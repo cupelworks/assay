@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from assay.judge_settings import resolve_judge_settings
 from assay.messages import sentence
 from assay.models import (
     OutputSource,
@@ -18,12 +19,14 @@ from assay.models import (
     TestStatus,
     TestTypesModel,
 )
-from assay.schemas import TestTypeAssignment, TestTypeResult
+from assay.schemas import JudgeSettings, TestTypeAssignment, TestTypeResult
 from assay.schemas.settings import describe_validation_error
 from assay.target_settings import resolve_target_settings
 from assay.worker import evaluators, target
 
 logger = logging.getLogger(__name__)
+
+JUDGE_ENGINE = "llm_judge"
 
 
 def execute_run(run_id: uuid.UUID, session: Session) -> None:
@@ -124,13 +127,17 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     # than by the broader try/except above. A failed result is still stamped
     # with the engine the row named (None only if the type isn't in the
     # catalogue at all), so it records what *would* have scored it.
+    judge, judge_problem = _judge_settings(resolved, session)
     results: dict[str, TestTypeResult] = {}
     for assignment, catalogue_row in resolved:
         engine = catalogue_row.engine if catalogue_row is not None else None
         try:
+            if engine == JUDGE_ENGINE and judge_problem:
+                raise ValueError(judge_problem)
             results[assignment.name] = evaluators.evaluate(
                 assignment, catalogue_row, entry,
                 _answer_for(assignment.answer_path, answer, reply, output_source),
+                judge=judge,
             )
         except Exception as exc:
             logger.warning(
@@ -174,6 +181,21 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
             "duration_ms": duration_ms,
         },
     )
+
+
+def _judge_settings(
+        resolved: list[tuple[TestTypeAssignment, TestTypesModel | None]], session: Session,
+) -> tuple[JudgeSettings | None, str | None]:
+    """The judge settings in effect, read once for a run that has a judge
+    check — saved from the UI, else the environment, like the application's
+    — or why they can't be used. Saved settings that no longer validate fail
+    the run's judge checks with the reason; its other checks are scored."""
+    if not any(row is not None and row.engine == JUDGE_ENGINE for _, row in resolved):
+        return None, None
+    try:
+        return resolve_judge_settings(session.get(SettingsModel, SettingsSection.judge)), None
+    except ValidationError as exc:
+        return None, f"The saved judge settings are invalid: {describe_validation_error(exc)}"
 
 
 def _answer_for(path: str | None, answer: str, reply: Any,

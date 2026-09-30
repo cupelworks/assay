@@ -1,21 +1,17 @@
 import logging
 import uuid
-from datetime import datetime, timedelta
 
-from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from assay.messages import sentence
-from assay.models import TargetCheckModel, TargetCheckStatus
+from assay.models import TargetCheckModel
 from assay.schemas.settings import TargetSettings
 from assay.worker import target
+from assay.worker.services._checks import CHECK_EXPIRES_AFTER, EXPIRED, claim, complete, expired
 
 logger = logging.getLogger(__name__)
 
-# A check still queued after this long is completed without calling the
-# application: whoever asked has long stopped waiting for it, and a worker
-# that starts after an outage shouldn't fire a backlog of stale calls.
-CHECK_EXPIRES_AFTER = timedelta(minutes=5)
+__all__ = ["CHECK_EXPIRES_AFTER", "check_target"]
 
 
 def check_target(check_id: uuid.UUID, session: Session) -> None:
@@ -31,23 +27,14 @@ def check_target(check_id: uuid.UUID, session: Session) -> None:
         check_id: UUID of the TargetCheckModel to run.
         session: Active sync SQLAlchemy session (assay.worker.db).
     """
-    claim = session.execute(
-        update(TargetCheckModel)
-        .where(TargetCheckModel.id == check_id,
-               TargetCheckModel.status == TargetCheckStatus.pending)
-        .values(status=TargetCheckStatus.running)
-    )
-    session.commit()
-    if claim.rowcount == 0:
-        # missing, or already claimed by another worker (a duplicate delivery)
+    check = claim(session, TargetCheckModel, check_id)
+    if check is None:
         logger.info("Check %s not claimed: missing, already running or already completed",
                     check_id)
         return
 
-    check = session.scalar(select(TargetCheckModel).where(TargetCheckModel.id == check_id))
-
-    if _age(check.created_at) > CHECK_EXPIRES_AFTER:
-        _complete(check, ok=False, error="Expired before a worker picked it up")
+    if expired(check):
+        complete(check, ok=False, error=EXPIRED)
         session.commit()
         logger.warning("Check %s expired before a worker picked it up", check_id)
         return
@@ -58,14 +45,14 @@ def check_target(check_id: uuid.UUID, session: Session) -> None:
     try:
         response = target.get_answer(check.input, settings)
     except target.TargetError as exc:
-        _complete(check, ok=False, error=sentence(str(exc)), status_code=exc.status,
-                  latency_ms=exc.latency_ms)
+        complete(check, ok=False, error=sentence(str(exc)), status_code=exc.status,
+                 latency_ms=exc.latency_ms)
     else:
         # A run scores an empty answer; a check reports it, since its question
         # is whether these settings get a usable answer out of the application.
-        _complete(check, ok=not response.empty, answer=response.answer or None,
-                  error=response.empty, status_code=response.status,
-                  latency_ms=response.latency_ms)
+        complete(check, ok=not response.empty, answer=response.answer or None,
+                 error=response.empty, status_code=response.status,
+                 latency_ms=response.latency_ms)
     session.commit()
 
     logger.info(
@@ -73,22 +60,3 @@ def check_target(check_id: uuid.UUID, session: Session) -> None:
         f"HTTP {check.status_code}" if check.status_code else "no response",
         extra={"ok": check.ok, "status": check.status_code, "latency_ms": check.latency_ms},
     )
-
-
-def _complete(check: TargetCheckModel, *, ok: bool, answer: str | None = None,
-              error: str | None = None, status_code: int | None = None,
-              latency_ms: float | None = None) -> None:
-    check.status = TargetCheckStatus.completed
-    check.ok = ok
-    check.answer = answer
-    check.error = error
-    check.status_code = status_code
-    check.latency_ms = latency_ms
-    check.completed_at = datetime.now().astimezone()
-
-
-def _age(created_at: datetime) -> timedelta:
-    # SQLite hands a DateTime column back naive (local wall time); compare
-    # like with like either way
-    now = datetime.now(created_at.tzinfo) if created_at.tzinfo else datetime.now()
-    return now - created_at

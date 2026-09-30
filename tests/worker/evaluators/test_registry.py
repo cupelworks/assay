@@ -112,15 +112,6 @@ def test_a_type_missing_from_the_catalogue_is_that_types_failure():
         evaluate(TestTypeAssignment(name="Retired"), None, ENTRY, "x")
 
 
-def test_the_judge_stub_keeps_its_fixed_outcome():
-    # Every deterministic and metric engine scores for real; the judge engine
-    # still returns one fixed outcome until it's replaced.
-    evaluation = EvaluationInput(input="q", reference="a", answer="a")
-
-    assert ENGINES["llm_judge"](evaluation) == TestTypeResult(passed=True, score=None,
-                                                               detail="Testing")
-
-
 def test_the_deterministic_engines_score_for_real_through_the_registry():
     row = TestTypesModel(name="Exact Match", engine="exact_match",
                          engine_settings={"trim": True, "case_sensitive": True}, comparison=None)
