@@ -151,6 +151,7 @@ def test_configure_logging_scopes_the_level_to_the_app_namespace():
         assert logging.getLogger().level == logging.INFO  # third-party stays at INFO
         assert logging.getLogger("sqlalchemy.engine").level == logging.INFO  # SQL statements on
         assert logging.getLogger("uvicorn.access").level == logging.WARNING  # ours replaces it
+        assert logging.getLogger("absl").level == logging.WARNING  # rouge-score's per-check line
 
         configure_logging("WARNING", "text")
 
@@ -180,4 +181,27 @@ def test_configure_logging_is_a_no_op_for_identical_arguments():
 
         assert logging.getLogger().handlers[0] is handler
     finally:
+        _restore()
+
+
+def test_a_rouge_check_logs_nothing_from_its_library():
+    from assay.models import Comparison
+    from assay.schemas import EvaluationInput
+    from assay.worker.evaluators.engines import rouge
+
+    records = []
+    collector = logging.Handler()
+    collector.emit = records.append
+    try:
+        configure_logging("INFO", "text")
+        logging.getLogger().addHandler(collector)
+        rouge.evaluate(EvaluationInput(
+            input="q", reference="a b", answer="a b", config={"threshold": "0"},
+            engine_settings={"variant": "rougeL", "measure": "f1", "stemmer": True},
+            comparison=Comparison.gte,
+        ))
+
+        assert not [record for record in records if record.name == "absl"]
+    finally:
+        logging.getLogger().removeHandler(collector)
         _restore()

@@ -153,6 +153,9 @@ def configure_logging(level: str = "INFO", fmt: Literal["text", "json"] = "text"
                 # Replaced by RequestContextMiddleware's access line, which
                 # adds the request ID, the route template and the duration.
                 "uvicorn.access": {"handlers": ["stdout"], "level": "WARNING", "propagate": False},
+                # rouge-score logs "Using default tokenizer." through absl on
+                # every ROUGE check.
+                "absl": {"level": "WARNING"},
             },
         }
     )
