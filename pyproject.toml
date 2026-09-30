@@ -35,6 +35,8 @@ dev = [
     "jsonschema>=4.18", # Same reason: the worker's JSON checks
     "rouge-score>=0.1.2", # Same reason: the worker's ROUGE engine (see the nlp extra)
     "sacrebleu>=2.4",   # Same reason: the worker's BLEU engine (see the nlp extra)
+    "nltk>=3.9",        # Same reason: the worker's METEOR engine (see the nlp extra); its
+                        # scoring tests skip unless WordNet is downloaded
 ]
 anthropic = [
     "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)
@@ -48,6 +50,9 @@ nlp = [
                            # without this extra fails just that check, with the reason
     "sacrebleu>=2.4",      # BLEU (worker/evaluators/engines/bleu.py): sentence-level BLEU with
                            # smoothing; imported only when a BLEU check runs, likewise
+    "nltk>=3.9",           # METEOR (worker/evaluators/engines/meteor.py), likewise. Needs NLTK's
+                           # WordNet data too, downloaded separately:
+                           # python -m nltk.downloader wordnet
 ]
 worker = [
     "httpx>=0.27",           # The adapter that calls the application under test (worker/target.py)
