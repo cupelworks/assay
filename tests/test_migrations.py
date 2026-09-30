@@ -726,3 +726,62 @@ def test_downgrade_restores_rouges_old_description(scratch):
     assert _test_types(db_path)["ROUGE"]["description"] == (
         "Measures n-gram overlap between output and expected text."
     )
+
+
+# --- ad28dd68006e: BLEU's settings and BLEU (case-insensitive) ---
+
+
+def test_upgrade_gives_bleu_sacrebleus_settings_and_seeds_the_case_insensitive_row(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "ad28dd68006e")
+
+    rows = _test_types(db_path)
+    assert json.loads(rows["BLEU"]["engine_settings"]) == {"smooth_method": "exp",
+                                                           "lowercase": False}
+    variant = rows["BLEU (case-insensitive)"]
+    assert json.loads(variant["engine_settings"]) == {"smooth_method": "exp", "lowercase": True}
+    assert (variant["category"], variant["cost"], variant["engine"], variant["comparison"]) == (
+        "nlp_metric", "fast", "bleu", "gte")
+    for name in ("BLEU", "BLEU (case-insensitive)"):
+        threshold = _fields(db_path, name)["threshold"]
+        assert (threshold["min"], threshold["max"], threshold["placeholder"]) == (0.0, 100.0, "20")
+        assert threshold["hint"].startswith("Shared wording in runs of up to four words.")
+
+
+def test_both_bleu_rows_score_through_the_registry(scratch):
+    from assay.models import Comparison, TestTypesModel
+    from assay.schemas import TestTypeAssignment
+    from assay.worker.evaluators import evaluate
+
+    config, db_path = scratch
+    command.upgrade(config, "ad28dd68006e")
+    rows = _test_types(db_path)
+    reference = "The refund for order 4471 has been issued and will arrive in five days."
+
+    def score(name):
+        row = rows[name]
+        catalogue_row = TestTypesModel(name=name, engine=row["engine"],
+                                       engine_settings=json.loads(row["engine_settings"]),
+                                       comparison=Comparison.gte)
+        entry = type("Entry", (), {"input": "q", "expected_output": reference})()
+        return evaluate(TestTypeAssignment(name=name, config={"threshold": "0"}),
+                        catalogue_row, entry, reference.upper()).score
+
+    # the same answer in capitals: a different text to BLEU, the same one lowercased
+    assert score("BLEU") == 3.1252
+    assert score("BLEU (case-insensitive)") == 100.0
+
+
+def test_downgrade_removes_the_variant_and_restores_bleu(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "ad28dd68006e")
+
+    command.downgrade(config, "1d1fddd1a247")
+
+    rows = _test_types(db_path)
+    assert "BLEU (case-insensitive)" not in rows
+    assert json.loads(rows["BLEU"]["engine_settings"]) == {"smoothing": True}
+    assert rows["BLEU"]["description"] == (
+        "Measures n-gram precision between output and reference text.")
+    assert "hint" not in _fields(db_path, "BLEU")["threshold"]

@@ -29,7 +29,8 @@ scores the reply. Assay scores each case with the checks you assign to it:
   *Matches JSON Schema*, *JSON Field Equals*) and length limits (*Word Count Limit*,
   *Character Count Limit*).
 - **NLP metrics** scored against a threshold you set — *ROUGE* (and ROUGE-1, ROUGE-2,
-  ROUGE-L Recall, ROUGE-L Precision), *BLEU*, *METEOR*, *BERTScore*, *Cosine Similarity*.
+  ROUGE-L Recall, ROUGE-L Precision), *BLEU* (and BLEU case-insensitive), *METEOR*,
+  *BERTScore*, *Cosine Similarity*.
 - **LLM-as-judge** verdicts against a rubric you write — *Correctness*, *Relevance*,
   *Bias*, *Toxicity*, *Hallucination*.
 

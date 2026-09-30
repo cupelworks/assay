@@ -35,8 +35,8 @@ _RUN_DETAIL_RECORDED = {
             "engine_settings": {"trim": True, "case_sensitive": True},
         },
         "BLEU": {
-            "passed": True, "score": 42.0, "detail": None,
-            "engine": "bleu", "engine_settings": {"smoothing": True},
+            "passed": True, "score": 100.0, "detail": None,
+            "engine": "bleu", "engine_settings": {"smooth_method": "exp", "lowercase": False},
         },
     },
     "error": None,
@@ -49,7 +49,7 @@ _RUN_DETAIL_RECORDED = {
     "model_output": "Hello, Alice!",
     "test_type_assignments": [
         {"name": "Exact Match", "config": None},
-        {"name": "BLEU", "config": {"threshold": "0.4"}},
+        {"name": "BLEU", "config": {"threshold": "20"}},
     ],
     "test_case_snapshot_at": {
         "snapshot_at": "2026-07-14T18:03:21.123456"
@@ -76,7 +76,7 @@ _RUN_DETAIL_FROM_APPLICATION = {
     "model_output": None,
     "test_type_assignments": [
         {"name": "Exact Match", "config": None},
-        {"name": "BLEU", "config": {"threshold": "0.4"}, "answer_path": "$.output.greeting"},
+        {"name": "BLEU", "config": {"threshold": "20"}, "answer_path": "$.output.greeting"},
     ],
 }
 
