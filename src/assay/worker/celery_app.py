@@ -30,7 +30,7 @@ from datetime import timedelta
 from urllib.parse import urlparse
 
 from celery import Celery
-from celery.signals import beat_init, setup_logging, worker_init, worker_ready
+from celery.signals import beat_init, celeryd_after_setup, setup_logging, worker_ready
 from kombu.utils.url import maybe_sanitize_url
 
 from assay import __version__
@@ -109,11 +109,12 @@ def _configure_logging(loglevel: int | None = None, **_kwargs) -> None:
         logging.getLogger("celery").setLevel(loglevel)
 
 
-@worker_init.connect
+@celeryd_after_setup.connect
 def _warm_up_evaluators(**_kwargs) -> None:
     """Load what an engine can't load safely from several task threads at
-    once, before the worker takes any task. Imported here, not at the top:
-    the API imports this module too, and never the evaluators."""
+    once: before the worker takes any task, once logging is set up so what
+    it logs is seen. Imported here, not at the top: the API imports this
+    module too, and never the evaluators."""
     from assay.worker.evaluators.engines import meteor
 
     meteor.warm_up()
