@@ -10,7 +10,7 @@ from dotenv import dotenv_values
 from pydantic import ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from assay.schemas.settings import TargetSettings, describe_validation_error
+from assay.schemas.settings import JudgeSettings, TargetSettings, describe_validation_error
 
 # Anchored to this file's own location, not the process's working directory:
 # a bare "./.env" is resolved relative to CWD, which silently finds nothing
@@ -90,6 +90,19 @@ class Settings(BaseSettings):
     # timeout, 5xx, 429) — a retry is a second call to the application, which
     # can cost money or have side effects, so 0 is a valid choice.
     target_max_retries: int = 2
+    # The LLM judge's model — likewise the fallback for when no judge
+    # settings have been saved from the UI, validated by the same rules as a
+    # save (_validate_judge). No provider means no judge is configured: a
+    # judge check in a run fails, saying so. The key itself is never a
+    # setting, only the name of the variable holding it (null: the
+    # provider's standard ANTHROPIC_API_KEY / OPENAI_API_KEY), read by the
+    # worker when it calls.
+    judge_provider: str | None = None
+    judge_model: str | None = None
+    judge_base_url: str | None = None
+    judge_api_key_env: str | None = None
+    judge_timeout_seconds: float = 60
+    judge_max_retries: int = 2
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
@@ -113,6 +126,27 @@ class Settings(BaseSettings):
         except ValidationError as exc:
             raise ValueError(describe_validation_error(exc, prefix="ASSAY_TARGET_")) from None
         return self
+
+    @model_validator(mode="after")
+    def _validate_judge(self) -> "Settings":
+        # As _validate_target, for the judge's group
+        try:
+            self.judge_settings()
+        except ValidationError as exc:
+            raise ValueError(describe_validation_error(exc, prefix="ASSAY_JUDGE_")) from None
+        return self
+
+    def judge_settings(self) -> "JudgeSettings":
+        """The judge settings as this environment defines them — the
+        fallback whenever none have been saved from the UI."""
+        return JudgeSettings(
+            provider=self.judge_provider or None,
+            model=self.judge_model,
+            base_url=self.judge_base_url,
+            api_key_env=self.judge_api_key_env,
+            timeout_seconds=self.judge_timeout_seconds,
+            max_retries=self.judge_max_retries,
+        )
 
     def target_settings(self) -> "TargetSettings":
         """The application-under-test settings as this environment defines

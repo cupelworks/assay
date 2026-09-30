@@ -17,6 +17,12 @@ from assay.schemas.datasets import (
     PaginatedDataSetRowResponse,
 )
 from assay.schemas.settings import (
+    JudgeCheck,
+    JudgeCheckRequest,
+    JudgeProvider,
+    JudgeSettings,
+    JudgeSettingsRead,
+    JudgeSettingsUpdate,
     SettingsSource,
     TargetCheck,
     TargetCheckRequest,
@@ -112,6 +118,12 @@ from assay.schemas.runs import (
 )
 
 __all__ = [
+    "JudgeCheck",
+    "JudgeCheckRequest",
+    "JudgeProvider",
+    "JudgeSettings",
+    "JudgeSettingsRead",
+    "JudgeSettingsUpdate",
     "ZTestRequest",
     "ZTestResult",
     "ConfigFieldDescriptor",

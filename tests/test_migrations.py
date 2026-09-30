@@ -213,7 +213,7 @@ def test_upgrade_creates_an_empty_settings_table_keyed_by_a_constrained_section(
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
             connection.execute(
                 "INSERT INTO settings (section, value, updated_at) "
-                "VALUES ('judge', '{}', '2026-01-01')"
+                "VALUES ('unknown', '{}', '2026-01-01')"
             )
 
 
@@ -878,3 +878,70 @@ def test_downgrade_restores_both_rows_and_removes_the_variant(scratch):
         "model": "distilbert-base-uncased", "measure": "f1", "rescale": False}
     assert rows["Cosine Similarity"]["best_for"] == "RAG evaluation and semantic search tasks."
     assert "hint" not in _fields(db_path, "BERTScore")["threshold"]
+
+
+# --- 1e4b81f30147: the judge settings group, judge_checks, the judge rows ---
+
+
+def test_upgrade_accepts_a_judge_settings_row_and_creates_judge_checks(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "1e4b81f30147")
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("INSERT INTO settings (section, value, updated_at) "
+                           "VALUES ('judge', '{}', '2026-01-01')")
+        connection.execute(
+            "INSERT INTO judge_checks (id, created_at, status, settings) "
+            "VALUES (X'01', '2026-01-01', 'pending', '{}')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "INSERT INTO judge_checks (id, created_at, status, settings) "
+                "VALUES (X'02', '2026-01-01', 'lost', '{}')"
+            )
+
+
+def test_upgrade_says_which_judges_see_the_reference_and_explains_the_rubric(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "1e4b81f30147")
+
+    rows = _test_types(db_path)
+    sees_reference = {
+        name: json.loads(row["engine_settings"])["reference"]
+        for name, row in rows.items() if row["engine"] == "llm_judge"
+    }
+    assert sees_reference == {"Correctness": True, "Hallucination": True, "Relevance": False,
+                              "Bias": False, "Toxicity": False}
+    rubric = _fields(db_path, "Toxicity")["rubric"]
+    assert rubric["placeholder"] == json.loads(
+        rows["Toxicity"]["engine_settings"])["default_rubric"]
+    assert rubric["hint"].startswith("Optional. Replaces the default rubric")
+    assert rows["Toxicity"]["description"].startswith("Asks an AI judge")
+
+
+def test_downgrade_restores_the_judge_rows_and_narrows_the_section_again(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "1e4b81f30147")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("INSERT INTO settings (section, value, updated_at) "
+                           "VALUES ('target', '{}', '2026-01-01')")
+        connection.execute("INSERT INTO settings (section, value, updated_at) "
+                           "VALUES ('judge', '{}', '2026-01-01')")
+
+    command.downgrade(config, "1b6c140a6035")
+
+    rows = _test_types(db_path)
+    assert "reference" not in json.loads(rows["Correctness"]["engine_settings"])
+    assert rows["Correctness"]["description"] == (
+        "Uses an LLM to evaluate factual correctness of the output.")
+    assert "hint" not in _fields(db_path, "Correctness")["rubric"]
+    with sqlite3.connect(db_path) as connection:
+        # the saved target settings survive; the judge's are gone with their group
+        assert connection.execute("SELECT section FROM settings").fetchall() == [("target",)]
+        assert "judge_checks" not in {name for (name,) in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute("INSERT INTO settings (section, value, updated_at) "
+                               "VALUES ('judge', '{}', '2026-01-01')")

@@ -3,6 +3,7 @@
 from assay.models.base import Base
 from assay.models.datasets import DatasetModel, DatasetRowModel
 from assay.models.settings import (
+    JudgeCheckModel,
     SettingsModel,
     SettingsSection,
     TargetCheckModel,
@@ -42,6 +43,7 @@ __all__ = [
     "SettingsSection",
     "StandaloneRunModel",
     "StatisticalVerificationModel",
+    "JudgeCheckModel",
     "TargetCheckModel",
     "TargetCheckStatus",
     "TestModel",

@@ -10,9 +10,10 @@ from assay.models.base import Base
 
 
 class SettingsSection(StrEnum):
-    """A group of settings saved together as one row. `target` is the
-    application under test; the LLM judge's settings will be another group."""
+    """A group of settings saved together as one row: `target` is the
+    application under test, `judge` the LLM judge's model."""
     target = "target"
+    judge = "judge"
 
 
 class SettingsModel(Base):
@@ -21,7 +22,8 @@ class SettingsModel(Base):
     settings as one JSON object.
 
     The shape of `value` is defined in code, by the group's Pydantic schema
-    (schemas/settings.py — TargetSettings for `target`), which validates it
+    (schemas/settings.py — TargetSettings for `target`, JudgeSettings for
+    `judge`), which validates it
     on the way in and on the way out; the table only stores it. Adding a
     setting to a group is a new field with a default on that schema, never a
     migration.
@@ -78,6 +80,38 @@ class TargetCheckModel(Base):
         nullable=False, default=TargetCheckStatus.pending,
     )
     input: Mapped[str] = mapped_column(Text, nullable=False)
+    settings: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class JudgeCheckModel(Base):
+    """
+    One check of the judge settings: the judge asked one fixed question by a
+    worker, with the outcome written back here for the UI to poll — the same
+    lifecycle and outcome columns as TargetCheckModel, with no input.
+
+    `settings` holds the complete settings checked (the effective ones plus
+    any proposed fields). On completion `ok` says whether a readable verdict
+    came back, `answer` holds the judge's rationale when it did and `error`
+    the reason when it didn't.
+    """
+
+    __tablename__ = "judge_checks"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now().astimezone()
+    )
+    status: Mapped[TargetCheckStatus] = mapped_column(
+        SAEnum(TargetCheckStatus, name="judgecheckstatus", create_constraint=True),
+        nullable=False, default=TargetCheckStatus.pending,
+    )
     settings: Mapped[dict] = mapped_column(JSON, nullable=False)
 
     ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

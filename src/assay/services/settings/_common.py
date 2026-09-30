@@ -1,13 +1,14 @@
+from typing import TypeVar
+
 from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import SettingsModel, SettingsSection, TargetCheckModel
-from assay.schemas import TargetCheck, TargetSettings, TargetSettingsUpdate
+from assay.models import JudgeCheckModel, SettingsModel, SettingsSection, TargetCheckModel
+from assay.schemas import JudgeCheck, JudgeSettings, TargetCheck, TargetSettings
 from assay.schemas.settings import settings_errors
 
-# the fields of the settings themselves, without TargetSettingsRead's source/updated_at
-_TARGET_FIELDS = set(TargetSettings.model_fields)
+GroupSettings = TypeVar("GroupSettings", TargetSettings, JudgeSettings)
 
 
 async def _find_target_row(session: AsyncSession) -> SettingsModel | None:
@@ -16,11 +17,17 @@ async def _find_target_row(session: AsyncSession) -> SettingsModel | None:
     return await session.get(SettingsModel, SettingsSection.target)
 
 
+async def _find_judge_row(session: AsyncSession) -> SettingsModel | None:
+    """The `judge` group's saved row, or None when the environment is in effect."""
+    return await session.get(SettingsModel, SettingsSection.judge)
+
+
 def _apply_or_422(
-        current: TargetSettings,
-        changes: TargetSettingsUpdate,
+        current: GroupSettings,
+        changes: BaseModel,
         loc: tuple[str, ...] = ("body",),
-) -> TargetSettings:
+        schema: type[GroupSettings] = TargetSettings,
+) -> GroupSettings:
     """current with the fields sent in changes applied, validated as a whole.
 
     Only fields the caller actually sent are applied — an explicit null
@@ -34,11 +41,12 @@ def _apply_or_422(
             request body). The submitted values are never echoed back.
     """
     merged = {
-        **current.model_dump(include=_TARGET_FIELDS),
+        # the settings themselves, without a Read's source/updated_at
+        **current.model_dump(include=set(schema.model_fields)),
         **changes.model_dump(exclude_unset=True),
     }
     try:
-        return TargetSettings(**merged)
+        return schema(**merged)
     except ValidationError as exc:
         raise RequestValidationError([
             {**error, "loc": (*loc, *error["loc"])} for error in settings_errors(exc)
@@ -52,6 +60,21 @@ def _target_check_schema(check: TargetCheckModel) -> TargetCheck:
         created_at=check.created_at,
         completed_at=check.completed_at,
         settings=TargetSettings.model_validate(check.settings),
+        ok=check.ok,
+        status_code=check.status_code,
+        latency_ms=check.latency_ms,
+        answer=check.answer,
+        error=check.error,
+    )
+
+
+def _judge_check_schema(check: JudgeCheckModel) -> JudgeCheck:
+    return JudgeCheck(
+        id=check.id,
+        status=check.status,
+        created_at=check.created_at,
+        completed_at=check.completed_at,
+        settings=JudgeSettings.model_validate(check.settings),
         ok=check.ok,
         status_code=check.status_code,
         latency_ms=check.latency_ms,

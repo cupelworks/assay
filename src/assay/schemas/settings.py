@@ -1,10 +1,10 @@
 """Settings users see and change from the UI.
 
 TargetSettings is the one definition of the application-under-test
-settings: their shape, defaults and rules. It validates the environment
-fallback (config.py), what PATCH /settings/target saves, a check's
-proposed settings, and a stored row read back — so a value refused in one
-place can't get in through another.
+settings, JudgeSettings of the LLM judge's: their shape, defaults and
+rules. Each validates its group's environment fallback (config.py), what
+PATCH saves, a check's proposed settings, and a stored row read back — so a
+value refused in one place can't get in through another.
 """
 import re
 import uuid
@@ -14,7 +14,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 from jsonpath_ng import parse as parse_jsonpath
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 
 from assay.messages import sentence
 from assay.models import TargetCheckStatus
@@ -255,6 +262,219 @@ class TargetCheck(BaseModel):
         description="Why the check failed, when not `ok`: the reason a run would get "
                     "for a failed call, or that the answer at the output path was "
                     "empty (a run scores an empty answer; a check reports it).",
+    )
+
+
+class JudgeProvider(StrEnum):
+    """The API a judge model is called through. `openai` covers any
+    OpenAI-compatible server, reached through `base_url`."""
+    anthropic = "anthropic"
+    openai = "openai"
+
+
+# Each provider's own API root and the variable its key is read from by default
+JUDGE_DEFAULT_BASE_URLS = {
+    JudgeProvider.anthropic: "https://api.anthropic.com",
+    JudgeProvider.openai: "https://api.openai.com/v1",
+}
+JUDGE_DEFAULT_API_KEY_VARIABLES = {
+    JudgeProvider.anthropic: "ANTHROPIC_API_KEY",
+    JudgeProvider.openai: "OPENAI_API_KEY",
+}
+MAX_MODEL_NAME_LENGTH = 200
+
+
+class JudgeSettings(BaseModel):
+    """The model that answers for the LLM-judge test types, and how it's
+    called.
+
+    The API key itself is never a setting: only the name of the environment
+    variable holding it, read by the process making the call (the worker),
+    so a key never passes through here.
+    """
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "provider": "anthropic",
+                "model": "claude-sonnet-5-5",
+                "base_url": None,
+                "api_key_env": None,
+                "timeout_seconds": 60,
+                "max_retries": 2,
+            }
+        },
+    )
+
+    provider: JudgeProvider | None = Field(
+        None,
+        description="`anthropic` or `openai` (including any OpenAI-compatible server "
+                    "through `base_url`). Null means no judge is configured: a judge "
+                    "check in a run then fails, saying so.",
+    )
+    model: str | None = Field(
+        None, max_length=MAX_MODEL_NAME_LENGTH, validate_default=True,
+        description="The provider's model name, e.g. `claude-sonnet-5-5`. Required when "
+                    "a provider is set. The judge always runs at temperature 0.",
+    )
+    base_url: str | None = Field(
+        None,
+        description="The API root, `http` or `https`; null for the provider's own "
+                    f"(`{JUDGE_DEFAULT_BASE_URLS[JudgeProvider.anthropic]}`, "
+                    f"`{JUDGE_DEFAULT_BASE_URLS[JudgeProvider.openai]}`).",
+    )
+    api_key_env: str | None = Field(
+        None,
+        description="The name of the environment variable holding the API key on the "
+                    "worker — never the key itself. Null for the provider's standard one "
+                    f"(`{JUDGE_DEFAULT_API_KEY_VARIABLES[JudgeProvider.anthropic]}`, "
+                    f"`{JUDGE_DEFAULT_API_KEY_VARIABLES[JudgeProvider.openai]}`).",
+    )
+    timeout_seconds: float = Field(
+        60, gt=0, le=MAX_TIMEOUT_SECONDS,
+        description=f"Per-call timeout, above 0 and at most {MAX_TIMEOUT_SECONDS}.",
+    )
+    max_retries: int = Field(
+        2, ge=0, le=MAX_RETRIES,
+        description="Retries after a connection error, timeout, 5xx or 429 "
+                    f"(0 to {MAX_RETRIES}); 0 means a single call.",
+    )
+
+    @field_validator("model", "base_url", "api_key_env", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("model")
+    @classmethod
+    def _model_with_a_provider(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None and info.data.get("provider") is not None:
+            raise ValueError("Required when a provider is set")
+        return value
+
+    @field_validator("base_url")
+    @classmethod
+    def _http_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("Must be an http:// or https:// URL")
+        return value.rstrip("/")
+
+    @field_validator("api_key_env")
+    @classmethod
+    def _variable_name(cls, value: str | None) -> str | None:
+        if value is not None and not _VARIABLE_NAME.match(value):
+            raise ValueError(
+                "Must be a valid variable name (letters, digits and _, not starting "
+                "with a digit)"
+            )
+        return value
+
+    def key_variable(self) -> str | None:
+        """The variable the key is read from: `api_key_env`, else the
+        provider's standard one; None with no provider."""
+        if self.provider is None:
+            return None
+        return self.api_key_env or JUDGE_DEFAULT_API_KEY_VARIABLES[self.provider]
+
+    def api_root(self) -> str | None:
+        """`base_url`, else the provider's own; None with no provider."""
+        if self.provider is None:
+            return None
+        return self.base_url or JUDGE_DEFAULT_BASE_URLS[self.provider]
+
+
+class JudgeSettingsUpdate(BaseModel):
+    """PATCH /settings/judge: only the fields sent change; `null` clears a
+    nullable one. The result is validated as a whole against JudgeSettings'
+    rules."""
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"provider": "anthropic",
+                                       "model": "claude-haiku-4-5-20251001"}},
+    )
+
+    provider: JudgeProvider | None = None
+    model: str | None = None
+    base_url: str | None = None
+    api_key_env: str | None = None
+    timeout_seconds: float | None = None
+    max_retries: int | None = None
+
+
+class JudgeSettingsRead(JudgeSettings):
+    """The effective judge settings, the variable the key is read from, and
+    where the settings come from."""
+    api_key_variable: str | None = Field(
+        None,
+        description="Read-only: the environment variable the worker reads the API key "
+                    "from — `api_key_env`, else the provider's standard one. Null with no "
+                    "provider. Whether it's set is only known on the worker: run a check.",
+    )
+    source: SettingsSource = Field(
+        ...,
+        description="`database`: saved from the UI. `environment`: never saved (or "
+                    "reset), so read from the ASSAY_JUDGE_* environment variables and "
+                    "the defaults. The source applies to the whole group.",
+    )
+    updated_at: datetime | None = Field(
+        None,
+        description="When the settings were last saved from the UI; null when the "
+                    "source is the environment.",
+    )
+
+
+class JudgeCheckRequest(BaseModel):
+    """POST /settings/judge/checks."""
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"settings": {"model": "claude-haiku-4-5-20251001"}}},
+    )
+
+    settings: JudgeSettingsUpdate | None = Field(
+        None,
+        description="Optional fields to try on top of the current settings, validated "
+                    "like a PATCH. Never saved.",
+    )
+
+
+class JudgeCheck(BaseModel):
+    """One check of the judge settings, run on a worker: the judge is asked
+    one fixed question."""
+    id: uuid.UUID
+    status: TargetCheckStatus = Field(
+        ...,
+        description="`pending` until a worker picks it up, `running` while it asks the "
+                    "judge, `completed` once the outcome is written.",
+    )
+    created_at: datetime
+    completed_at: datetime | None = None
+    settings: JudgeSettings = Field(
+        ..., description="The complete settings this check uses (or used).",
+    )
+    ok: bool | None = Field(
+        None,
+        description="Whether the judge gave a readable verdict — whatever the verdict. "
+                    "Null until completed.",
+    )
+    status_code: int | None = Field(
+        None, description="The provider's HTTP status, when a response came back.",
+    )
+    latency_ms: float | None = Field(
+        None, description="How long the call took, when a response came back.",
+    )
+    answer: str | None = Field(
+        None, description="The judge's rationale for its verdict, when `ok`.",
+    )
+    error: str | None = Field(
+        None,
+        description="Why the check failed, when not `ok`: the reason a judge check in a "
+                    "run would get.",
     )
 
 

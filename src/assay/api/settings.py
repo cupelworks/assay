@@ -5,12 +5,26 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
-from assay.schemas import TargetCheck, TargetCheckRequest, TargetSettingsRead, TargetSettingsUpdate
+from assay.schemas import (
+    JudgeCheck,
+    JudgeCheckRequest,
+    JudgeSettingsRead,
+    JudgeSettingsUpdate,
+    TargetCheck,
+    TargetCheckRequest,
+    TargetSettingsRead,
+    TargetSettingsUpdate,
+)
 from assay.services import (
+    create_judge_check,
     create_target_check,
+    get_judge_check,
+    get_judge_settings,
     get_target_check,
     get_target_settings,
+    reset_judge_settings,
     reset_target_settings,
+    update_judge_settings,
     update_target_settings,
 )
 
@@ -250,3 +264,224 @@ async def read_target_check(
     """One check, as far as it has got: `pending`, `running` (a worker is
     calling the application) or `completed` with its outcome."""
     return await get_target_check(check_id, session)
+
+
+_JUDGE_FROM_DATABASE = {
+    "provider": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "base_url": None,
+    "api_key_env": None,
+    "timeout_seconds": 60,
+    "max_retries": 2,
+    "api_key_variable": "ANTHROPIC_API_KEY",
+    "source": "database",
+    "updated_at": "2026-10-01T09:30:00+02:00",
+}
+_JUDGE_FROM_ENVIRONMENT = {
+    "provider": None,
+    "model": None,
+    "base_url": None,
+    "api_key_env": None,
+    "timeout_seconds": 60,
+    "max_retries": 2,
+    "api_key_variable": None,
+    "source": "environment",
+    "updated_at": None,
+}
+_JUDGE_RESPONSE = {
+    "description": (
+        "The judge settings now in effect. `source` says where they come from, for the "
+        "whole group: `database` (saved from the UI) or `environment` (never saved, or "
+        "reset — the `ASSAY_JUDGE_*` variables and the defaults). `api_key_variable` is "
+        "the variable the worker reads the key from; the key itself is never returned."
+    ),
+    "content": {
+        "application/json": {
+            "examples": {
+                "saved": {"summary": "Saved from the UI", "value": _JUDGE_FROM_DATABASE},
+                "environment": {"summary": "No judge configured",
+                                "value": _JUDGE_FROM_ENVIRONMENT},
+            }
+        }
+    },
+}
+_INVALID_JUDGE_SETTINGS = {
+    "description": (
+        "The resulting settings break at least one rule; every problem is listed, each "
+        "`loc` pointing at the field. Nothing is saved."
+    ),
+    "content": {
+        "application/json": {
+            "example": {
+                "detail": [
+                    {"type": "value_error", "loc": ["body", "model"],
+                     "msg": "Required when a provider is set"},
+                    {"type": "value_error", "loc": ["body", "api_key_env"],
+                     "msg": "Must be a valid variable name (letters, digits and _, not "
+                            "starting with a digit)"},
+                ]
+            }
+        }
+    },
+}
+_JUDGE_CHECK_PENDING = {
+    "id": "8e2f4b1a-6c3d-4e5f-9a7b-1c2d3e4f5a6b",
+    "status": "pending",
+    "created_at": "2026-10-01T09:31:12+02:00",
+    "completed_at": None,
+    "settings": {k: v for k, v in _JUDGE_FROM_DATABASE.items()
+                 if k not in ("api_key_variable", "source", "updated_at")},
+    "ok": None, "status_code": None, "latency_ms": None, "answer": None, "error": None,
+}
+
+
+@router.get(
+    path="/settings/judge",
+    summary="Read the judge settings",
+    responses={200: _JUDGE_RESPONSE},
+)
+async def read_judge_settings(session: SessionDep) -> JudgeSettingsRead:  # pragma: no cover
+    """The model that answers for the LLM-judge test types (Correctness,
+    Relevance, Bias, Toxicity, Hallucination), how it's called, and where
+    these settings come from.
+
+    With nothing saved from the UI, they come from the `ASSAY_JUDGE_*`
+    environment variables and the defaults (`source: environment`) — by
+    default no provider, so no judge: a judge check in a run then fails,
+    saying so. Once saved, the saved settings apply as a whole until reset.
+
+    The API key is never a setting: `api_key_variable` names the environment
+    variable the worker reads it from. Whether it's set is only known on the
+    worker — run a check (`POST /settings/judge/checks`).
+    """
+    return await get_judge_settings(session)
+
+
+@router.patch(
+    path="/settings/judge",
+    summary="Change the judge settings",
+    responses={
+        200: {**_JUDGE_RESPONSE, "description": "The saved settings, `source: database`."},
+        422: _INVALID_JUDGE_SETTINGS,
+    },
+)
+async def patch_judge_settings(
+        request: JudgeSettingsUpdate,
+        session: SessionDep,
+) -> JudgeSettingsRead:  # pragma: no cover
+    """Change some settings; send only the fields to change, `null` to clear
+    a nullable one.
+
+    | Field | Rule |
+    |---|---|
+    | `provider` | `anthropic`, `openai`, or `null` for no judge |
+    | `model` | required when a provider is set; the provider's model name |
+    | `base_url` | `http`/`https` API root, or `null` for the provider's own |
+    | `api_key_env` | a variable name, or `null` for the provider's standard one |
+    | `timeout_seconds` | above 0, at most 600 |
+    | `max_retries` | 0 to 10 |
+
+    `openai` with a `base_url` reaches any OpenAI-compatible server (vLLM,
+    Ollama, LM Studio, OpenRouter). The first save copies the environment's
+    settings forward with the changes applied. A change applies from the
+    next run; the worker doesn't need a restart.
+    """
+    return await update_judge_settings(request, session)
+
+
+@router.delete(
+    path="/settings/judge",
+    summary="Reset the judge settings to the environment's",
+    responses={200: {**_JUDGE_RESPONSE,
+                     "description": "The settings now in effect, `source: environment`."}},
+)
+async def delete_judge_settings(session: SessionDep) -> JudgeSettingsRead:  # pragma: no cover
+    """Drop the settings saved from the UI, so the `ASSAY_JUDGE_*`
+    environment variables and the defaults apply again. Resetting when
+    nothing is saved is not an error.
+    """
+    return await reset_judge_settings(session)
+
+
+@router.post(
+    path="/settings/judge/checks",
+    summary="Check the judge settings on a worker",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        202: {
+            "description": (
+                "The check, `pending` until a worker has asked the judge — poll "
+                "`GET /settings/judge/checks/{check_id}`. Already `completed` with "
+                "`ok: false` if it couldn't be sent to a worker."
+            ),
+            "content": {"application/json": {"example": _JUDGE_CHECK_PENDING}},
+        },
+        422: {**_INVALID_JUDGE_SETTINGS,
+              "description": "The proposed settings break at least one rule. No check is "
+                             "created."},
+    },
+)
+async def post_judge_check(
+        request: JudgeCheckRequest,
+        session: SessionDep,
+) -> JudgeCheck:  # pragma: no cover
+    """Ask a worker to put one fixed, tiny question to the judge — whether
+    "Paris is the capital of France." is a relevant answer to "What is the
+    capital of France?" — and record what happened.
+
+    It runs on a worker because that's where runs call the judge: the only
+    place the API key's variable can be read. `settings` optionally proposes
+    fields to try on top of the settings in effect, validated like a PATCH
+    and never saved. One attempt, no retries; a check still queued after 5
+    minutes is completed without calling the judge, with the reason.
+    """
+    return await create_judge_check(request, session)
+
+
+@router.get(
+    path="/settings/judge/checks/{check_id}",
+    summary="Read a check of the judge settings",
+    responses={
+        200: {
+            "description": (
+                "The check as far as it has got. Poll until `status` is `completed`, "
+                "then `ok` says whether the judge gave a readable verdict — whatever it "
+                "was: `answer` holds the judge's rationale, or `error` says why not, "
+                "the reason a judge check in a run would get."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "ok": {"summary": "The judge answered", "value": {
+                            **_JUDGE_CHECK_PENDING, "status": "completed",
+                            "completed_at": "2026-10-01T09:31:14+02:00", "ok": True,
+                            "status_code": 200, "latency_ms": 1840.2,
+                            "answer": "The answer directly states that Paris is the capital "
+                                      "of France, which is exactly what was asked.",
+                        }},
+                        "no_key": {"summary": "The key's variable isn't set", "value": {
+                            **_JUDGE_CHECK_PENDING, "status": "completed",
+                            "completed_at": "2026-10-01T09:31:12+02:00", "ok": False,
+                            "error": "ANTHROPIC_API_KEY is not set on this server",
+                        }},
+                        "pending": {"summary": "Not picked up yet",
+                                    "value": _JUDGE_CHECK_PENDING},
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "No check exists with the given ID.",
+            "content": {"application/json": {
+                "example": {"detail": "Check with ID '<check_id>' not found"}
+            }},
+        },
+    },
+)
+async def read_judge_check(
+        check_id: uuid.UUID,
+        session: SessionDep,
+) -> JudgeCheck:  # pragma: no cover
+    """One check, as far as it has got: `pending`, `running` (a worker is
+    asking the judge) or `completed` with its outcome."""
+    return await get_judge_check(check_id, session)

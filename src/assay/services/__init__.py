@@ -28,10 +28,15 @@ from assay.services.runs import (
     get_test_set_execution_run_metadata_all_runs,
 )
 from assay.services.settings import (
+    create_judge_check,
     create_target_check,
+    get_judge_check,
+    get_judge_settings,
     get_target_check,
     get_target_settings,
+    reset_judge_settings,
     reset_target_settings,
+    update_judge_settings,
     update_target_settings,
 )
 from assay.services.stats import run_z_test
@@ -71,6 +76,7 @@ from assay.services.tests import (
 __all__ = [
     "add_test_sets_to_test_plan_by_id",
     "add_tests_to_test_set_by_test_id",
+    "create_judge_check",
     "create_new_live_test_plan_run",
     "create_new_live_test_set_run",
     "create_new_replay_test_plan_run",
@@ -88,6 +94,8 @@ __all__ = [
     "get_all_created_tests",
     "get_all_test_plan_entries_metadata",
     "get_all_test_plans_metadata",
+    "get_judge_check",
+    "get_judge_settings",
     "get_test_plan_metadata_by_id",
     "get_datasets_metadata",
     "get_dataset_metadata_by_id",
@@ -110,11 +118,13 @@ __all__ = [
     "get_test_types_by_category",
     "get_target_check",
     "get_target_settings",
+    "reset_judge_settings",
     "reset_target_settings",
     "run_z_test",
     "update_dataset_name_by_id",
     "update_dataset_rows_by_id",
     "delete_dataset_rows_by_ids",
+    "update_judge_settings",
     "upload_new_rows_in_existing_dataset",
     "upload_dataset_via_path",
     "delete_dataset_by_id",
