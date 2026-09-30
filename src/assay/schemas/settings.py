@@ -267,15 +267,15 @@ class TargetCheck(BaseModel):
 
 class JudgeProvider(StrEnum):
     """The API a judge model is called through. `openai` covers any
-    OpenAI-compatible server, reached through `base_url`."""
+    OpenAI-compatible server, reached through `url`."""
     anthropic = "anthropic"
     openai = "openai"
 
 
-# Each provider's own API root and the variable its key is read from by default
-JUDGE_DEFAULT_BASE_URLS = {
-    JudgeProvider.anthropic: "https://api.anthropic.com",
-    JudgeProvider.openai: "https://api.openai.com/v1",
+# Each provider's own endpoint and the variable its key is read from by default
+JUDGE_DEFAULT_ENDPOINTS = {
+    JudgeProvider.anthropic: "https://api.anthropic.com/v1/messages",
+    JudgeProvider.openai: "https://api.openai.com/v1/chat/completions",
 }
 JUDGE_DEFAULT_API_KEY_VARIABLES = {
     JudgeProvider.anthropic: "ANTHROPIC_API_KEY",
@@ -299,7 +299,7 @@ class JudgeSettings(BaseModel):
             "example": {
                 "provider": "anthropic",
                 "model": "claude-sonnet-5-5",
-                "base_url": None,
+                "url": None,
                 "api_key_env": None,
                 "timeout_seconds": 60,
                 "max_retries": 2,
@@ -310,7 +310,7 @@ class JudgeSettings(BaseModel):
     provider: JudgeProvider | None = Field(
         None,
         description="`anthropic` or `openai` (including any OpenAI-compatible server "
-                    "through `base_url`). Null means no judge is configured: a judge "
+                    "through `url`). Null means no judge is configured: a judge "
                     "check in a run then fails, saying so.",
     )
     model: str | None = Field(
@@ -318,11 +318,14 @@ class JudgeSettings(BaseModel):
         description="The provider's model name, e.g. `claude-sonnet-5-5`. Required when "
                     "a provider is set. The judge always runs at temperature 0.",
     )
-    base_url: str | None = Field(
+    url: str | None = Field(
         None,
-        description="The API root, `http` or `https`; null for the provider's own "
-                    f"(`{JUDGE_DEFAULT_BASE_URLS[JudgeProvider.anthropic]}`, "
-                    f"`{JUDGE_DEFAULT_BASE_URLS[JudgeProvider.openai]}`).",
+        description="The endpoint the judge is called at, `http` or `https`, exactly as "
+                    "written — nothing is appended to it. Null for the provider's own "
+                    f"(`{JUDGE_DEFAULT_ENDPOINTS[JudgeProvider.anthropic]}`, "
+                    f"`{JUDGE_DEFAULT_ENDPOINTS[JudgeProvider.openai]}`); with `openai`, "
+                    "any OpenAI-compatible server's chat completions endpoint, e.g. "
+                    "`http://localhost:11434/v1/chat/completions`.",
     )
     api_key_env: str | None = Field(
         None,
@@ -341,7 +344,7 @@ class JudgeSettings(BaseModel):
                     f"(0 to {MAX_RETRIES}); 0 means a single call.",
     )
 
-    @field_validator("model", "base_url", "api_key_env", mode="before")
+    @field_validator("model", "url", "api_key_env", mode="before")
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
@@ -355,15 +358,15 @@ class JudgeSettings(BaseModel):
             raise ValueError("Required when a provider is set")
         return value
 
-    @field_validator("base_url")
+    @field_validator("url")
     @classmethod
-    def _http_base_url(cls, value: str | None) -> str | None:
+    def _http_url(cls, value: str | None) -> str | None:
         if value is None:
             return None
         parsed = urlparse(value)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError("Must be an http:// or https:// URL")
-        return value.rstrip("/")
+        return value
 
     @field_validator("api_key_env")
     @classmethod
@@ -382,11 +385,12 @@ class JudgeSettings(BaseModel):
             return None
         return self.api_key_env or JUDGE_DEFAULT_API_KEY_VARIABLES[self.provider]
 
-    def api_root(self) -> str | None:
-        """`base_url`, else the provider's own; None with no provider."""
+    def endpoint(self) -> str | None:
+        """The URL the judge is called at: `url` as written, else the
+        provider's own endpoint; None with no provider."""
         if self.provider is None:
             return None
-        return self.base_url or JUDGE_DEFAULT_BASE_URLS[self.provider]
+        return self.url or JUDGE_DEFAULT_ENDPOINTS[self.provider]
 
 
 class JudgeSettingsUpdate(BaseModel):
@@ -401,15 +405,20 @@ class JudgeSettingsUpdate(BaseModel):
 
     provider: JudgeProvider | None = None
     model: str | None = None
-    base_url: str | None = None
+    url: str | None = None
     api_key_env: str | None = None
     timeout_seconds: float | None = None
     max_retries: int | None = None
 
 
 class JudgeSettingsRead(JudgeSettings):
-    """The effective judge settings, the variable the key is read from, and
-    where the settings come from."""
+    """The effective judge settings, the URL and the variable the worker
+    uses, and where the settings come from."""
+    endpoint: str | None = Field(
+        None,
+        description="Read-only: the URL the worker calls the judge at — `url`, else the "
+                    "provider's own endpoint. Null with no provider.",
+    )
     api_key_variable: str | None = Field(
         None,
         description="Read-only: the environment variable the worker reads the API key "

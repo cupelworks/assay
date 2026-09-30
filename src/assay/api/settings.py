@@ -269,10 +269,11 @@ async def read_target_check(
 _JUDGE_FROM_DATABASE = {
     "provider": "anthropic",
     "model": "claude-sonnet-5-5",
-    "base_url": None,
+    "url": None,
     "api_key_env": None,
     "timeout_seconds": 60,
     "max_retries": 2,
+    "endpoint": "https://api.anthropic.com/v1/messages",
     "api_key_variable": "ANTHROPIC_API_KEY",
     "source": "database",
     "updated_at": "2026-10-01T09:30:00+02:00",
@@ -280,10 +281,11 @@ _JUDGE_FROM_DATABASE = {
 _JUDGE_FROM_ENVIRONMENT = {
     "provider": None,
     "model": None,
-    "base_url": None,
+    "url": None,
     "api_key_env": None,
     "timeout_seconds": 60,
     "max_retries": 2,
+    "endpoint": None,
     "api_key_variable": None,
     "source": "environment",
     "updated_at": None,
@@ -292,8 +294,10 @@ _JUDGE_RESPONSE = {
     "description": (
         "The judge settings now in effect. `source` says where they come from, for the "
         "whole group: `database` (saved from the UI) or `environment` (never saved, or "
-        "reset — the `ASSAY_JUDGE_*` variables and the defaults). `api_key_variable` is "
-        "the variable the worker reads the key from; the key itself is never returned."
+        "reset — the `ASSAY_JUDGE_*` variables and the defaults). `endpoint` is the URL "
+        "the worker calls — `url` as written, else the provider's own — and "
+        "`api_key_variable` the variable it reads the key from; the key itself is never "
+        "returned."
     ),
     "content": {
         "application/json": {
@@ -330,7 +334,7 @@ _JUDGE_CHECK_PENDING = {
     "created_at": "2026-10-01T09:31:12+02:00",
     "completed_at": None,
     "settings": {k: v for k, v in _JUDGE_FROM_DATABASE.items()
-                 if k not in ("api_key_variable", "source", "updated_at")},
+                 if k not in ("endpoint", "api_key_variable", "source", "updated_at")},
     "ok": None, "status_code": None, "latency_ms": None, "answer": None, "error": None,
 }
 
@@ -376,13 +380,15 @@ async def patch_judge_settings(
     |---|---|
     | `provider` | `anthropic`, `openai`, or `null` for no judge |
     | `model` | required when a provider is set; the provider's model name |
-    | `base_url` | `http`/`https` API root, or `null` for the provider's own |
+    | `url` | `http`/`https` endpoint, called exactly as written, or `null` for the provider's own |
     | `api_key_env` | a variable name, or `null` for the provider's standard one |
     | `timeout_seconds` | above 0, at most 600 |
     | `max_retries` | 0 to 10 |
 
-    `openai` with a `base_url` reaches any OpenAI-compatible server (vLLM,
-    Ollama, LM Studio, OpenRouter). The first save copies the environment's
+    Nothing is appended to `url`: it's the whole endpoint, e.g.
+    `http://localhost:11434/v1/chat/completions` for Ollama with `openai`, which
+    reaches any OpenAI-compatible server (vLLM, Ollama, LM Studio,
+    OpenRouter). `GET` returns the resulting `endpoint`. The first save copies the environment's
     settings forward with the changes applied. A change applies from the
     next run; the worker doesn't need a restart.
     """

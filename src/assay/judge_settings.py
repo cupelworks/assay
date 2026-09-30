@@ -34,10 +34,11 @@ def resolve_judge_settings(row: SettingsModel | None) -> JudgeSettingsRead:
 
 def judge_settings_read(effective: JudgeSettings, source: SettingsSource,
                         updated_at: datetime | None) -> JudgeSettingsRead:
-    """effective as the API returns it: with the variable its key is read
-    from, and where it comes from."""
+    """effective as the API returns it: with the URL the worker calls, the
+    variable its key is read from, and where it comes from."""
     return JudgeSettingsRead(
         **effective.model_dump(),
+        endpoint=effective.endpoint(),
         api_key_variable=effective.key_variable(),
         source=source,
         updated_at=updated_at,

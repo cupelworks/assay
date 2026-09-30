@@ -971,3 +971,56 @@ def test_downgrade_restores_the_shared_rubric_hint(scratch):
     assert _fields(db_path, "Bias")["rubric"]["hint"] == (
         "Optional. Replaces the default rubric, shown as the example; say what the answer "
         "must do to pass.")
+
+
+# --- b795f3711490: the judge's URL is the full endpoint ---
+
+
+def _judge_values(db_path: Path) -> tuple[list[dict], list[dict]]:
+    with sqlite3.connect(db_path) as connection:
+        saved = [json.loads(value) for (value,) in connection.execute(
+            "SELECT value FROM settings WHERE section = 'judge'")]
+        checks = [json.loads(value) for (value,) in connection.execute(
+            "SELECT settings FROM judge_checks ORDER BY id")]
+    return saved, checks
+
+
+def test_upgrade_turns_base_url_into_the_full_endpoint_it_called(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "66000c4b71ab")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO settings (section, value, updated_at) VALUES ('judge', ?, '2026-01-01')",
+            (json.dumps({"provider": "openai", "model": "m",
+                         "base_url": "http://localhost:11434/v1/"}),))
+        for n, value in enumerate([
+            {"provider": "anthropic", "model": "m", "base_url": "https://proxy.test"},
+            {"provider": "anthropic", "model": "m", "base_url": None},
+            {"provider": None, "model": None, "base_url": None},
+        ]):
+            connection.execute(
+                "INSERT INTO judge_checks (id, created_at, status, settings) "
+                "VALUES (?, '2026-01-01', 'completed', ?)", (f"{n + 1:032x}", json.dumps(value)))
+
+    command.upgrade(config, "b795f3711490")
+
+    saved, checks = _judge_values(db_path)
+    assert saved == [{"provider": "openai", "model": "m",
+                      "url": "http://localhost:11434/v1/chat/completions"}]
+    assert [check["url"] for check in checks] == ["https://proxy.test/v1/messages", None, None]
+    assert all("base_url" not in check for check in checks)
+
+
+def test_downgrade_takes_the_appended_path_back_off(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "b795f3711490")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO settings (section, value, updated_at) VALUES ('judge', ?, '2026-01-01')",
+            (json.dumps({"provider": "anthropic", "model": "m",
+                         "url": "https://proxy.test/v1/messages"}),))
+
+    command.downgrade(config, "66000c4b71ab")
+
+    saved, _ = _judge_values(db_path)
+    assert saved == [{"provider": "anthropic", "model": "m", "base_url": "https://proxy.test"}]

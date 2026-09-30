@@ -14,10 +14,10 @@ from assay.schemas import JudgeProvider, JudgeSettings, SettingsSource
 def test_the_defaults_are_no_judge():
     judge = JudgeSettings()
 
-    assert (judge.provider, judge.model, judge.base_url, judge.api_key_env) == (
+    assert (judge.provider, judge.model, judge.url, judge.api_key_env) == (
         None, None, None, None)
     assert (judge.timeout_seconds, judge.max_retries) == (60, 2)
-    assert (judge.key_variable(), judge.api_root()) == (None, None)
+    assert (judge.key_variable(), judge.endpoint()) == (None, None)
 
 
 def test_a_provider_needs_a_model_and_the_problem_is_on_the_model_field():
@@ -38,29 +38,30 @@ def test_a_blank_model_is_no_model(model):
 
 def test_every_problem_is_reported_at_once():
     with pytest.raises(ValidationError) as caught:
-        JudgeSettings(provider="mistral", model="m", base_url="ftp://x", api_key_env="1KEY",
+        JudgeSettings(provider="mistral", model="m", url="ftp://x", api_key_env="1KEY",
                       timeout_seconds=0, max_retries=11)
 
     assert {error["loc"][0] for error in caught.value.errors()} == {
-        "provider", "base_url", "api_key_env", "timeout_seconds", "max_retries"}
+        "provider", "url", "api_key_env", "timeout_seconds", "max_retries"}
 
 
-def test_the_key_variable_and_api_root_default_to_the_providers_own():
+def test_the_key_variable_and_endpoint_default_to_the_providers_own():
     anthropic = JudgeSettings(provider="anthropic", model="claude-sonnet-5-5")
     openai = JudgeSettings(provider="openai", model="gpt-4o-mini")
 
-    assert (anthropic.key_variable(), anthropic.api_root()) == (
-        "ANTHROPIC_API_KEY", "https://api.anthropic.com")
-    assert (openai.key_variable(), openai.api_root()) == (
-        "OPENAI_API_KEY", "https://api.openai.com/v1")
+    assert (anthropic.key_variable(), anthropic.endpoint()) == (
+        "ANTHROPIC_API_KEY", "https://api.anthropic.com/v1/messages")
+    assert (openai.key_variable(), openai.endpoint()) == (
+        "OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions")
 
 
-def test_a_custom_key_variable_and_base_url_win():
+def test_a_custom_key_variable_and_url_win_and_the_url_is_kept_as_written():
     judge = JudgeSettings(provider="openai", model="llama3", api_key_env=" LOCAL_KEY ",
-                          base_url="http://localhost:11434/v1/")
+                          url=" http://localhost:11434/v1/chat/completions/ ")
 
     assert judge.key_variable() == "LOCAL_KEY"
-    assert judge.api_root() == "http://localhost:11434/v1"
+    # only surrounding blanks go; nothing is appended or trimmed off the path
+    assert judge.endpoint() == "http://localhost:11434/v1/chat/completions/"
 
 
 def test_the_model_name_is_bounded():

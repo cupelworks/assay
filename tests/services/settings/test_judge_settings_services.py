@@ -231,3 +231,14 @@ def test_an_unknown_check_is_a_404():
 
     assert caught.value.status_code == 404
     assert caught.value.detail == f"Check with ID '{check_id}' not found"
+
+
+def test_get_returns_the_endpoint_the_worker_calls():
+    default = asyncio.run(get_judge_settings(_session(_saved_row())))
+    written = asyncio.run(get_judge_settings(_session(_saved_row(
+        provider="openai", url="http://localhost:11434/v1/chat/completions"))))
+    no_judge = asyncio.run(get_judge_settings(_session()))
+
+    assert (default.url, default.endpoint) == (None, "https://api.anthropic.com/v1/messages")
+    assert written.endpoint == "http://localhost:11434/v1/chat/completions"
+    assert no_judge.endpoint is None

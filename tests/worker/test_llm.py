@@ -149,9 +149,9 @@ def test_openai_a_reply_without_a_message_is_unreadable():
         _ask(OPENAI, _transport((200, {"choices": []})))
 
 
-def test_a_base_url_reaches_an_openai_compatible_server_with_its_own_key(monkeypatch):
+def test_a_url_is_called_exactly_as_written_with_its_own_key(monkeypatch):
     monkeypatch.setenv("LOCAL_KEY", "local")
-    settings = OPENAI.model_copy(update={"base_url": "http://localhost:11434/v1",
+    settings = OPENAI.model_copy(update={"url": "http://localhost:11434/v1/chat/completions",
                                          "api_key_env": "LOCAL_KEY"})
     transport = _transport((200, _openai_reply()))
 
@@ -193,7 +193,8 @@ def test_a_4xx_is_not_retried_and_carries_the_providers_message():
     with pytest.raises(llm.JudgeError) as caught:
         _ask(ANTHROPIC, transport)
 
-    assert str(caught.value) == "Judge answered HTTP 401: invalid x-api-key"
+    assert str(caught.value) == ("Judge answered HTTP 401 at https://api.anthropic.com/v1/"
+                                 "messages: invalid x-api-key")
     assert caught.value.status == 401
     assert len(transport.requests) == 1
 
@@ -204,8 +205,9 @@ def test_a_long_provider_message_is_cut():
     with pytest.raises(llm.JudgeError) as caught:
         _ask(OPENAI, transport)
 
-    assert len(str(caught.value)) < 240
-    assert str(caught.value).endswith("…")
+    provider_message = str(caught.value).split(": ", 1)[1]
+    assert len(provider_message) == 200
+    assert provider_message.endswith("…")
 
 
 def test_a_429_is_retried_then_answered():
@@ -218,7 +220,7 @@ def test_a_429_is_retried_then_answered():
 def test_5xx_until_the_retries_run_out():
     transport = _transport((529, {}), (529, {}), (529, {}))
 
-    with pytest.raises(llm.JudgeError, match="Judge answered HTTP 529 after 3 attempt"):
+    with pytest.raises(llm.JudgeError, match="Judge answered HTTP 529 at .* after 3 attempt"):
         _ask(ANTHROPIC, transport)
 
 
@@ -229,7 +231,8 @@ def test_a_connection_error_is_retried_and_named():
     with pytest.raises(llm.JudgeError) as caught:
         _ask(ANTHROPIC, transport)
 
-    assert str(caught.value) == "ConnectError calling the judge after 3 attempt(s)"
+    assert str(caught.value) == ("ConnectError calling the judge at https://api.anthropic.com/"
+                                 "v1/messages after 3 attempt(s)")
     assert caught.value.status is None
 
 
@@ -252,3 +255,12 @@ def test_a_call_logs_model_latency_and_tokens_never_the_prompt_the_reply_or_the_
     assert "312 in / 41 out tokens" in caplog.text
     for secret in ("the prompt", "It answers the question.", "sk-ant-test"):
         assert secret not in caplog.text
+
+
+def test_a_wrong_url_shows_in_the_reason_without_its_query_string():
+    settings = ANTHROPIC.model_copy(update={"url": "http://localhost:8001/chat?token=s3cret"})
+
+    with pytest.raises(llm.JudgeError) as caught:
+        _ask(settings, _transport((404, {"detail": "Not Found"})))
+
+    assert str(caught.value) == "Judge answered HTTP 404 at http://localhost:8001/chat"

@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     # worker when it calls.
     judge_provider: str | None = None
     judge_model: str | None = None
-    judge_base_url: str | None = None
+    judge_url: str | None = None
     judge_api_key_env: str | None = None
     judge_timeout_seconds: float = 60
     judge_max_retries: int = 2
@@ -142,7 +142,7 @@ class Settings(BaseSettings):
         return JudgeSettings(
             provider=self.judge_provider or None,
             model=self.judge_model,
-            base_url=self.judge_base_url,
+            url=self.judge_url,
             api_key_env=self.judge_api_key_env,
             timeout_seconds=self.judge_timeout_seconds,
             max_retries=self.judge_max_retries,

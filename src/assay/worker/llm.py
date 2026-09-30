@@ -1,12 +1,16 @@
 """The client that asks a judge model for a verdict.
 
-Plain HTTP (`httpx`), one request shape per provider:
-- `anthropic` — the Messages API (`POST {root}/v1/messages`), the verdict
-  recorded through a single tool the model is made to call (`tool_choice`),
-  which every Claude model supports;
-- `openai` — the Chat Completions API (`POST {root}/chat/completions`), the
-  verdict as JSON matching a strict `json_schema` response format; `root`
-  can be any OpenAI-compatible server.
+Plain HTTP (`httpx`), one request shape per provider, each posted to the
+settings' endpoint exactly as written (their `url`, else the provider's own):
+- `anthropic` — the Messages API, the verdict recorded through a single tool
+  the model is made to call (`tool_choice`), which every Claude model
+  supports;
+- `openai` — the Chat Completions API, the verdict as JSON matching a strict
+  `json_schema` response format; the endpoint can be any OpenAI-compatible
+  server's.
+
+Every failure's reason names the endpoint (without its query string), so a
+wrong URL shows at once.
 
 Temperature 0, at most MAX_OUTPUT_TOKENS. The API key is read here, in the
 calling process, from the variable the settings name — never stored,
@@ -113,6 +117,7 @@ def ask_for_verdict(
         url, headers, body = _openai_request(settings, key, system, prompt)
         read = _read_openai
 
+    shown_url = _without_query(url)
     attempts = settings.max_retries + 1
     with httpx.Client(timeout=settings.timeout_seconds, transport=transport) as client:
         for attempt in range(1, attempts + 1):
@@ -122,7 +127,7 @@ def ask_for_verdict(
             try:
                 response = client.post(url, json=body, headers=headers)
             except httpx.TransportError as exc:
-                reason = f"{type(exc).__name__} calling the judge"
+                reason = f"{type(exc).__name__} calling the judge at {shown_url}"
             else:
                 latency_ms = round((time.perf_counter() - started) * 1000, 1)
                 status = response.status_code
@@ -139,7 +144,8 @@ def ask_for_verdict(
                                "output_tokens": verdict.output_tokens},
                     )
                     return verdict
-                reason = f"Judge answered HTTP {status}{_provider_message(response)}"
+                reason = (f"Judge answered HTTP {status} at {shown_url}"
+                          f"{_provider_message(response)}")
                 if status not in RETRYABLE_STATUSES:
                     logger.error("%s; not retried", reason,
                                  extra={"status": status, "attempt": attempt})
@@ -163,7 +169,7 @@ def ask_for_verdict(
 def _anthropic_request(settings: JudgeSettings, key: str, system: str,
                        prompt: str) -> tuple[str, dict, dict]:
     return (
-        f"{settings.api_root()}/v1/messages",
+        settings.endpoint(),
         {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION},
         {
             "model": settings.model,
@@ -181,7 +187,7 @@ def _anthropic_request(settings: JudgeSettings, key: str, system: str,
 def _openai_request(settings: JudgeSettings, key: str, system: str,
                     prompt: str) -> tuple[str, dict, dict]:
     return (
-        f"{settings.api_root()}/chat/completions",
+        settings.endpoint(),
         {"Authorization": f"Bearer {key}"},
         {
             "model": settings.model,
@@ -255,6 +261,11 @@ def _verdict(verdict: Any, status: int, latency_ms: float, input_tokens: Any,
         input_tokens=input_tokens if isinstance(input_tokens, int) else None,
         output_tokens=output_tokens if isinstance(output_tokens, int) else None,
     )
+
+
+def _without_query(url: str) -> str:
+    """The URL as a reason shows it: a query string can carry a token."""
+    return url.split("?", 1)[0].split("#", 1)[0]
 
 
 def _provider_message(response: httpx.Response) -> str:
