@@ -34,6 +34,7 @@ dev = [
                         # imports the evaluator engines, so it needs it too
     "jsonschema>=4.18", # Same reason: the worker's JSON checks
     "rouge-score>=0.1.2", # Same reason: the worker's ROUGE engine (see the nlp extra)
+    "sacrebleu>=2.4",   # Same reason: the worker's BLEU engine (see the nlp extra)
 ]
 anthropic = [
     "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)
@@ -45,6 +46,8 @@ nlp = [
     "rouge-score>=0.1.2",  # ROUGE (worker/evaluators/engines/rouge.py): Google's reference
                            # implementation; imported only when a ROUGE check runs, so a worker
                            # without this extra fails just that check, with the reason
+    "sacrebleu>=2.4",      # BLEU (worker/evaluators/engines/bleu.py): sentence-level BLEU with
+                           # smoothing; imported only when a BLEU check runs, likewise
 ]
 worker = [
     "httpx>=0.27",           # The adapter that calls the application under test (worker/target.py)
