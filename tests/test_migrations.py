@@ -785,3 +785,47 @@ def test_downgrade_removes_the_variant_and_restores_bleu(scratch):
     assert rows["BLEU"]["description"] == (
         "Measures n-gram precision between output and reference text.")
     assert "hint" not in _fields(db_path, "BLEU")["threshold"]
+
+
+# --- 6774a3279590: METEOR's settings and texts ---
+
+
+def test_upgrade_gives_meteor_nltks_parameters_and_a_threshold_hint(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "6774a3279590")
+
+    row = _test_types(db_path)["METEOR"]
+    assert json.loads(row["engine_settings"]) == {"alpha": 0.9, "beta": 3.0, "gamma": 0.5}
+    assert row["description"].startswith("Checks how much of the expected text the answer "
+                                          "covers")
+    threshold = _fields(db_path, "METEOR")["threshold"]
+    assert (threshold["min"], threshold["max"], threshold["placeholder"]) == (0.0, 1.0, "0.5")
+    assert threshold["hint"].startswith("Shared words, counting other word forms and synonyms.")
+
+
+def test_upgrade_seeds_meteor_balanced_on_the_same_engine(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "6774a3279590")
+
+    row = _test_types(db_path)["METEOR (balanced)"]
+    assert json.loads(row["engine_settings"]) == {"alpha": 0.5, "beta": 3.0, "gamma": 0.5}
+    assert (row["category"], row["cost"], row["engine"], row["comparison"]) == (
+        "nlp_metric", "fast", "meteor", "gte")
+    assert "extra content lower the score equally" in row["description"]
+    assert _fields(db_path, "METEOR (balanced)")["threshold"]["placeholder"] == "0.5"
+
+
+def test_downgrade_restores_meteor(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "6774a3279590")
+
+    command.downgrade(config, "ad28dd68006e")
+
+    rows = _test_types(db_path)
+    assert "METEOR (balanced)" not in rows
+    row = rows["METEOR"]
+    assert json.loads(row["engine_settings"]) == {}
+    assert row["description"].startswith("Measures alignment between output and reference")
+    assert "hint" not in _fields(db_path, "METEOR")["threshold"]

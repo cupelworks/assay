@@ -91,18 +91,17 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                 },
                                 {
                                     "id": "ede3f4b9-1f31-4296-90ca-f34e6e3adb1f",
-                                    "name": "METEOR",
+                                    "name": "BERTScore",
                                     "category": "nlp_metric",
-                                    "description": "Measures alignment between output and "
-                                                   "reference, accounting for synonyms and "
-                                                   "stemming.",
+                                    "description": "Measures semantic similarity using BERT "
+                                                   "embeddings.",
                                     "is_active": True,
                                     "created_at": "2026-05-27T19:36:01.272322",
-                                    "best_for": "Tasks where paraphrasing and word "
-                                                "variations are common.",
+                                    "best_for": "Q&A and tasks where paraphrasing is "
+                                                "acceptable.",
                                     "cost": "fast",
-                                    "limitations": "More complex to compute than "
-                                                   "BLEU/ROUGE; language support varies.",
+                                    "limitations": "Requires a BERT model; scores can be hard "
+                                                   "to interpret without a baseline.",
                                     "config_fields": [
                                         {
                                             "key": "reference",
@@ -125,8 +124,12 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "hint": None,
                                         },
                                     ],
-                                    "engine": "meteor",
-                                    "engine_settings": {},
+                                    "engine": "bertscore",
+                                    "engine_settings": {
+                                        "model": "distilbert-base-uncased",
+                                        "measure": "f1",
+                                        "rescale": False,
+                                    },
                                     "comparison": "gte",
                                 },
                             ],
