@@ -945,3 +945,29 @@ def test_downgrade_restores_the_judge_rows_and_narrows_the_section_again(scratch
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
             connection.execute("INSERT INTO settings (section, value, updated_at) "
                                "VALUES ('judge', '{}', '2026-01-01')")
+
+
+# --- 66000c4b71ab: the rubric hint of the judges that never see the reference ---
+
+
+def test_upgrade_warns_the_judges_without_a_reference_that_a_rubric_cant_compare(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "66000c4b71ab")
+
+    for name in ("Relevance", "Bias", "Toxicity"):
+        assert _fields(db_path, name)["rubric"]["hint"].endswith(
+            "This type never sees the expected output, so the rubric can't compare with it.")
+    for name in ("Correctness", "Hallucination"):
+        assert "never sees" not in _fields(db_path, name)["rubric"]["hint"]
+
+
+def test_downgrade_restores_the_shared_rubric_hint(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "66000c4b71ab")
+
+    command.downgrade(config, "1e4b81f30147")
+
+    assert _fields(db_path, "Bias")["rubric"]["hint"] == (
+        "Optional. Replaces the default rubric, shown as the example; say what the answer "
+        "must do to pass.")
