@@ -33,7 +33,6 @@ one exists; until then the log line is their home.
 """
 import json
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -45,6 +44,7 @@ import httpx
 from jsonpath_ng import parse as parse_jsonpath
 from jsonpath_ng.exceptions import JSONPathError
 
+from assay.config import environment_value
 from assay.schemas.settings import INPUT_PLACEHOLDER, TargetSettings
 
 logger = logging.getLogger(__name__)
@@ -174,7 +174,7 @@ def _resolve_headers(headers: dict[str, str]) -> dict[str, str]:
     token lives in the environment rather than in the stored settings."""
     def substitute(match: re.Match) -> str:
         name = match.group(1)
-        value = os.environ.get(name)
+        value = environment_value(name)
         if value is None:
             raise TargetError(
                 f"A header references ${{{name}}} but {name} is not set on this server"

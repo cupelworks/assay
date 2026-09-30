@@ -84,3 +84,33 @@ def test_target_settings_are_the_environments_values():
     target = settings.target_settings()
 
     assert (target.url, target.method, target.max_retries) == ("http://app.test/chat", "PUT", 0)
+
+
+# --- secrets looked up by name ---
+
+
+def test_a_variable_is_read_from_the_process_environment_first(monkeypatch, tmp_path):
+    import assay.config
+    env_file = tmp_path / ".env"
+    env_file.write_text("JUDGE_KEY=from-the-file\n")
+    monkeypatch.setattr(assay.config, "_ENV_FILE", env_file)
+    monkeypatch.setenv("JUDGE_KEY", "from-the-process")
+
+    assert assay.config.environment_value("JUDGE_KEY") == "from-the-process"
+
+
+def test_a_variable_only_in_the_env_file_is_found_there(monkeypatch, tmp_path):
+    import assay.config
+    env_file = tmp_path / ".env"
+    env_file.write_text("JUDGE_KEY=from-the-file\n")
+    monkeypatch.setattr(assay.config, "_ENV_FILE", env_file)
+    monkeypatch.delenv("JUDGE_KEY", raising=False)
+
+    assert assay.config.environment_value("JUDGE_KEY") == "from-the-file"
+
+
+def test_a_variable_set_nowhere_is_none(monkeypatch):
+    import assay.config
+    monkeypatch.delenv("JUDGE_KEY", raising=False)
+
+    assert assay.config.environment_value("JUDGE_KEY") is None

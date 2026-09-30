@@ -2,9 +2,11 @@
 # environment variables and .env files, then validates and coerces their types.
 # Distinct from pydantic's use in schemas.py, which validates API request/response bodies.
 import logging
+import os
 from pathlib import Path
 from typing import Annotated, Literal
 
+from dotenv import dotenv_values
 from pydantic import ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
@@ -139,3 +141,16 @@ class Settings(BaseSettings):
 
 # Module-level singleton — imported across the app, read once at startup.
 settings = Settings()
+
+
+def environment_value(name: str) -> str | None:
+    """A variable from this process's environment, else from the project's
+    .env file — where the ASSAY_* settings come from too, but pydantic-settings
+    reads them without exporting anything. Secrets referenced by name (the
+    judge's API key, a ${NAME} in the application's headers) are looked up
+    here by the process that uses them, when it does: a change to .env
+    applies from the next call."""
+    value = os.environ.get(name)
+    if value is None and _ENV_FILE.is_file():
+        value = dotenv_values(_ENV_FILE).get(name)
+    return value
