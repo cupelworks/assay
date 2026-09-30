@@ -42,7 +42,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                 "application/json": {
                     "examples": {
                         "nlp_metric": {
-                            "summary": "NLP metrics: a threshold with and without a hint",
+                            "summary": "NLP metrics: thresholds on a 0–1 and a −1 to 1 scale",
                             "value": [
                                 {
                                     "id": "696bf21b-6263-4024-8182-ddaba33d5b30",
@@ -91,17 +91,27 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                 },
                                 {
                                     "id": "ede3f4b9-1f31-4296-90ca-f34e6e3adb1f",
-                                    "name": "BERTScore",
+                                    "name": "Cosine Similarity (multilingual)",
                                     "category": "nlp_metric",
-                                    "description": "Measures semantic similarity using BERT "
-                                                   "embeddings.",
+                                    "description": "Checks whether the answer means the same "
+                                                   "as the expected text, as a whole, in "
+                                                   "about 50 languages including German, "
+                                                   "French and Italian — even when the answer "
+                                                   "and the expected text are in different "
+                                                   "languages.",
                                     "is_active": True,
-                                    "created_at": "2026-05-27T19:36:01.272322",
-                                    "best_for": "Q&A and tasks where paraphrasing is "
-                                                "acceptable.",
+                                    "created_at": "2026-10-01T03:00:00.000000",
+                                    "best_for": "Answers in languages other than English, or "
+                                                "in a different language from the expected "
+                                                "text.",
                                     "cost": "fast",
-                                    "limitations": "Requires a BERT model; scores can be hard "
-                                                   "to interpret without a baseline.",
+                                    "limitations": "Measures closeness of meaning, not "
+                                                   "correctness: an answer saying the "
+                                                   "opposite about the same thing can still "
+                                                   "score high. Only about the first 100 "
+                                                   "words of each text count. Its model is "
+                                                   "larger, so the first check on a worker "
+                                                   "takes longer.",
                                     "config_fields": [
                                         {
                                             "key": "reference",
@@ -118,17 +128,17 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "label": "Minimum score to pass",
                                             "kind": "numeric",
                                             "required": True,
-                                            "min": 0.0,
+                                            "min": -1.0,
                                             "max": 1.0,
-                                            "placeholder": None,
-                                            "hint": None,
+                                            "placeholder": "0.7",
+                                            "hint": "Closeness of meaning, in any of its "
+                                                    "languages. A close paraphrase scores "
+                                                    "about 0.95, an unrelated answer about 0.",
                                         },
                                     ],
-                                    "engine": "bertscore",
+                                    "engine": "embedding_cosine",
                                     "engine_settings": {
-                                        "model": "distilbert-base-uncased",
-                                        "measure": "f1",
-                                        "rescale": False,
+                                        "model": "paraphrase-multilingual-MiniLM-L12-v2",
                                     },
                                     "comparison": "gte",
                                 },

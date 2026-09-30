@@ -829,3 +829,52 @@ def test_downgrade_restores_meteor(scratch):
     assert json.loads(row["engine_settings"]) == {}
     assert row["description"].startswith("Measures alignment between output and reference")
     assert "hint" not in _fields(db_path, "METEOR")["threshold"]
+
+
+# --- 1b6c140a6035: BERTScore's and Cosine Similarity's settings and texts ---
+
+
+def test_upgrade_gives_bertscore_its_layer_and_rescaling_baseline(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "1b6c140a6035")
+
+    settings_ = json.loads(_test_types(db_path)["BERTScore"]["engine_settings"])
+    assert (settings_["model"], settings_["layer"], settings_["measure"]) == (
+        "distilbert-base-uncased", 5, "f1")
+    assert set(settings_["baseline"]) == {"precision", "recall", "f1"}
+    assert "rescale" not in settings_
+    threshold = _fields(db_path, "BERTScore")["threshold"]
+    assert (threshold["min"], threshold["max"], threshold["placeholder"]) == (0.0, 1.0, "0.6")
+
+
+def test_upgrade_seeds_cosine_similarity_multilingual_on_the_same_engine(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "1b6c140a6035")
+
+    rows = _test_types(db_path)
+    variant = rows["Cosine Similarity (multilingual)"]
+    assert json.loads(variant["engine_settings"]) == {
+        "model": "paraphrase-multilingual-MiniLM-L12-v2"}
+    assert (variant["category"], variant["engine"], variant["comparison"]) == (
+        "nlp_metric", "embedding_cosine", "gte")
+    for name in ("Cosine Similarity", "Cosine Similarity (multilingual)"):
+        threshold = _fields(db_path, name)["threshold"]
+        assert (threshold["min"], threshold["max"], threshold["placeholder"]) == (
+            -1.0, 1.0, "0.7")
+        assert "not correctness" in rows[name]["limitations"]
+
+
+def test_downgrade_restores_both_rows_and_removes_the_variant(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "1b6c140a6035")
+
+    command.downgrade(config, "6774a3279590")
+
+    rows = _test_types(db_path)
+    assert "Cosine Similarity (multilingual)" not in rows
+    assert json.loads(rows["BERTScore"]["engine_settings"]) == {
+        "model": "distilbert-base-uncased", "measure": "f1", "rescale": False}
+    assert rows["Cosine Similarity"]["best_for"] == "RAG evaluation and semantic search tasks."
+    assert "hint" not in _fields(db_path, "BERTScore")["threshold"]
