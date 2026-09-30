@@ -110,6 +110,21 @@ class EvaluationInput(BaseModel):
     )
 
 
+class RubricSource(StrEnum):
+    custom = "custom"
+    default = "default"
+
+
+class JudgeRubric(BaseModel):
+    """The rubric an LLM judge graded with."""
+    text: str = Field(description="The rubric, exactly as the judge received it.")
+    source: RubricSource = Field(
+        description="`custom`: the assignment's own `rubric`. `default`: the type's "
+                    "`default_rubric`, because the assignment set none (or only "
+                    "whitespace).",
+    )
+
+
 class TestTypeResult(BaseModel):
     passed: bool = Field(
         ...,
@@ -175,6 +190,17 @@ class TestTypeResult(BaseModel):
             '(a JSONPath into `application_reply`, or into a recorded answer that '
             'is JSON). Null: it read `evaluated_output`, the answer at the '
             'settings\' output path, like every check without its own path.'
+        ),
+    )
+    rubric: JudgeRubric | None = Field(
+        default=None,
+        description=(
+            'For an LLM-judge type: the rubric the judge graded with, and whether '
+            'it was the assignment\'s own or the type\'s default — recorded at '
+            'execution time, so it stays right if the test or the catalogue '
+            'changes later. Null for every other type, for a judge that couldn\'t '
+            'be asked (then `detail` says why), and on results written before '
+            'this field existed.'
         ),
     )
 

@@ -2,7 +2,13 @@ from unittest.mock import patch
 
 import pytest
 
-from assay.schemas import EvaluationInput, JudgeSettings, TestTypeResult
+from assay.schemas import (
+    EvaluationInput,
+    JudgeRubric,
+    JudgeSettings,
+    RubricSource,
+    TestTypeResult,
+)
 from assay.worker import llm
 from assay.worker.evaluators.engines import llm_judge
 
@@ -29,8 +35,11 @@ def test_the_verdict_is_the_result_and_the_rationale_its_detail_on_a_pass_too():
     with patch(_PATCH_ASK, return_value=_verdict()):
         result = _evaluate()
 
-    assert result == TestTypeResult(passed=True, score=None,
-                                    detail="It names Paris, as the reference does.")
+    assert result == TestTypeResult(
+        passed=True, score=None, detail="It names Paris, as the reference does.",
+        rubric=JudgeRubric(text="Pass if it states the same facts as the reference.",
+                           source=RubricSource.default),
+    )
 
 
 def test_a_failing_verdict_fails_the_check_with_its_rationale():
@@ -72,20 +81,33 @@ def test_a_type_that_doesnt_compare_never_sees_the_reference_even_when_the_test_
     assert "Pass if it addresses the question." in prompt
 
 
-def test_the_assignments_rubric_replaces_the_default():
+def test_the_assignments_rubric_replaces_the_default_and_is_recorded_as_custom():
     with patch(_PATCH_ASK, return_value=_verdict()) as ask:
-        _evaluate(config={"rubric": "  Pass only if it mentions the Eiffel Tower.  "})
+        result = _evaluate(config={"rubric": "  Pass only if it mentions the Eiffel Tower.  "})
 
     prompt = ask.call_args.args[2]
     assert "<rubric>\nPass only if it mentions the Eiffel Tower.\n</rubric>" in prompt
     assert "same facts" not in prompt
+    assert result.rubric == JudgeRubric(text="Pass only if it mentions the Eiffel Tower.",
+                                        source=RubricSource.custom)
 
 
-def test_a_blank_rubric_falls_back_to_the_default():
+def test_a_blank_rubric_falls_back_to_the_default_and_is_recorded_as_default():
     with patch(_PATCH_ASK, return_value=_verdict()) as ask:
-        _evaluate(config={"rubric": "   "})
+        result = _evaluate(config={"rubric": "   "})
 
     assert "same facts as the reference" in ask.call_args.args[2]
+    assert result.rubric.source == RubricSource.default
+
+
+def test_a_custom_rubric_changes_only_the_criteria_not_what_the_judge_sees():
+    with patch(_PATCH_ASK, return_value=_verdict()) as ask:
+        _evaluate(settings=RELEVANCE, config={"rubric": "Pass if it matches the reference."})
+
+    system, prompt = ask.call_args.args[1:]
+    assert system == llm_judge.SYSTEM_PROMPT
+    # a type that doesn't compare never gets the reference, whatever its rubric says
+    assert "<reference>" not in prompt
 
 
 def test_an_empty_answer_is_judged_not_skipped():

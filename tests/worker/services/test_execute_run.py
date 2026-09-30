@@ -56,6 +56,7 @@ def _stamped(passed: bool, row: TestTypesModel, score=None, detail=None) -> dict
     return {
         "passed": passed, "score": score, "detail": detail,
         "engine": row.engine, "engine_settings": row.engine_settings, "answer_path": None,
+        "rubric": None,
     }
 
 
@@ -228,7 +229,7 @@ def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
     assert run.results["Retired Type"] == {
         "passed": False, "score": None,
         "detail": "Test type 'Retired Type' is not in the catalogue",
-        "engine": None, "engine_settings": None, "answer_path": None,
+        "engine": None, "engine_settings": None, "answer_path": None, "rubric": None,
     }
 
 
@@ -657,7 +658,7 @@ def test_nothing_at_a_checks_path_fails_that_check_only():
         "passed": False, "score": None,
         "detail": "Nothing found at $.usage.tokens in the application's reply",
         "engine": "llm_judge", "engine_settings": TOXICITY.engine_settings,
-        "answer_path": "$.usage.tokens",
+        "answer_path": "$.usage.tokens", "rubric": None,
     }
 
 

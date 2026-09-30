@@ -13,9 +13,10 @@ row says so, and the answer, each between tags it's told to treat as data —
 an answer under test can itself contain instructions. Its verdict is
 `passed` plus a rationale: `passed` is the result, the rationale is
 `detail` (on a pass too), and `score` stays null — judge types have no
-threshold.
+threshold. The result also records the rubric graded with, and whether it
+was the assignment's own or the type's default.
 """
-from assay.schemas import EvaluationInput, TestTypeResult
+from assay.schemas import EvaluationInput, JudgeRubric, RubricSource, TestTypeResult
 from assay.worker import llm
 from assay.worker.evaluators._common import require_reference
 
@@ -41,11 +42,12 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
     try:
         verdict = llm.ask_for_verdict(
             evaluation.judge, SYSTEM_PROMPT,
-            build_prompt(rubric, evaluation.input, evaluation.answer, reference),
+            build_prompt(rubric.text, evaluation.input, evaluation.answer, reference),
         )
     except llm.JudgeError as exc:
         raise ValueError(str(exc)) from None
-    return TestTypeResult(passed=verdict.passed, score=None, detail=verdict.rationale)
+    return TestTypeResult(passed=verdict.passed, score=None, detail=verdict.rationale,
+                          rubric=rubric)
 
 
 def build_prompt(rubric: str, question: str, answer: str, reference: str | None = None) -> str:
@@ -61,13 +63,14 @@ def build_prompt(rubric: str, question: str, answer: str, reference: str | None 
     return "\n\n".join(parts)
 
 
-def _rubric(evaluation: EvaluationInput) -> str:
-    """The assignment's own rubric when it set one, else the row's default."""
+def _rubric(evaluation: EvaluationInput) -> JudgeRubric:
+    """The assignment's own rubric when it set one (not blank), else the
+    row's default — replaced, never combined."""
     rubric = (evaluation.config.get("rubric") or "").strip()
     if rubric:
-        return rubric
+        return JudgeRubric(text=rubric, source=RubricSource.custom)
     default = evaluation.engine_settings.get("default_rubric")
     if not isinstance(default, str) or not default.strip():
         raise ValueError("No rubric: the assignment sets none and this test type's catalogue "
                          "row has no default_rubric")
-    return default.strip()
+    return JudgeRubric(text=default.strip(), source=RubricSource.default)
