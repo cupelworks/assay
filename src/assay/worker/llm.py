@@ -169,7 +169,7 @@ def ask_for_verdict(
 def _anthropic_request(settings: JudgeSettings, key: str, system: str,
                        prompt: str) -> tuple[str, dict, dict]:
     return (
-        settings.endpoint(),
+        settings.endpoint_url(),
         {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION},
         {
             "model": settings.model,
@@ -187,7 +187,7 @@ def _anthropic_request(settings: JudgeSettings, key: str, system: str,
 def _openai_request(settings: JudgeSettings, key: str, system: str,
                     prompt: str) -> tuple[str, dict, dict]:
     return (
-        settings.endpoint(),
+        settings.endpoint_url(),
         {"Authorization": f"Bearer {key}"},
         {
             "model": settings.model,

@@ -38,7 +38,7 @@ def judge_settings_read(effective: JudgeSettings, source: SettingsSource,
     variable its key is read from, and where it comes from."""
     return JudgeSettingsRead(
         **effective.model_dump(),
-        endpoint=effective.endpoint(),
+        endpoint=effective.endpoint_url(),
         api_key_variable=effective.key_variable(),
         source=source,
         updated_at=updated_at,

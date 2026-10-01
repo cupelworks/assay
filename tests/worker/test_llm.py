@@ -264,3 +264,27 @@ def test_a_wrong_url_shows_in_the_reason_without_its_query_string():
         _ask(settings, _transport((404, {"detail": "Not Found"})))
 
     assert str(caught.value) == "Judge answered HTTP 404 at http://localhost:8001/chat"
+
+
+# --- settings as a run resolves them ---
+
+
+@pytest.mark.parametrize("settings,url", [
+    (ANTHROPIC, "https://api.anthropic.com/v1/messages"),
+    (JudgeSettings(provider="openai", model="m", url="http://127.0.0.1:8766/v1/chat/completions"),
+     "http://127.0.0.1:8766/v1/chat/completions"),
+])
+def test_the_settings_a_run_resolves_are_called_at_their_url(settings, url):
+    # execute_run hands over resolve_judge_settings()'s JudgeSettingsRead, whose
+    # `endpoint` field once shadowed the endpoint() method this client called,
+    # so every judge check in a run failed with "'str' object is not callable"
+    from assay.judge_settings import judge_settings_read
+    from assay.schemas import SettingsSource
+
+    resolved = judge_settings_read(settings, SettingsSource.database, None)
+    reply = _anthropic_reply() if settings.provider == "anthropic" else _openai_reply()
+    transport = _transport((200, reply))
+
+    assert _ask(resolved, transport).status == 200
+    (request,) = transport.requests
+    assert str(request.url) == url

@@ -17,7 +17,7 @@ def test_the_defaults_are_no_judge():
     assert (judge.provider, judge.model, judge.url, judge.api_key_env) == (
         None, None, None, None)
     assert (judge.timeout_seconds, judge.max_retries) == (60, 2)
-    assert (judge.key_variable(), judge.endpoint()) == (None, None)
+    assert (judge.key_variable(), judge.endpoint_url()) == (None, None)
 
 
 def test_a_provider_needs_a_model_and_the_problem_is_on_the_model_field():
@@ -49,9 +49,9 @@ def test_the_key_variable_and_endpoint_default_to_the_providers_own():
     anthropic = JudgeSettings(provider="anthropic", model="claude-sonnet-5-5")
     openai = JudgeSettings(provider="openai", model="gpt-4o-mini")
 
-    assert (anthropic.key_variable(), anthropic.endpoint()) == (
+    assert (anthropic.key_variable(), anthropic.endpoint_url()) == (
         "ANTHROPIC_API_KEY", "https://api.anthropic.com/v1/messages")
-    assert (openai.key_variable(), openai.endpoint()) == (
+    assert (openai.key_variable(), openai.endpoint_url()) == (
         "OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions")
 
 
@@ -61,7 +61,7 @@ def test_a_custom_key_variable_and_url_win_and_the_url_is_kept_as_written():
 
     assert judge.key_variable() == "LOCAL_KEY"
     # only surrounding blanks go; nothing is appended or trimmed off the path
-    assert judge.endpoint() == "http://localhost:11434/v1/chat/completions/"
+    assert judge.endpoint_url() == "http://localhost:11434/v1/chat/completions/"
 
 
 def test_the_model_name_is_bounded():

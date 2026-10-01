@@ -385,7 +385,7 @@ class JudgeSettings(BaseModel):
             return None
         return self.api_key_env or JUDGE_DEFAULT_API_KEY_VARIABLES[self.provider]
 
-    def endpoint(self) -> str | None:
+    def endpoint_url(self) -> str | None:
         """The URL the judge is called at: `url` as written, else the
         provider's own endpoint; None with no provider."""
         if self.provider is None:
