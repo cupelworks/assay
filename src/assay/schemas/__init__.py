@@ -121,6 +121,17 @@ from assay.schemas.runs import (
     TestTypeResult,
 )
 
+# isort: split
+# statistics stands alone (it imports nothing from this package), kept last
+from assay.schemas.statistics import (
+    Estimate,
+    EstimateRequest,
+    Scope,
+    ScopeKind,
+    StatisticalTestCatalogue,
+    StatisticalTestName,
+)
+
 __all__ = [
     "JudgeCheck",
     "JudgeCheckRequest",
@@ -226,4 +237,10 @@ __all__ = [
     "WorkerHealth",
     "WorkerHealthStatus",
     "WorkerStatus",
+    "Estimate",
+    "EstimateRequest",
+    "Scope",
+    "ScopeKind",
+    "StatisticalTestCatalogue",
+    "StatisticalTestName",
 ]
