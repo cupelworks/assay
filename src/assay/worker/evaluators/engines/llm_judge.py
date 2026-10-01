@@ -14,9 +14,17 @@ an answer under test can itself contain instructions. Its verdict is
 `passed` plus a rationale: `passed` is the result, the rationale is
 `detail` (on a pass too), and `score` stays null — judge types have no
 threshold. The result also records the rubric graded with, and whether it
-was the assignment's own or the type's default.
+was the assignment's own or the type's default, and the provider and model
+that gave the verdict: the judge settings can change at any moment, so the
+result is the only place that says which model judged.
 """
-from assay.schemas import EvaluationInput, JudgeRubric, RubricSource, TestTypeResult
+from assay.schemas import (
+    EvaluationInput,
+    JudgeIdentity,
+    JudgeRubric,
+    RubricSource,
+    TestTypeResult,
+)
 from assay.worker import llm
 from assay.worker.evaluators._common import require_reference
 
@@ -46,8 +54,10 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
         )
     except llm.JudgeError as exc:
         raise ValueError(str(exc)) from None
+    # a verdict came back, so the settings named a provider and a model
+    judge = JudgeIdentity(provider=evaluation.judge.provider, model=evaluation.judge.model)
     return TestTypeResult(passed=verdict.passed, score=None, detail=verdict.rationale,
-                          rubric=rubric)
+                          rubric=rubric, judge=judge)
 
 
 def build_prompt(rubric: str, question: str, answer: str, reference: str | None = None) -> str:

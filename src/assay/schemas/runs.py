@@ -15,7 +15,7 @@ from assay.schemas import (
     TestSetEntryID,
     TestSetID,
 )
-from assay.schemas.settings import JudgeSettings
+from assay.schemas.settings import JudgeProvider, JudgeSettings
 
 
 class RunID(BaseModel):
@@ -125,6 +125,15 @@ class JudgeRubric(BaseModel):
     )
 
 
+class JudgeIdentity(BaseModel):
+    """Which model gave an LLM judge's verdict."""
+    provider: JudgeProvider = Field(
+        description="The API the judge was called through: `anthropic` or `openai` "
+                    "(which includes any OpenAI-compatible server).",
+    )
+    model: str = Field(description="The model name the judge was called with.")
+
+
 class TestTypeResult(BaseModel):
     passed: bool = Field(
         ...,
@@ -201,6 +210,16 @@ class TestTypeResult(BaseModel):
             'changes later. Null for every other type, for a judge that couldn\'t '
             'be asked (then `detail` says why), and on results written before '
             'this field existed.'
+        ),
+    )
+    judge: JudgeIdentity | None = Field(
+        default=None,
+        description=(
+            'For an LLM-judge type: the provider and model that gave the verdict, '
+            'recorded at execution time — the judge settings can change at any '
+            'moment, so this is what says which model a verdict came from. Null '
+            'for every other type, for a judge that couldn\'t be asked (then '
+            '`detail` says why), and on results written before this field existed.'
         ),
     )
 
