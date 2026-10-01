@@ -103,6 +103,8 @@ def test_invalid_json_fails_before_the_schema_is_consulted():
 @pytest.mark.parametrize("schema,message", [
     ("{oops", "The schema is not valid JSON"),
     ('{"type": "nope"}', "The schema is not a valid JSON Schema"),
+    ("42", "The schema is not a valid JSON Schema: it must be a JSON object or a boolean"),
+    ("null", "The schema is not a valid JSON Schema: it must be a JSON object or a boolean"),
     ("", "No schema configured"),
 ])
 def test_a_bad_schema_is_this_types_failure_with_the_reason(schema, message):

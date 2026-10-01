@@ -62,6 +62,10 @@ def _valid(_document: Any, _config: dict[str, str]) -> TestTypeResult:
 
 def _schema(document: Any, config: dict[str, str]) -> TestTypeResult:
     schema = _parse_config(config, "schema", "The schema")
+    if not isinstance(schema, dict | bool):
+        # validator_for would fail with a TypeError that says nothing useful
+        raise ValueError("The schema is not a valid JSON Schema: it must be a JSON object "
+                         "or a boolean")
     validator_class = validators.validator_for(schema)
     try:
         validator_class.check_schema(schema)

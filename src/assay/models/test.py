@@ -202,6 +202,8 @@ class ConfigFieldKind(StrEnum):
     reference = "reference"
     multiline = "multiline"
     rubric = "rubric"
+    # A number, checked when the type is assigned: it must parse, fall within
+    # the field's min/max when set, and be whole when the field says integer.
     numeric = "numeric"
     # A JSON document or value, written as JSON text; checked to parse when
     # the type is assigned.
@@ -209,6 +211,12 @@ class ConfigFieldKind(StrEnum):
     # A JSONPath expression, e.g. $.status; checked to parse when the type is
     # assigned.
     jsonpath = "jsonpath"
+    # A regular expression for the worker's `regex` library; checked to compile
+    # when the type is assigned, with that same library.
+    regex = "regex"
+    # A JSON Schema, written as JSON text; checked when the type is assigned to
+    # parse as JSON and to be a valid schema for the draft its $schema names.
+    json_schema = "json_schema"
 
 
 class TestTypesModel(Base):
@@ -246,12 +254,13 @@ class TestTypesModel(Base):
     limitations: Mapped[str] = mapped_column(Text, nullable=True)
     # Seeded server-side only, never user-editable through the API. Each item:
     # {"key": str, "label": str, "kind": str, "required": bool, "min": float |
-    # None, "max": float | None}. kind "reference" is reserved — it never gets
-    # its own storage, it always resolves to the test case's own
-    # expected_output. min/max are only ever set for kind "numeric" (advisory
-    # bounds for the FE, not enforced by the API); omitted (→ None) for every
-    # other kind. Empty list for a self-contained type that needs no extra
-    # input.
+    # None, "max": float | None, "integer": bool, "placeholder": str | None,
+    # "hint": str | None}. kind "reference" is reserved — it never gets its own
+    # storage, it always resolves to the test case's own expected_output.
+    # min/max (inclusive) and integer are only ever set for kind "numeric", and
+    # a value outside them is refused when the type is assigned; omitted
+    # (→ None / false) for every other kind. Empty list for a self-contained
+    # type that needs no extra input.
     config_fields: Mapped[list[dict]] = mapped_column(JSON, default=list)
     # Plain text, not an enum: the engine list grows with code, and a row
     # naming an engine this worker doesn't have must fail that one type at

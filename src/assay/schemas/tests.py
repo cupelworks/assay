@@ -141,24 +141,32 @@ class ConfigFieldDescriptor(BaseModel):
     kind: ConfigFieldKind = Field(
         description="What kind of value this field holds. `reference` is reserved — "
                     "it resolves to the test case's own expected_output rather than "
-                    "being stored per assignment. `json` holds JSON text and "
-                    "`jsonpath` a JSONPath expression: both are checked when the type "
-                    "is assigned, and a value that doesn't parse is a 422."
+                    "being stored per assignment. `json` holds JSON text, `jsonpath` a "
+                    "JSONPath expression, `regex` a regular expression and "
+                    "`json_schema` a JSON Schema written as JSON; `numeric` a number "
+                    "within `min`/`max`. Each is checked when the type is assigned, "
+                    "and a value that doesn't parse or is out of range is a 422."
     )
     required: bool = Field(
         description="Whether this field must be filled in when the type is assigned."
     )
     min: float | None = Field(
         None,
-        description="Minimum allowed value, for `kind: \"numeric\"` fields only. "
-                    "Null for every other kind. Advisory only — the API does not "
-                    "enforce this against submitted config values; it exists so "
-                    "the FE doesn't have to hardcode bounds per type.",
+        description="Minimum allowed value, inclusive, for `kind: \"numeric\"` fields "
+                    "only; null for no minimum and for every other kind. A value below "
+                    "it is refused with a 422 when the type is assigned.",
     )
     max: float | None = Field(
         None,
-        description="Maximum allowed value, for `kind: \"numeric\"` fields only. "
-                    "Null for every other kind. Advisory only, same as `min`.",
+        description="Maximum allowed value, inclusive, for `kind: \"numeric\"` fields "
+                    "only; null for no maximum and for every other kind. A value above "
+                    "it is refused with a 422, like `min`.",
+    )
+    integer: bool = Field(
+        False,
+        description="For `kind: \"numeric\"` fields: true when the value must be a whole "
+                    "number (e.g. a word limit), refused with a 422 otherwise. False for "
+                    "every other field.",
     )
     placeholder: str | None = Field(
         None,
@@ -169,9 +177,10 @@ class ConfigFieldDescriptor(BaseModel):
         None,
         description="A one-line note on how to fill the field in, shown under it: what "
                     "the value means and what to expect. It never restates what the "
-                    "descriptor already says — the range (`min`/`max`), the pass "
-                    "direction (the type's `comparison`) or whether it's required. Null "
-                    "when the field has none.",
+                    "descriptor already says — the range (`min`/`max`), whether it's a "
+                    "whole number (`integer`), the pass direction (the type's "
+                    "`comparison`) or whether it's required. Null when the field has "
+                    "none.",
     )
 
 

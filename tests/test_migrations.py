@@ -1100,3 +1100,51 @@ def test_downgrade_removes_the_setting_and_restores_the_texts(scratch):
 
     after = _test_types(db_path)
     assert after == before
+
+
+# --- 45dabe26c054: regex and json_schema kinds, whole-number length bounds ---
+
+
+def test_upgrade_gives_patterns_and_schemas_their_kinds_and_bounds_integer(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "3f8cecd2afff")
+    before = _test_types(db_path)
+
+    command.upgrade(config, "45dabe26c054")
+
+    after = _test_types(db_path)
+    fields = {name: {f["key"]: f for f in json.loads(row["config_fields"])}
+              for name, row in after.items()}
+    for name in ("Regex Match", "Regex Full Match", "Regex Must Not Match"):
+        assert fields[name]["pattern"]["kind"] == "regex", name
+    assert fields["Matches JSON Schema"]["schema"]["kind"] == "json_schema"
+    assert fields["JSON Field Equals"]["value"]["kind"] == "json"     # a value, not a schema
+    for name in ("Word Count Limit", "Character Count Limit"):
+        assert fields[name]["max"]["integer"] is True, name
+        assert fields[name]["min"]["integer"] is True, name
+    changed = {"Regex Match", "Regex Full Match", "Regex Must Not Match",
+               "Matches JSON Schema", "Word Count Limit", "Character Count Limit"}
+    for name in set(after) - changed:
+        assert after[name] == before[name], name
+
+
+def test_no_hint_says_whole_number_once_the_descriptor_does(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "45dabe26c054")
+
+    for name, row in _test_types(db_path).items():
+        for field in json.loads(row["config_fields"]):
+            if field.get("integer"):
+                assert "whole number" not in (field.get("hint") or "").lower(), name
+
+
+def test_downgrade_restores_the_fields_as_they_were(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "3f8cecd2afff")
+    before = _test_types(db_path)
+    command.upgrade(config, "45dabe26c054")
+
+    command.downgrade(config, "3f8cecd2afff")
+
+    assert _test_types(db_path) == before

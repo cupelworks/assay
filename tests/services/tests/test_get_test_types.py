@@ -164,3 +164,33 @@ def test_preserves_order_and_count_returned_by_the_query():
     result = asyncio.run(get_test_types_by_category(TestTypes.nlp_metric, session))
 
     assert [test_type.name for test_type in result] == ["ROUGE", "METEOR"]
+
+
+def test_the_regex_and_json_schema_kinds_and_integer_round_trip():
+    mock_test_type = MagicMock()
+    mock_test_type.id = uuid.uuid4()
+    mock_test_type.name = "Word Count Limit"
+    mock_test_type.category = TestTypes.deterministic
+    mock_test_type.created_at = datetime.now().astimezone()
+    mock_test_type.is_active = True
+    mock_test_type.cost = TestTypesCost.very_fast
+    mock_test_type.description = mock_test_type.best_for = mock_test_type.limitations = None
+    mock_test_type.config_fields = [
+        {"key": "max", "label": "Maximum words", "kind": "numeric", "required": True,
+         "min": 0.0, "max": None, "integer": True},
+        {"key": "pattern", "label": "Regex pattern", "kind": "regex", "required": True},
+        {"key": "schema", "label": "JSON Schema", "kind": "json_schema", "required": True},
+    ]
+    mock_test_type.engine = "length"
+    mock_test_type.engine_settings = {"unit": "words"}
+    mock_test_type.comparison = None
+    session = AsyncMock()
+    session.scalars.return_value = [mock_test_type]
+
+    (returned,) = asyncio.run(get_test_types_by_category(TestTypes.deterministic, session))
+
+    bound, pattern, schema = returned.config_fields
+    assert (bound.kind, bound.integer) == ("numeric", True)
+    # a field stored without the key reads back as false, never missing
+    assert (pattern.kind, pattern.integer) == ("regex", False)
+    assert (schema.kind, schema.integer) == ("json_schema", False)

@@ -1,8 +1,12 @@
 import json
+import math
 import uuid
 
+import regex
 from fastapi import HTTPException
 from jsonpath_ng import parse as parse_jsonpath
+from jsonschema import validators
+from jsonschema.exceptions import SchemaError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -136,13 +140,17 @@ async def _validate_test_type_assignments(
         assignments: list[TestTypeAssignment]) -> None:
     """Checks that every assigned test type exists in the catalogue, that
     each assignment supplies a value for every required config field its
-    type declares, and that a value given for a `json` or `jsonpath` field
-    — or an assignment's own answer_path — parses as one.
+    type declares, and that every value given is valid for its field's
+    kind — see _invalid_reason — as is an assignment's own answer_path.
+
+    A broken value is refused here rather than left to fail when a run
+    executes: there it would fail its check and turn the run Amber or Red,
+    blaming the application for a typo in the test.
 
     A config_fields entry of kind "reference" is never checked here — it
     resolves from the test case's own expected_output, not from an
-    assignment's config. Other kinds are free text the engine interprets
-    when a run executes, so a bad value there is that type's failure then.
+    assignment's config. `multiline` and `rubric` are free text, checked for
+    presence only.
 
     Args:
         session: Async SQLAlchemy session.
@@ -152,7 +160,7 @@ async def _validate_test_type_assignments(
     Raises:
         HTTPException: 422 listing unknown test type names, assignments
             missing a required (non-reference) config field, and values
-            that don't parse as their field's kind, if any is found. All
+            that aren't valid for their field, if any is found. All
             are reported together in one exception rather than failing on
             whichever is found first.
     """
@@ -173,7 +181,8 @@ async def _validate_test_type_assignments(
             continue  # already reported via unknown_names
 
         if assignment.answer_path:
-            reason = _unparseable_reason(ConfigFieldKind.jsonpath, assignment.answer_path)
+            reason = _invalid_reason({"kind": ConfigFieldKind.jsonpath},
+                                     assignment.answer_path)
             if reason:
                 field_problems.append(f"'{assignment.name}' answer_path {reason}")
 
@@ -188,7 +197,7 @@ async def _validate_test_type_assignments(
                         f"'{assignment.name}' is missing required config field '{field['key']}'"
                     )
                 continue
-            reason = _unparseable_reason(field["kind"], value)
+            reason = _invalid_reason(field, value)
             if reason:
                 field_problems.append(
                     f"'{assignment.name}' config field '{field['key']}' {reason}"
@@ -208,19 +217,67 @@ async def _validate_test_type_assignments(
     )
 
 
-def _unparseable_reason(kind: str, value: str) -> str | None:
-    """Why value doesn't parse as its field's kind, or None when it does (or
-    the kind is free text)."""
-    if kind == ConfigFieldKind.json:
-        try:
-            json.loads(value)
-        except json.JSONDecodeError as exc:
-            return f"is not valid JSON: {exc}"
-    elif kind == ConfigFieldKind.jsonpath:
-        try:
-            parse_jsonpath(value)
-        except Exception as exc:  # jsonpath-ng's parser raises assorted exception types
-            return f"is not a valid JSONPath: {exc}"
+def _invalid_reason(field: dict, value: str) -> str | None:
+    """Why value isn't valid for field, or None when it is (or the field's
+    kind is free text). The reason follows "'<type>' config field '<key>'".
+
+    The checks use what the worker uses, so a value accepted here is one the
+    engine can read: the `regex` library, not the stdlib `re`, whose syntax
+    differs; `jsonschema`'s validator for the draft the schema's own $schema
+    names.
+    """
+    match field["kind"]:
+        case ConfigFieldKind.numeric:
+            return _numeric_reason(field, value)
+        case ConfigFieldKind.json:
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                return f"is not valid JSON: {exc}"
+        case ConfigFieldKind.jsonpath:
+            try:
+                parse_jsonpath(value)
+            except Exception as exc:  # jsonpath-ng's parser raises assorted exception types
+                return f"is not a valid JSONPath: {exc}"
+        case ConfigFieldKind.regex:
+            try:
+                regex.compile(value)
+            except regex.error as exc:
+                return f"is not a valid regex pattern: {exc}"
+        case ConfigFieldKind.json_schema:
+            try:
+                schema = json.loads(value)
+            except json.JSONDecodeError as exc:
+                return f"is not valid JSON: {exc}"
+            if not isinstance(schema, dict | bool):
+                return "is not a valid JSON Schema: it must be a JSON object or a boolean"
+            try:
+                validators.validator_for(schema).check_schema(schema)
+            except SchemaError as exc:
+                return f"is not a valid JSON Schema: {exc.message}"
+    return None
+
+
+def _numeric_reason(field: dict, value: str) -> str | None:
+    """Why value isn't a number this numeric field accepts: it must parse,
+    be finite, be whole when the field says `integer`, and lie within the
+    field's `min`/`max`, both inclusive. Like every reason here, it names
+    the rule, never the submitted value."""
+    try:
+        number = float(value)
+    except ValueError:
+        return "is not a number"
+    if not math.isfinite(number):
+        return "is not a number"
+    if field.get("integer") and not number.is_integer():
+        return "is not a whole number"
+    low, high = field.get("min"), field.get("max")
+    if (low is not None and number < low) or (high is not None and number > high):
+        if low is not None and high is not None:
+            return f"must be between {low:g} and {high:g}"
+        if low is not None:
+            return f"must be at least {low:g}"
+        return f"must be at most {high:g}"
     return None
 
 

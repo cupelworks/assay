@@ -20,6 +20,14 @@ dependencies = [
                                                 # evaluator modules, see docs/run_execution/dev_notes.md notes 10-11
     "jsonpath-ng>=1.6",                        # Validates the application-under-test output path when settings are
                                                 # saved (schemas/settings.py) — the worker also reads the answer with it
+    "regex>=2024.0",                           # Regex Match's engine (worker/evaluators/engines/regex.py): a drop-in
+                                                # for the stdlib `re` with a per-call timeout, so a catastrophically
+                                                # backtracking pattern fails that one check instead of hanging a worker
+                                                # thread. The API compiles a pattern with it when a check is assigned
+                                                # (services/tests/_common.py): the stdlib's syntax differs slightly
+    "jsonschema>=4.18",                        # Matches JSON Schema's engine (worker/evaluators/engines/json_check.py),
+                                                # any draft the schema declares; the API checks a schema is valid with it
+                                                # when the check is assigned
 ]
 
 [project.optional-dependencies]
@@ -30,10 +38,8 @@ dev = [
     "ruff>=0.7",        # Linter and formatter
     "aiosqlite>=0.20",  # Async SQLite driver — local dev only (prod uses asyncpg)
     "flower>=2.0",      # Web dashboard for Celery task/worker history — celery -A assay.worker flower
-    "regex>=2024.0",    # The worker's Regex Match engine (see the worker extra) — the test suite
-                        # imports the evaluator engines, so it needs it too
-    "jsonschema>=4.18", # Same reason: the worker's JSON checks
-    "rouge-score>=0.1.2", # Same reason: the worker's ROUGE engine (see the nlp extra)
+    "rouge-score>=0.1.2", # The worker's ROUGE engine (see the nlp extra) — the test suite
+                          # imports the evaluator engines, so it needs it too
     "sacrebleu>=2.4",   # Same reason: the worker's BLEU engine (see the nlp extra)
     "nltk>=3.9",        # Same reason: the worker's METEOR engine (see the nlp extra); its
                         # scoring tests skip unless WordNet is downloaded
@@ -56,12 +62,6 @@ nlp = [
 ]
 worker = [
     "httpx>=0.27",           # The adapter that calls the application under test (worker/target.py)
-    "regex>=2024.0",         # Regex Match engine (worker/evaluators/engines/regex.py): a drop-in
-                             # for the stdlib `re` that supports a per-call timeout, so a
-                             # catastrophically backtracking user pattern fails that one type
-                             # instead of hanging a worker thread forever
-    "jsonschema>=4.18",      # The JSON checks' "Matches JSON Schema" (worker/evaluators/engines/
-                             # json_check.py) — any JSON Schema draft the schema declares
     "psycopg2-binary>=2.9",  # Sync PostgreSQL driver for assay.worker.db — the worker's tasks use a
                              # sync SQLAlchemy session (see docs/run_execution/dev_notes.md note 4),
                              # never asyncpg. Only needed against production Postgres; SQLite's sync

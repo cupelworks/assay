@@ -65,6 +65,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "required": True,
                                             "min": None,
                                             "max": None,
+                                            "integer": False,
                                             "placeholder": None,
                                             "hint": None,
                                         },
@@ -75,6 +76,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "required": True,
                                             "min": 0.0,
                                             "max": 1.0,
+                                            "integer": False,
                                             "placeholder": "0.5",
                                             "hint": "Shared wording, in order. A close "
                                                     "paraphrase scores about 0.6, an "
@@ -120,6 +122,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "required": True,
                                             "min": None,
                                             "max": None,
+                                            "integer": False,
                                             "placeholder": None,
                                             "hint": None,
                                         },
@@ -130,6 +133,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "required": True,
                                             "min": -1.0,
                                             "max": 1.0,
+                                            "integer": False,
                                             "placeholder": "0.7",
                                             "hint": "Closeness of meaning, in any of its "
                                                     "languages. A close paraphrase scores "
@@ -146,7 +150,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                         },
                         "deterministic": {
                             "summary": "Deterministic checks: json/jsonpath fields, an "
-                                       "open-ended numeric bound",
+                                       "open-ended whole-number bound",
                             "value": [
                                 {
                                     "id": "6417a3dd-253e-482b-af8d-21672a5e925c",
@@ -173,9 +177,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "required": True,
                                             "min": 0.0,
                                             "max": None,
+                                            "integer": True,
                                             "placeholder": "100",
-                                            "hint": "A whole number; an answer of exactly "
-                                                    "this length meets it.",
+                                            "hint": "An answer of exactly this length "
+                                                    "meets it.",
                                         },
                                         {
                                             "key": "min",
@@ -184,9 +189,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "required": False,
                                             "min": 0.0,
                                             "max": None,
+                                            "integer": True,
                                             "placeholder": None,
-                                            "hint": "Optional. A whole number; leave it "
-                                                    "empty for no minimum.",
+                                            "hint": "Optional. Leave it empty for no "
+                                                    "minimum.",
                                         },
                                     ],
                                     "engine": "length",
@@ -216,6 +222,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "required": True,
                                             "min": None,
                                             "max": None,
+                                            "integer": False,
                                             "placeholder": "$.status",
                                             "hint": "Where the value is in the answer, "
                                                     "e.g. $.items[0].sku.",
@@ -227,6 +234,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                             "required": True,
                                             "min": None,
                                             "max": None,
+                                            "integer": False,
                                             "placeholder": '"approved"',
                                             "hint": 'A JSON value: strings in double '
                                                     'quotes, e.g. "approved"; 42, true '
@@ -299,13 +307,18 @@ async def get_test_types(
     `min`/`max` are the type's own native score range, which differs per
     type (0–1 for ROUGE, 0–100 for BLEU, −1 to 1 for Cosine Similarity) —
     bound the input from the descriptor, not a shared constant; a `max` of
-    null means no upper bound (e.g. a word-count limit).
+    null means no upper bound (e.g. a word-count limit). The bounds are
+    inclusive and enforced: a value outside them is a 422 when the type is
+    assigned. `integer: true` means the value must be a whole number.
 
     Each `config_fields` entry's `kind` says what the value is: `reference`
     (read from the test's `expected_output`, never stored in `config`),
-    `multiline` or `rubric` (free text), `numeric`, `json` (JSON text) or
-    `jsonpath` (a JSONPath expression). A `json` or `jsonpath` value is
-    checked to parse when the type is assigned — a 422 otherwise. Every entry
+    `multiline` or `rubric` (free text), `numeric` (a number within
+    `min`/`max`), `json` (JSON text), `jsonpath` (a JSONPath expression),
+    `regex` (a regular expression, in the syntax of Python's `regex` library)
+    or `json_schema` (a JSON Schema, written as JSON). Every kind but free
+    text is checked when the type is assigned — a 422 if the value doesn't
+    parse, compile, or fall within the range. Every entry
     also carries `placeholder` (an example value for the empty input) and
     `hint` (a one-line note on what the value means and what to expect), both
     null when the field has none; a hint never repeats the range or the pass
@@ -377,8 +390,10 @@ async def get_test_types(
             "description": (
                 "Validation error — either an unknown field was sent in the request body, "
                 "one or more test type names are not in the catalogue, an assignment "
-                "is missing a required config field, a `json`/`jsonpath` value "
-                "or an `answer_path` doesn't parse, or a reference-required type "
+                "is missing a required config field, a config value isn't valid for "
+                "its field (a number out of range, a pattern that doesn't compile, "
+                "JSON, a JSONPath or a JSON Schema that doesn't parse) or an "
+                "`answer_path` doesn't parse, or a reference-required type "
                 "(e.g. Exact Match, ROUGE) is left with no `expected_output` once this "
                 "update is applied — considering both the request and whatever the test "
                 "case already had for any field this request doesn't touch."
@@ -403,12 +418,13 @@ async def get_test_types(
                             "value": {"detail": "Unknown test types: ['Invalid Type']"},
                         },
                         "unparseable_value": {
-                            "summary": "A json/jsonpath value or an answer_path that doesn't parse",
+                            "summary": "A config value or an answer_path that isn't valid",
                             "value": {"detail": (
-                                "'JSON Field Equals' config field 'value' is not valid JSON: "
-                                "Expecting value: line 1 column 1 (char 0); 'Contains' "
-                                "answer_path is not a valid JSONPath: Parse error near the "
-                                "end of string!"
+                                "'ROUGE' config field 'threshold' must be between 0 and 1; "
+                                "'Regex Match' config field 'pattern' is not a valid regex "
+                                "pattern: unterminated character set at position 5; "
+                                "'Contains' answer_path is not a valid JSONPath: Parse "
+                                "error near the end of string!"
                             )},
                         },
                         "missing_expected_output": {
@@ -453,8 +469,9 @@ async def update_test(
 
     Returns a 404 if no test case with the given ID exists.
     Returns a 422 if any unknown field is sent, if any test type name is not in the
-    catalogue, if a `json`/`jsonpath` config value or an assignment's `answer_path`
-    doesn't parse, or if — considering the effective state after this update — a type
+    catalogue, if a config value isn't valid for its field (see `GET /tests/types`'
+    field kinds) or an assignment's `answer_path` doesn't parse, or if — considering
+    the effective state after this update — a type
     requiring a reference is assigned while `expected_output` is empty.
     """
     return await modify_test_by_id(test_case_id, request, session)
@@ -576,8 +593,9 @@ async def get_all_tests(
         422: {
             "description": "One or more test type names are not in the catalogue, "
                            "an assignment is missing a required config field, a "
-                           "`json`/`jsonpath` value or an `answer_path` doesn't "
-                           "parse, or a "
+                           "config value isn't valid for its field (out of range, "
+                           "doesn't compile or doesn't parse) or an `answer_path` "
+                           "doesn't parse, or a "
                            "type requiring a reference (e.g. Exact Match, ROUGE) is "
                            "assigned while `expected_output` is empty.",
             "content": {
@@ -588,12 +606,13 @@ async def get_all_tests(
                             "value": {"detail": "Unknown test types: ['Invalid Type']"},
                         },
                         "unparseable_value": {
-                            "summary": "A json/jsonpath value or an answer_path that doesn't parse",
+                            "summary": "A config value or an answer_path that isn't valid",
                             "value": {"detail": (
-                                "'JSON Field Equals' config field 'value' is not valid JSON: "
-                                "Expecting value: line 1 column 1 (char 0); 'Contains' "
-                                "answer_path is not a valid JSONPath: Parse error near the "
-                                "end of string!"
+                                "'ROUGE' config field 'threshold' must be between 0 and 1; "
+                                "'Regex Match' config field 'pattern' is not a valid regex "
+                                "pattern: unterminated character set at position 5; "
+                                "'Contains' answer_path is not a valid JSONPath: Parse "
+                                "error near the end of string!"
                             )},
                         },
                         "missing_expected_output": {
@@ -636,8 +655,9 @@ async def create_test_manually(
     Each assignment can also set `answer_path` — a JSONPath naming the part of the
     application's reply that check reads instead of the default answer, e.g.
     `$.stop_reason` (or, on a recorded answer that is JSON, the part of it). Leave it out
-    for almost every check. A `json`/`jsonpath` config value and an `answer_path` must
-    parse — a 422 otherwise.
+    for almost every check. Every config value must be valid for its field — a number
+    within its range, a pattern that compiles, JSON, a JSONPath or a JSON Schema that
+    parses — and an `answer_path` must parse: a 422 otherwise, listing every problem.
 
     On success, returns the created test case with its generated `id` and all input fields.
     """
@@ -692,8 +712,9 @@ async def create_test_manually(
         422: {
             "description": "One or more test type names are not in the catalogue, "
                            "an assignment is missing a required config field, a "
-                           "`json`/`jsonpath` value or an `answer_path` doesn't "
-                           "parse, or a "
+                           "config value isn't valid for its field (out of range, "
+                           "doesn't compile or doesn't parse) or an `answer_path` "
+                           "doesn't parse, or a "
                            "type requiring a reference (e.g. Exact Match, ROUGE) is "
                            "assigned while one or more dataset rows have an empty "
                            "`expected_output`.",
@@ -705,12 +726,13 @@ async def create_test_manually(
                             "value": {"detail": "Unknown test types: ['Invalid Type']"},
                         },
                         "unparseable_value": {
-                            "summary": "A json/jsonpath value or an answer_path that doesn't parse",
+                            "summary": "A config value or an answer_path that isn't valid",
                             "value": {"detail": (
-                                "'JSON Field Equals' config field 'value' is not valid JSON: "
-                                "Expecting value: line 1 column 1 (char 0); 'Contains' "
-                                "answer_path is not a valid JSONPath: Parse error near the "
-                                "end of string!"
+                                "'ROUGE' config field 'threshold' must be between 0 and 1; "
+                                "'Regex Match' config field 'pattern' is not a valid regex "
+                                "pattern: unterminated character set at position 5; "
+                                "'Contains' answer_path is not a valid JSONPath: Parse "
+                                "error near the end of string!"
                             )},
                         },
                         "missing_expected_output": {
@@ -751,8 +773,9 @@ async def create_test_from_dataset(
     Each assignment can also set `answer_path` — a JSONPath naming the part of the
     application's reply that check reads instead of the default answer, e.g.
     `$.stop_reason` (or, on a recorded answer that is JSON, the part of it). Leave it out
-    for almost every check. A `json`/`jsonpath` config value and an `answer_path` must
-    parse — a 422 otherwise.
+    for almost every check. Every config value must be valid for its field — a number
+    within its range, a pattern that compiles, JSON, a JSONPath or a JSON Schema that
+    parses — and an `answer_path` must parse: a 422 otherwise, listing every problem.
 
     Returns a 404 if the dataset does not exist or has no rows.
 

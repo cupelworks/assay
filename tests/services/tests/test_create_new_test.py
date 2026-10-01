@@ -221,23 +221,134 @@ def test_validate_raises_for_missing_required_threshold():
     assert "threshold" in str(exc.value.detail)
 
 
-def test_validate_does_not_check_threshold_format():
-    mock_session = AsyncMock()
-    mock_session.execute.return_value = MagicMock(
-        all=MagicMock(return_value=[_catalogue_row("ROUGE", [
-            {"key": "reference", "label": "Reference text",
-             "kind": "reference", "required": True},
-            {"key": "threshold", "label": "Minimum score to pass",
-             "kind": "numeric", "required": True},
-        ])])
-    )
+# -- numeric fields: a number within the field's range, whole when it says so --
 
-    # A numeric field is checked for presence only, never format — a
-    # non-numeric string is the FE's problem to catch, not the API's.
-    asyncio.run(_validate_test_type_assignments(
-        mock_session,
-        [TestTypeAssignment(name="ROUGE", config={"threshold": "not a number"})],
-    ))  # no raise
+
+def _one_field_session(type_name, field):
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(
+        all=MagicMock(return_value=[_catalogue_row(type_name, [field])])
+    )
+    return session
+
+
+def _validation_detail(type_name, field, value):
+    """The 422 detail for one value of one field, or None when it's accepted."""
+    try:
+        asyncio.run(_validate_test_type_assignments(
+            _one_field_session(type_name, field),
+            [TestTypeAssignment(name=type_name, config={field["key"]: value})],
+        ))
+    except HTTPException as exc:
+        assert exc.status_code == 422
+        return exc.detail
+    return None
+
+
+_THRESHOLD = {"key": "threshold", "label": "Minimum score to pass", "kind": "numeric",
+              "required": True, "min": 0.0, "max": 1.0}
+_MAX_WORDS = {"key": "max", "label": "Maximum words", "kind": "numeric", "required": True,
+              "min": 0.0, "max": None, "integer": True}
+
+
+@pytest.mark.parametrize("value", ["0", "1", "0.7", " 0.5 ", "1e-1"])
+def test_validate_passes_a_threshold_within_its_range_bounds_included(value):
+    assert _validation_detail("ROUGE", _THRESHOLD, value) is None
+
+
+@pytest.mark.parametrize("value", ["not a number", "70%", "nan", "inf"])
+def test_validate_raises_for_a_threshold_that_is_not_a_number(value):
+    assert _validation_detail("ROUGE", _THRESHOLD, value) == (
+        "'ROUGE' config field 'threshold' is not a number")
+
+
+@pytest.mark.parametrize("value", ["70", "-0.1", "1.01"])
+def test_validate_raises_for_a_threshold_outside_its_range(value):
+    # 70 is the classic mistake: a percentage on a 0-1 scale never passes
+    assert _validation_detail("ROUGE", _THRESHOLD, value) == (
+        "'ROUGE' config field 'threshold' must be between 0 and 1")
+
+
+def test_validate_names_the_one_bound_a_half_open_range_has():
+    assert _validation_detail("Word Count Limit", _MAX_WORDS, "-1") == (
+        "'Word Count Limit' config field 'max' must be at least 0")
+    upper_only = {**_THRESHOLD, "min": None, "max": 100.0}
+    assert _validation_detail("BLEU", upper_only, "101") == (
+        "'BLEU' config field 'threshold' must be at most 100")
+
+
+def test_validate_takes_any_number_when_the_field_has_no_range():
+    unbounded = {**_THRESHOLD, "min": None, "max": None}
+    assert _validation_detail("ROUGE", unbounded, "-12.5") is None
+
+
+@pytest.mark.parametrize("value,accepted", [("100", True), ("100.0", True), ("0", True),
+                                            ("10.5", False)])
+def test_validate_wants_a_whole_number_when_the_field_says_integer(value, accepted):
+    detail = _validation_detail("Word Count Limit", _MAX_WORDS, value)
+    if accepted:
+        assert detail is None
+    else:
+        assert detail == "'Word Count Limit' config field 'max' is not a whole number"
+
+
+def test_validate_never_echoes_the_submitted_value():
+    detail = _validation_detail("ROUGE", _THRESHOLD, "secret-looking 42")
+    assert "secret-looking" not in detail
+
+
+# -- regex fields: compiled with the worker's own library --
+
+_PATTERN = {"key": "pattern", "label": "Regex pattern", "kind": "regex", "required": True}
+
+
+@pytest.mark.parametrize("pattern", [r"^\d{3}-\d{4}$", "(?i)paris", r"\p{Lu}+", "(?<=a+)b"])
+def test_validate_passes_a_pattern_the_regex_library_compiles(pattern):
+    # \p{Lu} and the variable-width lookbehind compile with `regex`, not with
+    # the stdlib `re`: the check uses what the worker uses
+    assert _validation_detail("Regex Match", _PATTERN, pattern) is None
+
+
+@pytest.mark.parametrize("pattern,reason", [
+    ("[A-Z+", "unterminated character set at position 5"),
+    ("[z-a]", "bad character range at position 4"),
+    ("a{99999999999}", "repeat count too big at position 2"),
+])
+def test_validate_raises_for_a_pattern_that_does_not_compile(pattern, reason):
+    assert _validation_detail("Regex Match", _PATTERN, pattern) == (
+        f"'Regex Match' config field 'pattern' is not a valid regex pattern: {reason}")
+
+
+# -- json_schema fields: valid JSON and a valid JSON Schema --
+
+_SCHEMA = {"key": "schema", "label": "JSON Schema", "kind": "json_schema", "required": True}
+
+
+@pytest.mark.parametrize("schema", [
+    '{"type": "object", "required": ["status"]}',
+    '{"$schema": "http://json-schema.org/draft-07/schema#", "type": "array"}',
+    "true",
+])
+def test_validate_passes_a_valid_json_schema(schema):
+    assert _validation_detail("Matches JSON Schema", _SCHEMA, schema) is None
+
+
+def test_validate_raises_for_a_schema_that_is_not_json():
+    assert _validation_detail("Matches JSON Schema", _SCHEMA, "{type: object}").startswith(
+        "'Matches JSON Schema' config field 'schema' is not valid JSON: ")
+
+
+def test_validate_raises_for_json_that_is_not_a_valid_schema():
+    assert _validation_detail("Matches JSON Schema", _SCHEMA, '{"type": "nope"}') == (
+        "'Matches JSON Schema' config field 'schema' is not a valid JSON Schema: "
+        "'nope' is not valid under any of the given schemas")
+
+
+@pytest.mark.parametrize("schema", ["42", "null", '"object"', "[1]"])
+def test_validate_raises_for_a_schema_that_is_not_an_object(schema):
+    detail = _validation_detail("Matches JSON Schema", _SCHEMA, schema)
+    assert detail.startswith("'Matches JSON Schema' config field 'schema' is not a valid "
+                             "JSON Schema: ")
 
 
 # -- json / jsonpath fields: checked to parse on save --
