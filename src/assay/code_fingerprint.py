@@ -11,6 +11,14 @@ and its middleware, its async database engine), so a change there doesn't
 mark the workers out of date. It's computed once, on import — at start-up in
 every process — so it describes the code loaded then, not what's on disk
 later. Two images built from the same commit share it.
+
+Leaving the API-only code out is only right while nothing the fingerprint
+covers imports it: a worker running a function from `services/` would run
+code whose changes the fingerprint can't see. So no module outside API_ONLY
+imports one inside it — tests/test_code_fingerprint.py fails the build if one
+does, naming the file. Code both sides need belongs outside API_ONLY (as
+`judge_settings.py` and `target_settings.py` are). A rename inside API_ONLY
+must be made here too; the same test fails while a listed name is missing.
 """
 import hashlib
 from pathlib import Path
@@ -18,7 +26,8 @@ from pathlib import Path
 from assay import __version__
 
 _PACKAGE = Path(__file__).resolve().parent
-# Code only the API process runs: top-level directories and files
+# Code only the API process runs, and the fingerprint leaves out: top-level
+# directories and files of the package. Nothing outside it may import it.
 API_ONLY = frozenset({"api", "services", "main.py", "middleware.py", "exception_handlers.py",
                       "db.py"})
 
