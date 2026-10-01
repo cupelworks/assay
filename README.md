@@ -219,7 +219,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/tests/types` | The test type catalogue for one `test_category` — each type's name, guidance, the `config_fields` an assignment must supply (a `threshold`'s `min`/`max` are that type's own score range), and, read-only, how the worker evaluates it: `engine`, `engine_settings`, `comparison` |
 | `GET` | `/tests` | List all test cases (paginated, includes total count) |
 | `GET` | `/tests/{test_case_id}` | Retrieve a single test case by ID |
-| `POST` | `/tests` | Create a single test case manually |
+| `POST` | `/tests` | Create a single test case manually; a type may be assigned more than once, each assignment told apart by its `label` (defaults to the type's name, numbered when taken) |
 | `POST` | `/tests/from-dataset` | Bulk-create test cases from all rows in a dataset |
 | `PATCH` | `/tests/{test_case_id}` | Partially update a test case — only sent fields are changed; `expected_output`/`model_output` sent as `null` are cleared, `name`/`input` sent as `null` are left as they are; unknown fields are rejected |
 | `DELETE` | `/tests` | Delete test cases by ID (guards against linked test sets and test runs) |
