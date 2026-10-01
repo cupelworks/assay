@@ -72,6 +72,7 @@ from assay.services.tests import (
     get_test_types_by_category,
     modify_test_by_id,
 )
+from assay.services.worker_health import get_worker_health
 
 __all__ = [
     "add_test_sets_to_test_plan_by_id",
@@ -136,4 +137,5 @@ __all__ = [
     "update_test_plan_by_id",
     "update_test_set_metadata_by_id",
     "update_target_settings",
+    "get_worker_health",
 ]

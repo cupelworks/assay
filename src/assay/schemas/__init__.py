@@ -16,6 +16,7 @@ from assay.schemas.datasets import (
     PaginatedDataSetResponse,
     PaginatedDataSetRowResponse,
 )
+from assay.schemas.health import BrokerStatus, WorkerHealth, WorkerHealthStatus, WorkerStatus
 from assay.schemas.settings import (
     JudgeCheck,
     JudgeCheckRequest,
@@ -221,4 +222,8 @@ __all__ = [
     "TestTypeAssignment",
     "TestTypeResult",
     "TestTypesSchema",
+    "BrokerStatus",
+    "WorkerHealth",
+    "WorkerHealthStatus",
+    "WorkerStatus",
 ]

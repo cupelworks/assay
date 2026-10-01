@@ -20,6 +20,9 @@ from assay.worker import app as _celery_app
 
 logger = logging.getLogger(__name__)
 
+# The worker's task that executes one run, published by name (_dispatch_runs)
+EXECUTE_RUN_TASK = "assay.worker.tasks.execute_run.execute_run"
+
 
 async def _find_test_set_entries_ids_or_409(
         test_set_id: uuid.UUID,
@@ -657,7 +660,7 @@ def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:
     for run_id in run_ids:
         try:
             _celery_app.send_task(
-                "assay.worker.tasks.execute_run.execute_run",
+                EXECUTE_RUN_TASK,
                 args=[run_id],
                 ignore_result=True,
                 # travels in the task message, so the worker's log lines for
