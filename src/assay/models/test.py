@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Text
 from sqlalchemy import Enum as SAEnum
@@ -9,9 +9,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from assay.models.base import Base
 from assay.models.datasets import DatasetRowModel
-
-if TYPE_CHECKING:
-    from assay.models.stats import StatisticalVerificationModel
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DESIGN OVERVIEW
@@ -101,11 +98,11 @@ if TYPE_CHECKING:
 #       └── TestModel (dataset_row_id, traceability only)
 #               └── TestSetEntryModel (snapshot at time of set inclusion)
 #                       └── TestRunModel (frozen execution)
-#                               └── StatisticalVerificationModel (stats results)
 #
 #   From a live TestModel you can navigate:
-#     test.set_entries → entry.runs → run.statistical_verifications
-#   to retrieve the full execution history across all sets and plans.
+#     test.set_entries → entry.runs
+#   to retrieve the full execution history across all sets and plans. Runs
+#   created by a statistical batch also carry its batch_id (models/statistics.py).
 #
 #   TestRunModel is also grouped by trigger event, via exactly one of:
 #     - TestSetExecutionModel (standalone test set execution)
@@ -706,8 +703,8 @@ class TestRunModel(Base):
     keyed by name. NotRan means nothing could be attempted at all (the
     model couldn't be called, the entry couldn't be read) — error carries
     the reason, and results stays null; NotRan is the only status error is
-    ever set for. Statistical verifications produced post-run are linked
-    via the statistical_verifications relationship.
+    ever set for. A run created by a statistical batch carries its batch_id
+    and batch_index (models/statistics.py).
     """
 
     __tablename__ = "test_runs"
@@ -794,11 +791,6 @@ class TestRunModel(Base):
     # fields (stop_reason, token counts, model). A check with an answer_path
     # reads its part of it. Null for a recorded answer and for NotRan.
     application_reply: Mapped[Any] = mapped_column(JSON, nullable=True)
-
-    statistical_verifications: Mapped[list["StatisticalVerificationModel"]] = relationship(
-        back_populates="test_run",
-        # TODO: cascade deletion of statistical_verifications should be opt-in via the API
-    )
 
 
 class StandaloneRunModel(Base):

@@ -1473,3 +1473,21 @@ def test_comparisons_table_comes_and_goes(scratch):
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert "statistical_comparisons" not in tables
     assert "statistical_batches" in tables
+
+
+# --- 5d8a1f3c9e27: statistical_verifications dropped with the z-test ---
+
+
+def test_the_z_tests_table_is_dropped_and_comes_back_empty(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "5d8a1f3c9e27")
+
+    def tables() -> set[str]:
+        with sqlite3.connect(db_path) as connection:
+            return {row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+    assert "statistical_verifications" not in tables()
+    command.downgrade(config, "3b7e2d9c41f6")
+    assert "statistical_verifications" in tables()
+    assert "z_statistic" in _table_columns(db_path, "statistical_verifications")

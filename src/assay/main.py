@@ -56,8 +56,11 @@ default, or any other part of your application's reply you point it at (`answer_
   (nothing could be attempted), with the result of each check kept alongside. Every run
   keeps a record of the test exactly as it was run, so editing a test later never changes
   a past run's history.
-- **Statistical verification** — a one-sample z-test over a series of metric scores
-  against a threshold, for claims like "this metric holds above 0.8 at α = 0.05".
+- **Run with statistics** — run a test, set or plan *N times* as one batch and answer with
+  a stated confidence: "95% confident each check passes at least 90% of the time" (the
+  binomial gate) or "the mean ROUGE is above its threshold" (the one-sample t-test), with
+  the cost estimated first, a Stop control, and chart-ready results. Two batches compare
+  check by check: "did my change help?"
 - **Settings** — how Assay calls your application (URL, headers, request body, where the
   answer is in the reply), saved from the UI; and *checks* that make one call through a
   worker to confirm the settings work before any run depends on them.

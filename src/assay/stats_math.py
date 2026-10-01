@@ -462,7 +462,7 @@ class OneSampleTResult:
 def one_sample_t(values: list[float], threshold: float, higher_is_better: bool,
                  confidence: float) -> OneSampleTResult:
     """The one-sample t-test of the mean score against a threshold, each way
-    (the old z-test's job done right: valid for small samples).
+    (valid for small samples: Student's t, not the normal approximation).
 
     One score proves nothing: inconclusive, no bounds. Scores that are all
     equal (a recorded answer scored by a metric gives the same score every

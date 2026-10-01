@@ -39,7 +39,6 @@ from assay.services.settings import (
     update_judge_settings,
     update_target_settings,
 )
-from assay.services.stats import run_z_test
 from assay.services.test_plans import (
     add_test_sets_to_test_plan_by_id,
     create_new_test_plan,
@@ -121,7 +120,6 @@ __all__ = [
     "get_target_settings",
     "reset_judge_settings",
     "reset_target_settings",
-    "run_z_test",
     "update_dataset_name_by_id",
     "update_dataset_rows_by_id",
     "delete_dataset_rows_by_ids",

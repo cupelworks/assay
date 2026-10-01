@@ -31,7 +31,6 @@ from assay.schemas.settings import (
     TargetSettingsRead,
     TargetSettingsUpdate,
 )
-from assay.schemas.stats import ZTestRequest, ZTestResult
 from assay.schemas.test_plan_entries import (
     PaginatedTestPlanEntriesDetails,
     TestPlanEntryDetails,
@@ -142,8 +141,6 @@ __all__ = [
     "JudgeSettingsRead",
     "JudgeSettingsUpdate",
     "RubricSource",
-    "ZTestRequest",
-    "ZTestResult",
     "ConfigFieldDescriptor",
     "CreateTestCaseRequest",
     "CreateTestCaseResponse",

@@ -15,7 +15,6 @@ from assay.models.statistics import (
     StatisticalBatchModel,
     StatisticalComparisonModel,
 )
-from assay.models.stats import StatisticalVerificationModel
 from assay.models.test import (
     TERMINAL_STATUSES,
     Comparison,
@@ -52,7 +51,6 @@ __all__ = [
     "StandaloneRunModel",
     "StatisticalBatchModel",
     "StatisticalComparisonModel",
-    "StatisticalVerificationModel",
     "JudgeCheckModel",
     "TargetCheckModel",
     "TargetCheckStatus",
