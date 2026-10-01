@@ -120,7 +120,19 @@ def _point(run: BatchRun, label: str) -> SeriesPoint:
                        score=r4(result.get("score")), error=None)
 
 
-def _interval(lower, point, upper, method: IntervalMethod, level: float,
+def fold(runs: list[BatchRun], label: str) -> tuple[list[SeriesPoint], CheckCounts]:
+    """One check's runs as points, and what they came to."""
+    series = [_point(run, label) for run in runs]
+    decided = [p for p in series if p.passed is not None]
+    passed = sum(p.passed for p in decided)
+    return series, CheckCounts(
+        evaluated=len(decided), passed=passed, failed=len(decided) - passed,
+        errored=sum(p.passed is None and p.status != TestStatus.not_ran.value for p in series),
+        not_ran=sum(p.status == TestStatus.not_ran.value for p in series),
+    )
+
+
+def make_interval(lower, point, upper, method: IntervalMethod, level: float,
               sides: IntervalSides) -> Interval:
     return Interval(lower=r4(lower), point=r4(point), upper=r4(upper), method=method,
                     level=level, sides=sides)
@@ -139,7 +151,7 @@ def _gate(passed: int, n: int, target: float, confidence: float) -> Statistic:
     gate = stats_math.binomial_gate(passed, n, target, confidence)
     rule = GateRuleSchema(times=n, pass_at_least=gate.rule.pass_at_least,
                           fail_at_most=gate.rule.fail_at_most)
-    interval = _interval(gate.lower, passed / n, gate.upper, IntervalMethod.exact,
+    interval = make_interval(gate.lower, passed / n, gate.upper, IntervalMethod.exact,
                          confidence, IntervalSides.one)
     sure, goal = percent(confidence), percent(target)
     times_to_decide = message = None
@@ -170,7 +182,7 @@ def _t_test(scores: list[float], threshold: float, higher_is_better: bool,
     n, sure = test.n, percent(confidence)
     passing, failing = ("at least", "below") if higher_is_better else ("at most", "above")
     interval = (None if test.lower is None else
-                _interval(test.lower, test.mean, test.upper, IntervalMethod.t, confidence,
+                make_interval(test.lower, test.mean, test.upper, IntervalMethod.t, confidence,
                           IntervalSides.one))
     times_to_decide = message = None
     if test.verdict == stats_math.Verdict.passed:
@@ -213,14 +225,9 @@ def check_result(name: StatisticalTestName, parameters: dict[str, float], floor:
                  stopped: bool, assignment: TestTypeAssignment, row: TestTypesModel | None,
                  runs: list[BatchRun]) -> CheckResult:
     confidence = parameters["confidence"]
-    series = [_point(run, assignment.label) for run in runs]
+    series, counts = fold(runs, assignment.label)
     decided = [p for p in series if p.passed is not None]
-    passed = sum(p.passed for p in decided)
-    counts = CheckCounts(
-        evaluated=len(decided), passed=passed, failed=len(decided) - passed,
-        errored=sum(p.passed is None and p.status != TestStatus.not_ran.value for p in series),
-        not_ran=sum(p.status == TestStatus.not_ran.value for p in series),
-    )
+    passed = counts.passed
     is_gate = name == StatisticalTestName.binomial_gate
     target = parameters["target"] if is_gate else None
 
@@ -228,13 +235,13 @@ def check_result(name: StatisticalTestName, parameters: dict[str, float], floor:
     if decided:
         n = len(decided)
         if is_gate:
-            pass_rate = _interval(
+            pass_rate = make_interval(
                 stats_math.exact_lower_bound(passed, n, confidence), passed / n,
                 stats_math.exact_upper_bound(passed, n, confidence),
                 IntervalMethod.exact, confidence, IntervalSides.one)
         else:
             lower, upper = stats_math.wilson_interval(passed, n, confidence)
-            pass_rate = _interval(lower, passed / n, upper, IntervalMethod.wilson, confidence,
+            pass_rate = make_interval(lower, passed / n, upper, IntervalMethod.wilson, confidence,
                                   IntervalSides.two)
 
     scale = scale_of(row)

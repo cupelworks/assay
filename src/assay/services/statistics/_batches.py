@@ -238,7 +238,7 @@ async def refresh(batch: StatisticalBatchModel, session: AsyncSession
 # ── the response ─────────────────────────────────────────────────────────────
 
 
-def _scope_kind(batch: StatisticalBatchModel) -> tuple[ScopeKind, uuid.UUID]:
+def scope_kind(batch: StatisticalBatchModel) -> tuple[ScopeKind, uuid.UUID]:
     if batch.test_id is not None:
         return ScopeKind.test, batch.test_id
     if batch.test_set_id is not None:
@@ -266,7 +266,7 @@ async def describe(batch: StatisticalBatchModel, session: AsyncSession, *, serie
     spare loading the runs twice."""
     if names is None:
         names = await scope_names([batch], session)
-    kind, scope_id = _scope_kind(batch)
+    kind, scope_id = scope_kind(batch)
     stored = batch.result
     if stored is not None:
         done = BatchProgress.model_validate(stored["progress"])

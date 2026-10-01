@@ -82,3 +82,36 @@ class StatisticalBatchModel(Base):
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Set when the result was computed: every run finished
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class StatisticalComparisonModel(Base):
+    """
+    Two finished batches of the same scope compared check by check: "did my
+    change help?" (docs/statistics/ notes 8, 18, 22). Computed when created,
+    stored, and read back as is — like a batch's result, the record of what
+    was compared, with what, when.
+
+    The scope columns repeat the batches' (both have the same) so comparisons
+    can be listed by scope without a join. `result` holds the per-check
+    comparison; A is the baseline, every difference is B − A.
+    """
+
+    __tablename__ = "statistical_comparisons"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    batch_a_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("statistical_batches.id"), nullable=False, index=True)
+    batch_b_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("statistical_batches.id"), nullable=False, index=True)
+    test_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("tests.id"), nullable=True, index=True)
+    test_set_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("test_sets.id"), nullable=True, index=True)
+    test_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("test_plans.id"), nullable=True, index=True)
+    statistical_test: Mapped[str] = mapped_column(Text, nullable=False)
+    parameters: Mapped[dict] = mapped_column(JSON, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now().astimezone())

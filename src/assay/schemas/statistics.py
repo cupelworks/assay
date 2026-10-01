@@ -673,3 +673,157 @@ class BatchDetails(BatchSummary):
 
 class BatchList(Pagination):
     items: list[BatchSummary]
+
+
+# ── comparisons ──────────────────────────────────────────────────────────────
+
+
+class ComparisonRequest(BaseModel):
+    """POST /statistics/comparisons: two finished batches of the same scope,
+    A the baseline and B the change."""
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"examples": [
+            {"batch_a": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+             "batch_b": "2f1b6a3e-8d4c-4b9e-a1f0-5c3d2e1b0a99",
+             "statistical_test": "pass_rates", "parameters": {"confidence": 0.95},
+             "note": "Prompt v3 against v2"},
+        ]},
+    )
+
+    batch_a: uuid.UUID = Field(description="The baseline batch: what B is compared against.")
+    batch_b: uuid.UUID = Field(
+        description="The batch to judge: every difference is B − A, so \"better\" means B "
+                    "passes more often than A.",
+    )
+    statistical_test: StatisticalTestName = Field(
+        StatisticalTestName.pass_rates,
+        description="A comparison test from the catalogue (`kind: comparison`).",
+    )
+    parameters: dict[str, float] = Field(
+        default_factory=dict,
+        description="The test's parameters by key; any left out take their default.",
+    )
+    note: str | None = Field(
+        None, max_length=500,
+        description="Free text kept with the comparison (\"prompt v3 against v2\"). At most "
+                    "500 characters; blank is stored as null.",
+    )
+
+
+class ComparisonVerdictName(StrEnum):
+    better = "better"
+    worse = "worse"
+    no_difference = "no_difference"
+
+
+class ComparisonSide(BaseModel):
+    """One batch's side of a check: its counts, its pass rate, its runs."""
+    counts: CheckCounts
+    pass_rate: Interval | None = Field(
+        description="The batch's pass rate for this check with Wilson's two-sided interval; "
+                    "null with no evaluated run.",
+    )
+    series: list[SeriesPoint] | None = Field(
+        description="The batch's runs for this check, by time — draw the two strips or "
+                    "distributions over each other. Null when the read asked `series=false`.",
+    )
+
+
+class CheckComparison(BaseModel):
+    """One check, B against A."""
+    label: str = Field(description="The check's label: its identity in both batches.")
+    test_type: str
+    a: ComparisonSide
+    b: ComparisonSide
+    difference: Interval | None = Field(
+        description="B's pass rate minus A's (`point`), with Newcombe's two-sided score "
+                    "interval: the one bar with whiskers to draw, and what the verdict is "
+                    "read from. Null when either side has no evaluated run.",
+    )
+    verdict: ComparisonVerdictName | None = Field(
+        description="`better`: the interval lies above 0 — B passes more often. `worse`: "
+                    "below 0. `no_difference`: it straddles 0, so no real difference can be "
+                    "told at this size (not proof that there is none). Null when either side "
+                    "has no evaluated run.",
+    )
+    reason: str = Field(description="The verdict in one sentence, as the UI shows it.")
+    p_value: float | None = Field(
+        description="Shown beside the verdict, never deciding it: chi-square's when every "
+                    "expected count is at least 5, Fisher's exact otherwise.",
+    )
+    p_value_method: str | None = Field(
+        description="`chi_square` or `fisher_exact` — name it in the caption.",
+    )
+    times_to_decide: int | None = Field(
+        description="With `no_difference` and different rates: about how many times *each* "
+                    "of two new batches would need to tell these rates apart, 80% of the "
+                    "time. Null otherwise.",
+    )
+    times_to_decide_message: str | None = Field(
+        description="The same as a sentence.",
+    )
+
+
+class EntryComparison(BaseModel):
+    entry_id: uuid.UUID | None = Field(description="The test set entry; null for a test.")
+    test_id: uuid.UUID | None
+    test_set_name: str | None
+    name: str
+    checks: list[CheckComparison] = Field(description="Every check in both, in label order.")
+
+
+class UnmatchedSide(StrEnum):
+    a = "a"
+    b = "b"
+
+
+class Unmatched(BaseModel):
+    """An entry or check present in one batch only — the scope changed between
+    them (an entry added to or removed from the set, a check relabelled)."""
+    entry_id: uuid.UUID | None
+    name: str = Field(description="The entry's name.")
+    label: str | None = Field(description="The check; null when the whole entry is unmatched.")
+    only_in: UnmatchedSide = Field(description="The batch it's in: `a` or `b`.")
+
+
+class ComparisonResult(BaseModel):
+    verdicts: dict[str, int] = Field(
+        description="Checks by verdict: `better`, `worse`, `no_difference`, and `none`.",
+    )
+    summary: str = Field(description="The comparison in one sentence.")
+    entries: list[EntryComparison]
+    unmatched: list[Unmatched] = Field(
+        description="What only one batch has: not compared, listed so nothing goes missing "
+                    "silently.",
+    )
+
+
+class ComparedBatch(BaseModel):
+    """A batch as a comparison names it."""
+    id: uuid.UUID
+    note: str | None
+    status: BatchStatusName
+    statistical_test: StatisticalTestName
+    times_requested: int
+    created_at: datetime
+
+
+class ComparisonSummary(BaseModel):
+    id: uuid.UUID
+    scope: Scope
+    statistical_test: StatisticalTestName
+    parameters: dict[str, float]
+    note: str | None
+    batch_a: ComparedBatch = Field(description="The baseline.")
+    batch_b: ComparedBatch = Field(description="The change: differences are B − A.")
+    summary: str
+    created_at: datetime
+
+
+class ComparisonDetails(ComparisonSummary):
+    result: ComparisonResult
+
+
+class ComparisonList(Pagination):
+    items: list[ComparisonSummary]

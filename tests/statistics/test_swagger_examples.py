@@ -3,7 +3,13 @@ an example that drifted from the schema would teach the FE the wrong shape."""
 import pytest
 
 from assay.main import create_app
-from assay.schemas.statistics import BatchDetails, BatchList, Estimate
+from assay.schemas.statistics import (
+    BatchDetails,
+    BatchList,
+    ComparisonDetails,
+    ComparisonList,
+    Estimate,
+)
 
 MODELS = {
     ("/statistics/estimate", "post", "200"): Estimate,
@@ -11,6 +17,9 @@ MODELS = {
     ("/statistics/batches", "get", "200"): BatchList,
     ("/statistics/batches/{batch_id}", "get", "200"): BatchDetails,
     ("/statistics/batches/{batch_id}/stop", "post", "200"): BatchDetails,
+    ("/statistics/comparisons", "post", "201"): ComparisonDetails,
+    ("/statistics/comparisons", "get", "200"): ComparisonList,
+    ("/statistics/comparisons/{comparison_id}", "get", "200"): ComparisonDetails,
 }
 
 

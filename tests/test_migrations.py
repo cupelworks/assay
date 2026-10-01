@@ -1455,3 +1455,21 @@ def test_downgrade_drops_batches_and_errored(scratch):
     assert "statistical_batches" not in tables
     assert "batch_id" not in _table_columns(db_path, "test_runs")
     assert "errored" not in _run(db_path, run_id)["results"]["Contains"]
+
+
+# --- 3b7e2d9c41f6: statistical comparisons ---
+
+
+def test_comparisons_table_comes_and_goes(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "3b7e2d9c41f6")
+
+    assert {"batch_a_id", "batch_b_id", "statistical_test", "parameters", "note", "result",
+            "created_at"} <= set(_table_columns(db_path, "statistical_comparisons"))
+
+    command.downgrade(config, "90b64c0a5c27")
+    with sqlite3.connect(db_path) as connection:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "statistical_comparisons" not in tables
+    assert "statistical_batches" in tables

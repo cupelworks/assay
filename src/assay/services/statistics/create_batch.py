@@ -85,4 +85,5 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
                "judge_calls": estimate.calls.judge.total},
     )
     _dispatch_runs([run.id for run in runs])
+    await session.refresh(batch)  # answer with what a read will return
     return await describe(batch, session)

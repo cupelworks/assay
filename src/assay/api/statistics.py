@@ -13,6 +13,9 @@ from assay.schemas.statistics import (
     BatchList,
     BatchRequest,
     BatchStatusName,
+    ComparisonDetails,
+    ComparisonList,
+    ComparisonRequest,
     Estimate,
     EstimateRequest,
     StatisticalTestCatalogue,
@@ -20,9 +23,12 @@ from assay.schemas.statistics import (
 from assay.services.statistics import (
     catalogue,
     create_batch,
+    create_comparison,
     estimate_batch,
     get_batch,
+    get_comparison,
     list_batches,
+    list_comparisons,
     stop_batch,
 )
 
@@ -735,3 +741,235 @@ async def stop_statistical_batch(
     Stopping a batch that has nothing left pending changes nothing and returns it.
     """
     return await stop_batch(batch_id, session)
+
+
+# ── comparisons ──────────────────────────────────────────────────────────────
+
+_BATCH_B_ID = "2f1b6a3e-8d4c-4b9e-a1f0-5c3d2e1b0a99"
+_COMPARISON_ID = "c0ffee00-1234-4abc-9def-0123456789ab"
+
+
+def _side(passed: int, lower: float, point: float, upper: float) -> dict:
+    return {"counts": {"evaluated": 29, "passed": passed, "failed": 29 - passed,
+                       "errored": 0, "not_ran": 0},
+            "pass_rate": {"lower": lower, "point": point, "upper": upper, "method": "wilson",
+                          "level": 0.95, "sides": "two"},
+            "series": [_point(1, True), _point(2, passed > 27)]}
+
+
+_CHECK_BETTER = {
+    "label": "Mentions the reset link", "test_type": "Contains",
+    "a": _side(20, 0.5077, 0.6897, 0.8272), "b": _side(28, 0.8282, 0.9655, 0.9939),
+    "difference": {"lower": 0.0815, "point": 0.2759, "upper": 0.46, "method": "newcombe",
+                   "level": 0.95, "sides": "two"},
+    "verdict": "better",
+    "reason": "B passes more often than A: 96.55% against 68.97%, 95% confident the "
+              "difference is between +8.2 points and +46.0 points.",
+    "p_value": 0.0054, "p_value_method": "chi_square",
+    "times_to_decide": None, "times_to_decide_message": None,
+}
+
+_CHECK_SAME = {
+    "label": "Relevance", "test_type": "Relevance",
+    "a": _side(27, 0.7804, 0.931, 0.9809), "b": _side(28, 0.8282, 0.9655, 0.9939),
+    "difference": {"lower": -0.1116, "point": 0.0345, "upper": 0.1878, "method": "newcombe",
+                   "level": 0.95, "sides": "two"},
+    "verdict": "no_difference",
+    "reason": "No real difference at this size: 93.1% for A, 96.55% for B; the difference "
+              "could be anywhere between -11.2 points and +18.8 points.",
+    "p_value": 1.0, "p_value_method": "fisher_exact",
+    "times_to_decide": 647,
+    "times_to_decide_message": "Two new batches of about 647 times each would likely tell "
+                               "93.1% from 96.55%.",
+}
+
+
+def _compared(batch_id: str, note: str, created_at: str) -> dict:
+    return {"id": batch_id, "note": note, "status": "Inconclusive",
+            "statistical_test": "binomial_gate", "times_requested": 29,
+            "created_at": created_at}
+
+
+_COMPARISON_SUMMARY = {
+    "id": _COMPARISON_ID,
+    "scope": _SCOPE_SET,
+    "statistical_test": "pass_rates",
+    "parameters": {"confidence": 0.95},
+    "note": "Prompt v3 against v2",
+    "batch_a": _compared(_BATCH_ID, "Prompt v2", "2026-09-30T16:02:11+02:00"),
+    "batch_b": _compared(_BATCH_B_ID, "Prompt v3, temperature 0.2",
+                         "2026-10-01T09:30:00+02:00"),
+    "summary": "B is better on 1 of 2 checks, worse on none.",
+    "created_at": "2026-10-01T10:05:12+02:00",
+}
+
+_COMPARISON = {
+    **_COMPARISON_SUMMARY,
+    "result": {
+        "verdicts": {"better": 1, "worse": 0, "no_difference": 1, "none": 0},
+        "summary": "B is better on 1 of 2 checks, worse on none.",
+        "entries": [{"entry_id": _ENTRY_ID, "test_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                     "test_set_name": "Support answers", "name": "Reset a password",
+                     "checks": [_CHECK_BETTER, _CHECK_SAME]}],
+        "unmatched": [],
+    },
+}
+
+_COMPARISON_404 = {
+    "description": "No comparison with this id.",
+    "content": {"application/json": {"example": {
+        "detail": f"Statistical comparison with ID {_COMPARISON_ID} not found"}}},
+}
+
+_COMPARISON_ANATOMY = """
+**Reading a comparison.** A is the baseline, B the change: every difference is **B − A**.
+
+- `batch_a` / `batch_b` — each batch's id, `note` (what it was: "prompt v2", "prompt v3"),
+  status, test and size, so the page can say what was compared without another call.
+- `result.verdicts` counts the checks by verdict, `result.summary` says it in a sentence.
+- `result.entries` — each entry both batches ran (matched by entry id; a standalone test is
+  one entry), each check both have (matched by label), with:
+  - `a` and `b` — each side's `counts` (errored and Not Ran counted apart, as in a batch),
+    its `pass_rate` with Wilson's two-sided interval, and its `series`, to draw the two
+    strips or distributions over each other;
+  - `difference` — B's rate minus A's with **Newcombe's score interval**: the one bar with
+    whiskers, and what decides the `verdict`: `better` when it lies above 0, `worse` below,
+    `no_difference` when it straddles 0 — *no real difference at this size*, not proof that
+    there is none;
+  - `p_value` with `p_value_method` — chi-square when every expected count is at least 5,
+    Fisher's exact otherwise: shown beside the verdict, never deciding it (name the method
+    in the caption);
+  - with `no_difference`, `times_to_decide`: about how many times each of two **new**
+    batches would need to tell the two rates apart (80% of the time).
+- `result.unmatched` — entries or checks only one batch has (an entry added to the set
+  between the batches, a check relabelled): not compared, listed so nothing goes missing.
+"""
+
+
+_CREATE_COMPARISON_DOC = inspect.cleandoc("""
+    **Did my change help?** Compare two finished batches of the same scope, check by check:
+    does B pass more often than A, less often, or is there no real difference at this size?
+
+    The usual flow: run a batch (A), change something outside Assay — the application's
+    prompt, its model, the judge — run another batch of the same scope (B), then compare.
+    Put what changed in each batch's `note`; the comparison shows both.
+
+    Guards, in order:
+    - the two ids differ (422), and the test is a comparison test (422; see `GET
+      /statistics/tests`), with its parameters in range (422);
+    - both batches exist (404);
+    - both have finished (409 while either has runs `Pending` or `Running` — stop it, or
+      wait). `Incomplete` batches can be compared: their evaluated runs are what's compared;
+    - both ran the same test, test set or test plan (422);
+    - for a standalone test, the test wasn't edited between them — its input, expected
+      output or checks (422 naming what changed: the runs answered different questions). A
+      different *recorded answer* is allowed: that is the change being measured.
+
+    The comparison is computed now and stored (201); read it back with `GET
+    /statistics/comparisons/{comparison_id}`. Comparing does no runs and costs nothing.
+    """) + "\n" + _COMPARISON_ANATOMY
+
+
+@router.post(
+    path="/statistics/comparisons",
+    summary="Compare two batches: did my change help?",
+    description=_CREATE_COMPARISON_DOC,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        201: {"description": "The comparison, computed and stored.",
+              "content": {"application/json": {"example": _COMPARISON}}},
+        404: {"description": "Either batch doesn't exist.",
+              "content": {"application/json": {"example": {
+                  "detail": f"Statistical batch with ID {_BATCH_B_ID} not found"}}}},
+        409: {"description": "A batch still has runs in flight.",
+              "content": {"application/json": {"example": {
+                  "detail": "Only finished batches can be compared: batch B is Running"}}}},
+        422: {
+            "description": "The request can't be compared, FastAPI's list shape, `loc` "
+                           "pointing at the field.",
+            "content": {"application/json": {"examples": {
+                "same_batch": {"summary": "The same batch twice", "value":
+                    _validation_error((["body", "batch_b"], "Compare two different batches"))},
+                "scope": {"summary": "Batches of different scopes", "value":
+                    _validation_error((["body", "batch_b"],
+                                       "Batch B ran test set 'Billing answers', batch A test "
+                                       "set 'Support answers': compare two batches of the "
+                                       "same scope"))},
+                "edited": {"summary": "A standalone test edited between the batches", "value":
+                    _validation_error((["body", "batch_b"],
+                                       "The test was edited between the two batches (the "
+                                       "checks changed): their runs answered different "
+                                       "questions. Compare two batches of the same "
+                                       "content"))},
+                "batch_test": {"summary": "A batch test instead of a comparison test",
+                               "value": _validation_error((
+                                   ["body", "statistical_test"],
+                                   "Binomial gate isn't a comparison test; see GET "
+                                   "/statistics/tests"))},
+            }}},
+        },
+    },
+)
+async def create_statistical_comparison(
+        request: ComparisonRequest, session: SessionDep) -> ComparisonDetails:  # pragma: no cover
+    return await create_comparison(request, session)
+
+
+@router.get(
+    path="/statistics/comparisons",
+    summary="List comparisons",
+    responses={200: {
+        "description": "Comparisons, newest first, without their per-check detail.",
+        "content": {"application/json": {"example": {
+            "items": [_COMPARISON_SUMMARY], "total": 1, "offset": 0, "limit": 100}}},
+    }},
+)
+async def list_statistical_comparisons(
+        session: SessionDep,
+        batch_id: Annotated[uuid.UUID | None, Query(
+            description="Only comparisons that read this batch, as A or as B.")] = None,
+        test_id: Annotated[uuid.UUID | None, Query(
+            description="Only comparisons of this standalone test's batches.")] = None,
+        test_set_id: Annotated[uuid.UUID | None, Query(
+            description="Only comparisons of this test set's batches.")] = None,
+        test_plan_id: Annotated[uuid.UUID | None, Query(
+            description="Only comparisons of this test plan's batches.")] = None,
+        offset: Annotated[int, Query(ge=0, description="Comparisons to skip.")] = 0,
+        limit: Annotated[int, Query(ge=1, le=500,
+                                    description="Comparisons to return.")] = 100,
+) -> ComparisonList:  # pragma: no cover
+    """The comparisons of a scope (the Statistics panel's history) or of one batch (what it
+    was compared with). Filters combine. Each item names both batches with their notes and
+    says the outcome in `summary`; open one for the per-check detail."""
+    return await list_comparisons(session, offset=offset, limit=limit, batch_id=batch_id,
+                                  test_id=test_id, test_set_id=test_set_id,
+                                  test_plan_id=test_plan_id)
+
+
+@router.get(
+    path="/statistics/comparisons/{comparison_id}",
+    summary="Get a comparison",
+    description=inspect.cleandoc("""
+        One stored comparison, exactly as it was computed. Series are shortened to two
+        points in the example; a real comparison has one per time on each side.
+        """) + "\n" + _COMPARISON_ANATOMY,
+    responses={
+        200: {"description": "The comparison.",
+              "content": {"application/json": {"examples": {
+                  "full": {"summary": "A comparison", "value": _COMPARISON},
+                  "no_series": {"summary": "With ?series=false", "value": {
+                      **_COMPARISON, "result": {**_COMPARISON["result"], "entries": [{
+                          **_COMPARISON["result"]["entries"][0],
+                          "checks": [{**c, "a": {**c["a"], "series": None},
+                                      "b": {**c["b"], "series": None}}
+                                     for c in (_CHECK_BETTER, _CHECK_SAME)]}]}}},
+              }}}},
+        404: _COMPARISON_404,
+    },
+)
+async def get_statistical_comparison(
+        comparison_id: uuid.UUID, session: SessionDep,
+        series: Annotated[bool, Query(
+            description="`false` leaves out both sides' `series`: the numbers alone.")] = True,
+) -> ComparisonDetails:  # pragma: no cover
+    return await get_comparison(comparison_id, series, session)

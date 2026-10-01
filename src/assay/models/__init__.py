@@ -13,6 +13,7 @@ from assay.models.statistics import (
     IN_PROGRESS_BATCH_STATUSES,
     BatchStatus,
     StatisticalBatchModel,
+    StatisticalComparisonModel,
 )
 from assay.models.stats import StatisticalVerificationModel
 from assay.models.test import (
@@ -50,6 +51,7 @@ __all__ = [
     "SettingsSection",
     "StandaloneRunModel",
     "StatisticalBatchModel",
+    "StatisticalComparisonModel",
     "StatisticalVerificationModel",
     "JudgeCheckModel",
     "TargetCheckModel",
