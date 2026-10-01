@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from assay.schemas import EvaluationInput, TestTypeResult
@@ -31,10 +33,17 @@ def test_any_json_value_is_valid_json(answer):
 
 
 def test_invalid_json_fails_with_the_parsers_reason():
-    result = _evaluate('{"status": "approved",}')
+    answer = '{"status": "approved",}'
+    # The parser's wording varies by Python version ("Illegal trailing comma"
+    # from 3.13, "Expecting property name ..." before), so the expected reason
+    # comes from the parser itself.
+    with pytest.raises(json.JSONDecodeError) as parser_error:
+        json.loads(answer)
+
+    result = _evaluate(answer)
 
     assert (result.passed, result.score) == (False, None)
-    assert result.detail.startswith("The answer is not valid JSON: Illegal trailing comma")
+    assert result.detail == f"The answer is not valid JSON: {parser_error.value}"
 
 
 def test_prose_around_json_is_not_json():
