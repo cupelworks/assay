@@ -2,7 +2,12 @@ import pytest
 
 from assay.models import Comparison
 from assay.schemas import EvaluationInput
-from assay.worker.evaluators._common import parse_threshold, passes, require_reference
+from assay.worker.evaluators._common import (
+    normalize_lookalikes,
+    parse_threshold,
+    passes,
+    require_reference,
+)
 
 # --- require_reference() ---
 
@@ -52,3 +57,36 @@ def test_passes_lte_lower_is_better_with_equality_passing(score, threshold, expe
 def test_passes_without_a_comparison_is_a_catalogue_error():
     with pytest.raises(ValueError, match="declares no comparison"):
         passes(0.9, 0.5, None)
+
+
+# --- normalize_lookalikes() ---
+
+
+@pytest.mark.parametrize("lookalike,plain", [
+    ("It’s ready", "It's ready"),                 # right single quotation mark
+    ("‘yes’ and “no”", "'yes' and \"no\""),
+    ("„tak“", '"tak"'),                     # low double quotation mark
+    ("itʼs", "it's"),                            # modifier letter apostrophe
+    ("Order 4471", "Order 4471"),                # no-break space
+    ("1 000 000", "1 000 000"),             # narrow no-break space
+    ("a b　c", "a b c"),                     # thin and ideographic spaces
+    ("e‑mail and −5", "e-mail and -5"),     # non-breaking hyphen, minus sign
+    ("pass​word­﻿", "password"),       # zero-width space, soft hyphen, BOM
+    ("Café", "Café"),                      # accent stored as two characters
+    ("Caf​é", "Café"),                # composes once the invisible one goes
+])
+def test_normalize_lookalikes_makes_look_alike_characters_plain(lookalike, plain):
+    assert normalize_lookalikes(lookalike) == plain
+
+
+@pytest.mark.parametrize("text", [
+    "Plain ASCII text, with 'quotes' and \"doubles\" - and a hyphen.",
+    "Two  spaces\tand a tab\nand a newline",          # inner whitespace kept as is
+    "en – and em — dashes look different",  # left alone
+    "«guillemets»",                         # left alone
+    "m² and ½",                             # NFKC would rewrite these
+    "Français, Été, naïve",
+    "\U0001F468‍\U0001F469‍\U0001F467",     # zero-width joiner in an emoji kept
+])
+def test_normalize_lookalikes_leaves_everything_else_unchanged(text):
+    assert normalize_lookalikes(text) == text

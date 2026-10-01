@@ -1024,3 +1024,79 @@ def test_downgrade_takes_the_appended_path_back_off(scratch):
 
     saved, _ = _judge_values(db_path)
     assert saved == [{"provider": "anthropic", "model": "m", "base_url": "https://proxy.test"}]
+
+
+# --- 3f8cecd2afff: normalize look-alike characters in the text checks ---
+
+_TEXT_ENGINES = {"exact_match", "contains", "regex"}
+
+
+def _settings_by_name(db_path: Path) -> dict[str, tuple[str, dict]]:
+    return {name: (row["engine"], json.loads(row["engine_settings"]))
+            for name, row in _test_types(db_path).items()}
+
+
+def test_upgrade_turns_normalize_lookalikes_on_for_every_text_check_but_one(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "b795f3711490")
+    before = _settings_by_name(db_path)
+
+    command.upgrade(config, "3f8cecd2afff")
+
+    after = _settings_by_name(db_path)
+    text_checks = {name for name, (engine, _) in after.items() if engine in _TEXT_ENGINES}
+    assert len(text_checks) == 10
+    for name in text_checks:
+        expected = name != "Exact Match (whitespace-sensitive)"
+        assert after[name][1] == {**before[name][1], "normalize_lookalikes": expected}, name
+    for name in set(after) - text_checks:
+        assert after[name] == before[name], name
+
+
+def test_upgrade_says_the_whitespace_sensitive_row_tells_look_alikes_apart(scratch):
+    config, db_path = scratch
+
+    command.upgrade(config, "3f8cecd2afff")
+
+    row = _test_types(db_path)["Exact Match (whitespace-sensitive)"]
+    assert "look-alike characters" in row["description"]
+    assert "curly quote" in row["limitations"]
+
+
+def test_every_text_check_scores_a_look_alike_answer_through_the_registry(scratch):
+    from assay.models import TestTypesModel
+    from assay.schemas import TestTypeAssignment
+    from assay.worker.evaluators import evaluate
+
+    config, db_path = scratch
+    command.upgrade(config, "3f8cecd2afff")
+    rows = _settings_by_name(db_path)
+
+    def outcome(name, answer, reference="It's ready", **config_values):
+        engine, engine_settings = rows[name]
+        catalogue_row = TestTypesModel(name=name, engine=engine,
+                                       engine_settings=engine_settings, comparison=None)
+        entry = type("Entry", (), {"input": "q", "expected_output": reference})()
+        return evaluate(TestTypeAssignment(name=name, config=config_values or None),
+                        catalogue_row, entry, answer).passed
+
+    curly = "It’s ready"
+    assert outcome("Exact Match", curly) is True
+    assert outcome("Exact Match (case-insensitive)", "it’s READY") is True
+    assert outcome("Exact Match (whitespace-sensitive)", curly) is False
+    assert outcome("Contains", curly, substring="It's") is True
+    assert outcome("Does Not Contain", curly, substring="It's") is False
+    assert outcome("Regex Match", curly, pattern="It's") is True
+    assert outcome("Regex Must Not Match", curly, pattern="It's") is False
+
+
+def test_downgrade_removes_the_setting_and_restores_the_texts(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "b795f3711490")
+    before = _test_types(db_path)
+    command.upgrade(config, "3f8cecd2afff")
+
+    command.downgrade(config, "b795f3711490")
+
+    after = _test_types(db_path)
+    assert after == before

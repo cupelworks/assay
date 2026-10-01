@@ -12,6 +12,10 @@ Flags such as case-insensitivity stay in the user's pattern (`(?i)`).
 matching, the outcome flipped — which is how "Regex Must Not Match" is a
 catalogue row rather than another engine. A timeout fails either way: it
 says nothing about whether the pattern would have matched.
+`normalize_lookalikes`, on by default, makes look-alike characters plain in
+the answer only, as in Exact Match. The pattern is never rewritten: it is
+code, not text, and turning a look-alike hyphen inside `[...]` into `-`
+would make it a range. Write patterns with plain characters.
 
 An invalid pattern raises with the compiler's own message — the error is
 the user's feedback; it is never validated at write time.
@@ -22,6 +26,7 @@ measure on, so `passed` is the whole result.
 import regex
 
 from assay.schemas import EvaluationInput, TestTypeResult
+from assay.worker.evaluators._common import normalize_lookalikes
 
 _MODES = {"search": regex.Pattern.search, "fullmatch": regex.Pattern.fullmatch}
 # Why a negated check failed: search looks anywhere, fullmatch at the whole answer
@@ -42,6 +47,9 @@ def evaluate(evaluation: EvaluationInput) -> TestTypeResult:
     if match_with is None:
         raise ValueError(f"Unknown regex mode {mode!r} on this test type's catalogue row")
     timeout = float(evaluation.engine_settings.get("timeout_seconds", 1))
+
+    if evaluation.engine_settings.get("normalize_lookalikes", True):
+        answer = normalize_lookalikes(answer)
 
     compiled = regex.compile(pattern)  # regex.error on an invalid pattern, message included
     try:

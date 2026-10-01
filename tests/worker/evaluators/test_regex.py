@@ -116,3 +116,29 @@ def test_negated_timeout_still_fails():
 
     assert result.passed is False
     assert result.detail.startswith("Pattern took longer than 0.2 s")
+
+
+# --- normalize_lookalikes ---
+
+
+def test_the_answer_is_made_plain_by_default():
+    result = regex.evaluate(_evaluation("It’s due 2026‑10‑01",
+                                        pattern=r"It's due \d{4}-\d{2}-\d{2}"))
+
+    assert result.passed is True
+
+
+def test_a_row_can_turn_normalize_lookalikes_off():
+    settings = {**DEFAULTS, "normalize_lookalikes": False}
+
+    result = regex.evaluate(_evaluation("It’s due", pattern="It's due",
+                                        settings=settings))
+
+    assert result.passed is False
+
+
+def test_the_pattern_is_never_rewritten():
+    # [a‐z] is three literal characters; rewritten to [a-z] it would be a range
+    result = regex.evaluate(_evaluation("m", pattern="^[a‐z]$"))
+
+    assert result.passed is False
