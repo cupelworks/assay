@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from kombu.exceptions import OperationalError
 
+from assay.code_fingerprint import CODE_FINGERPRINT
 from assay.schemas import WorkerHealthStatus
 from assay.services import worker_health
 from assay.services.worker_health import expected_tasks, get_worker_health
@@ -14,9 +15,10 @@ ALL_TASKS = [
 ]
 
 
-def _app(replies=None, connect_error=None, transport_options=None):
+def _app(replies=None, connect_error=None, transport_options=None, codes=None):
     """A stand-in Celery app: a broker connection that connects (or raises),
-    and workers that answer `registered` with `replies`."""
+    workers that answer `registered` with `replies`, and the code report
+    with `codes` — by default every worker that answered, on the API's code."""
     app = MagicMock()
     app.conf.broker_transport_options = transport_options or {}
     app.conf.beat_schedule = worker_health._celery_app.conf.beat_schedule
@@ -24,6 +26,10 @@ def _app(replies=None, connect_error=None, transport_options=None):
     if connect_error is not None:
         connection.ensure_connection.side_effect = connect_error
     app.control.inspect.return_value.registered.return_value = replies
+    if codes is None:
+        codes = {name: {"fingerprint": CODE_FINGERPRINT, "version": "0.10.0"}
+                 for name in (replies or {})}
+    app.control.broadcast.return_value = [{name: code} for name, code in codes.items()]
     return app
 
 
@@ -97,3 +103,68 @@ def test_the_connect_and_the_ping_are_bounded_and_keep_the_brokers_own_options()
     connection = app.connection_for_write.return_value.__enter__.return_value
     connection.ensure_connection.assert_called_once_with(max_retries=0)
     app.control.inspect.assert_called_once_with(timeout=1.0, connection=connection)
+
+
+
+# --- the code each worker runs ---
+
+
+def test_a_worker_on_the_apis_code_is_current_with_its_version():
+    health = _health(_app({"celery@a": ALL_TASKS}))
+
+    (worker,) = health.workers
+    assert (worker.current_code, worker.code_fingerprint, worker.version, worker.problem) == (
+        True, CODE_FINGERPRINT, "0.10.0", None)
+    assert (health.code_fingerprint, health.version) == (CODE_FINGERPRINT, "0.10.0")
+
+
+def test_a_worker_on_older_code_is_outdated_even_with_every_task():
+    health = _health(_app(
+        {"celery@new": ALL_TASKS, "celery@old": ALL_TASKS},
+        codes={"celery@new": {"fingerprint": CODE_FINGERPRINT, "version": "0.10.0"},
+               "celery@old": {"fingerprint": "0123456789ab", "version": "0.10.0"}},
+    ))
+
+    assert health.status == WorkerHealthStatus.outdated
+    old = next(w for w in health.workers if w.name == "celery@old")
+    assert (old.current_code, old.missing_tasks) == (False, [])
+    assert old.problem == "It runs older code than the API: restart it on the current code."
+
+
+def test_a_worker_too_old_to_report_its_code_is_outdated():
+    # a worker without the command answers a Celery error, or not at all
+    health = _health(_app(
+        {"celery@a": ALL_TASKS, "celery@b": ALL_TASKS},
+        codes={"celery@a": {"error": "No such inspect command: 'assay_code'"}},
+    ))
+
+    assert health.status == WorkerHealthStatus.outdated
+    for worker in health.workers:
+        assert (worker.version, worker.code_fingerprint, worker.current_code) == (
+            None, None, False)
+        assert worker.problem.startswith("It runs code from before this check could see")
+
+
+def test_a_worker_missing_a_task_says_how_many():
+    health = _health(_app({"celery@a": ALL_TASKS[:2]}))
+
+    assert health.workers[0].problem == (
+        "It doesn't know 2 kind(s) of job: restart it on the current code.")
+
+
+def test_the_code_report_waits_only_for_the_workers_that_answered():
+    app = _app({"celery@a": ALL_TASKS, "celery@b": ALL_TASKS})
+
+    _health(app)
+
+    connection = app.connection_for_write.return_value.__enter__.return_value
+    app.control.broadcast.assert_called_once_with(
+        "assay_code", reply=True, timeout=1.0, connection=connection, limit=2)
+
+
+def test_with_no_worker_the_code_isnt_asked_for():
+    app = _app(None)
+
+    _health(app)
+
+    app.control.broadcast.assert_not_called()

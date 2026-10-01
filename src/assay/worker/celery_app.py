@@ -31,9 +31,11 @@ from urllib.parse import urlparse
 
 from celery import Celery
 from celery.signals import beat_init, celeryd_after_setup, setup_logging, worker_ready
+from celery.worker.control import inspect_command
 from kombu.utils.url import maybe_sanitize_url
 
 from assay import __version__
+from assay.code_fingerprint import CODE_FINGERPRINT
 from assay.config import settings
 from assay.logging_config import configure_logging
 
@@ -108,6 +110,16 @@ def _configure_logging(loglevel: int | None = None, **_kwargs) -> None:
     configure_logging(settings.log_level, settings.log_format)
     if loglevel is not None:
         logging.getLogger("celery").setLevel(loglevel)
+
+
+# The inspect command the API's GET /health/worker sends: which code this
+# worker runs, as fingerprinted when it started (assay/code_fingerprint.py)
+CODE_COMMAND = "assay_code"
+
+
+@inspect_command(name=CODE_COMMAND)
+def _report_code(state, **_kwargs) -> dict:
+    return {"fingerprint": CODE_FINGERPRINT, "version": __version__}
 
 
 @celeryd_after_setup.connect
