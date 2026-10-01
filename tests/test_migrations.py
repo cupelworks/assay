@@ -1415,3 +1415,43 @@ def test_upgrade_puts_stored_copies_and_results_in_label_order(scratch):
     assert list(_run(db_path, run_id)["results"]) == ["Contains", "ROUGE"]
     command.downgrade(config, "e47a76f674f0")  # order only: nothing to undo
     assert list(_run(db_path, run_id)["results"]) == ["Contains", "ROUGE"]
+
+
+# --- 90b64c0a5c27: statistical batches, batch_id/batch_index, errored on results ---
+
+
+def _table_columns(db_path: Path, table: str) -> list[str]:
+    with sqlite3.connect(db_path) as connection:
+        return [row[1] for row in connection.execute(f"PRAGMA table_info({table})")]
+
+
+def test_upgrade_adds_batches_and_marks_every_result_not_errored(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "8409d407d9dc")
+    run_id = _insert_run(db_path, 20, "amber", results={
+        "Contains": {"passed": False, "score": None, "detail": "Judge API timed out"}})
+
+    command.upgrade(config, "90b64c0a5c27")
+
+    assert {"id", "statistical_test", "parameters", "times_requested", "runs_per_time",
+            "plan", "note", "status", "result", "stopped_at", "completed_at"} <= set(
+        _table_columns(db_path, "statistical_batches"))
+    for table in ("test_runs", "test_set_executions", "test_plan_executions"):
+        assert {"batch_id", "batch_index"} <= set(_table_columns(db_path, table))
+    assert _run(db_path, run_id)["results"]["Contains"]["errored"] is False
+
+
+def test_downgrade_drops_batches_and_errored(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "90b64c0a5c27")
+    run_id = _insert_run(db_path, 21, "green", results={
+        "Contains": {"passed": True, "score": None, "detail": None, "errored": False}})
+
+    command.downgrade(config, "8409d407d9dc")
+
+    with sqlite3.connect(db_path) as connection:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "statistical_batches" not in tables
+    assert "batch_id" not in _table_columns(db_path, "test_runs")
+    assert "errored" not in _run(db_path, run_id)["results"]["Contains"]

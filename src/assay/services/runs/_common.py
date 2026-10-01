@@ -677,3 +677,14 @@ def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:
             "Dispatched %d of %d runs to the worker", dispatched, len(run_ids),
             extra={"dispatched": dispatched, "run_count": len(run_ids)},
         )
+
+
+def _batch_clause(column, batch: str | None):
+    """The `?batch=` filter of a run or execution listing as a WHERE clause:
+    `none` keeps what no statistical batch created, a batch's id keeps that
+    batch's, None (left out) keeps everything — returned as None."""
+    if batch is None:
+        return None
+    if batch == "none":
+        return column.is_(None)
+    return column == uuid.UUID(batch)

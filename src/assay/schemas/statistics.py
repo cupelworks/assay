@@ -10,9 +10,12 @@ sentinel; every series is in the same order with the same `index`; every
 interval says what it is (`method`, `level`, `sides`).
 """
 import uuid
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from assay.schemas._common import Pagination
 
 # ── shared vocabulary ────────────────────────────────────────────────────────
 
@@ -346,3 +349,327 @@ class Estimate(BaseModel):
                     "statistical test applies to it.",
     )
     warnings: list[Warning_] = Field(description="What to know before confirming.")
+
+
+# ── batches ──────────────────────────────────────────────────────────────────
+
+
+class BatchStatusName(StrEnum):
+    """A batch's status, as the API spells it (the same words as BatchStatus
+    in models/statistics.py)."""
+    pending = "Pending"
+    running = "Running"
+    passed = "Passed"
+    failed = "Failed"
+    inconclusive = "Inconclusive"
+    incomplete = "Incomplete"
+    not_ran = "NotRan"
+
+
+class BatchRequest(EstimateRequest):
+    """POST /statistics/batches: run a scope N times as one batch."""
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"examples": [
+            {"test_set_id": "4e86003a-9e28-4c93-a08e-f99c6acbaab6",
+             "statistical_test": "binomial_gate",
+             "parameters": {"target": 0.9, "confidence": 0.95}, "times": 30,
+             "note": "Prompt v3, temperature 0.2"},
+            {"test_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+             "statistical_test": "one_sample_t", "parameters": {"difference": 0.05}},
+        ]},
+    )
+
+    note: str | None = Field(
+        None, max_length=500,
+        description="Free text kept with the batch and shown in lists and comparisons — what "
+                    "this batch is of (\"prompt v3, temperature 0.2\"), so A against B says "
+                    "what changed between them. At most 500 characters; blank is stored as "
+                    "null.",
+    )
+
+
+class BatchCallCount(BaseModel):
+    planned: int = Field(description="Calls the whole batch was planned to make.")
+    finished: int = Field(
+        description="Calls made by runs that have finished: an application call per finished "
+                    "run of an entry with no recorded answer, a judge call per judge check "
+                    "of a finished run. Attempts count, failed ones too (they're paid for or "
+                    "close to it); runs a stop cancelled don't. Retries aren't counted.",
+    )
+    in_flight: int = Field(
+        description="Calls the runs executing right now are making or about to make.",
+    )
+
+
+class BatchCalls(BaseModel):
+    application: BatchCallCount = Field(description="Calls to the application under test.")
+    judge: BatchCallCount = Field(description="Calls to the judge model.")
+
+
+class RunCounts(BaseModel):
+    """Runs by status: every key always present, 0 when none."""
+    Pending: int = 0
+    Running: int = 0
+    Green: int = 0
+    Amber: int = 0
+    Red: int = 0
+    NotRan: int = 0
+
+
+class BatchProgress(BaseModel):
+    """How far the batch has got — what the running batch page shows beside
+    Stop, so stopping is an informed choice."""
+    times_requested: int = Field(description="Times the batch was created to run the scope.")
+    times_done: int = Field(
+        description="Times whose every run has finished (Green, Amber, Red or Not Ran).",
+    )
+    runs_total: int = Field(description="Runs the batch created: times × entries.")
+    runs_done: int = Field(description="Runs that have finished, whatever their outcome.")
+    runs: RunCounts = Field(description="Runs by status.")
+    runs_cancelled: int = Field(
+        description="Of the Not Ran runs, those a stop cancelled before they ran (counted in "
+                    "`runs_done` too: they're finished, they'll never run).",
+    )
+    times_cancelled: int = Field(
+        description="Times every run of which a stop cancelled: they never ran. "
+                    "`times_requested − times_cancelled` is how many times actually ran.",
+    )
+    calls: BatchCalls = Field(description="What has been paid for so far, and what's planned.")
+
+
+class SeriesPoint(BaseModel):
+    """One run's outcome for one check — one point of a chart."""
+    index: int = Field(
+        description="The time this run belongs to, 1 to `times_requested`: the x axis. The "
+                    "same index across every check and entry is the same time.",
+    )
+    run_id: uuid.UUID = Field(description="The run, to open it from a point.")
+    execution_id: uuid.UUID | None = Field(
+        description="The set or plan execution the run belongs to; null for a test's "
+                    "standalone runs.",
+    )
+    status: str = Field(
+        description="The run's status: `Green`, `Amber`, `Red`, or `NotRan` (then `passed` "
+                    "and `score` are null and `error` says why).",
+    )
+    passed: bool | None = Field(
+        description="Whether this check passed in this run; null when the run was Not Ran or "
+                    "the check errored (it was never decided).",
+    )
+    score: float | None = Field(
+        description="The check's score on its own scale; null for a pass/fail check, a Not "
+                    "Ran run or an errored check.",
+    )
+    error: str | None = Field(
+        description="Why there's no result: the run's own reason when it was Not Ran, or the "
+                    "check's error (a judge timeout, no judge configured). Null otherwise.",
+    )
+
+
+class RunStripPoint(BaseModel):
+    """One run of an entry, for the runs matrix (a row per entry, a column per
+    time)."""
+    index: int = Field(description="The time, 1 to `times_requested`.")
+    run_id: uuid.UUID
+    execution_id: uuid.UUID | None = Field(
+        description="Its set or plan execution; null for a standalone run.")
+    status: str = Field(description="The run's status, Pending and Running included.")
+
+
+class Scale(BaseModel):
+    """The check's native score range, from its type's threshold bounds — the
+    chart's y axis."""
+    min: float | None = Field(description="The lowest score the type gives (e.g. 0, or -1).")
+    max: float | None = Field(description="The highest score the type gives (e.g. 1, or 100).")
+
+
+class CheckCounts(BaseModel):
+    """What the check's runs came to. `passed + failed` is the sample the
+    statistic reads; errored and Not Ran runs are counted apart, since they
+    say nothing about the check."""
+    evaluated: int = Field(description="Runs in which the check was decided: passed + failed.")
+    passed: int
+    failed: int
+    errored: int = Field(
+        description="Runs in which the check itself errored (a judge timeout, no judge "
+                    "chosen): never decided, so left out of the sample.",
+    )
+    not_ran: int = Field(description="Runs that were Not Ran as a whole: nothing evaluated.")
+
+
+class ScoreSummaryOut(BaseModel):
+    """The scores of the evaluated runs: what a box plot or an error bar
+    needs, so the FE doesn't recompute them."""
+    n: int = Field(description="Scores in the sample.")
+    mean: float
+    sd: float | None = Field(description="Sample standard deviation (n − 1); null for one score.")
+    min: float
+    max: float
+    p10: float
+    p25: float
+    median: float
+    p75: float
+    p90: float
+
+
+class CheckVerdict(StrEnum):
+    passed = "pass"
+    failed = "fail"
+    inconclusive = "inconclusive"
+
+
+class Statistic(BaseModel):
+    """What the batch's statistical test concluded for one check."""
+    verdict: CheckVerdict | None = Field(
+        description="`pass`: proven at the confidence level. `fail`: the opposite proven. "
+                    "`inconclusive`: neither at this size — `times_to_decide` says what "
+                    "would. Null: no verdict could be drawn at all (no evaluated run, or a "
+                    "stopped batch below the floor); `reason` says which.",
+    )
+    reason: str = Field(
+        description="The verdict in one sentence, as the UI shows it (\"95% confident it "
+                    "passes at least 90% of the time\").",
+    )
+    n: int = Field(description="The sample: runs in which the check was decided.")
+    interval: Interval | None = Field(
+        description="The interval the verdict was drawn from, so a whisker can never "
+                    "contradict it: the two exact one-sided bounds of the pass rate for the "
+                    "gate, the one-sided t bounds of the mean score for the t-test. Null "
+                    "when there's no sample, or one score (no spread).",
+    )
+    p_value_pass: float | None = Field(
+        description="The p-value of the test that would prove it passes (small = proven).",
+    )
+    p_value_fail: float | None = Field(
+        description="The p-value of the test that would prove it fails (small = proven).",
+    )
+    rule: GateRuleSchema | None = Field(
+        description="The binomial gate at this sample size: passes needed to pass, and at "
+                    "or below which it fails. Null for the t-test.",
+    )
+    t: float | None = Field(None, description="t-test: the t statistic.")
+    df: int | None = Field(None, description="t-test: degrees of freedom (n − 1).")
+    standard_error: float | None = Field(None, description="t-test: sd / √n.")
+    times_to_decide: int | None = Field(
+        description="When inconclusive: the size of a **new** batch that would likely decide "
+                    "it, if the check keeps behaving as it did here (never an extension of "
+                    "this one: pooling batches until one passes would make the confidence "
+                    "untrue). Null when the verdict is decided, or no size would.",
+    )
+    times_to_decide_message: str | None = Field(
+        description="The same as a sentence, in the direction the data point: \"A new batch "
+                    "of about 239 times would likely prove it below 90%\".",
+    )
+
+
+class CheckResult(BaseModel):
+    """One check of one entry over the batch's runs: the frame a chart needs,
+    the counts, the descriptive numbers, the verdict, and the series."""
+    label: str = Field(description="The check's label within its test: its identity.")
+    test_type: str = Field(description="The catalogue type it runs.")
+    applies: bool = Field(description="Whether the batch's statistical test gives it a verdict.")
+    reason: str | None = Field(description="Why not, when it doesn't.")
+    scale: Scale | None = Field(
+        description="The score range, for a check scored on a scale; null for pass/fail "
+                    "checks.",
+    )
+    threshold: float | None = Field(
+        description="The assignment's threshold, for a scored check: draw it as a line. Null "
+                    "for pass/fail checks, or when it isn't a number.",
+    )
+    comparison: str | None = Field(
+        description="Which side of the threshold passes: `gte` (at or above) or `lte`. Null "
+                    "for pass/fail checks.",
+    )
+    target: float | None = Field(
+        description="The binomial gate's target pass rate, for a line on a pass-rate chart; "
+                    "null under other tests.",
+    )
+    counts: CheckCounts
+    pass_rate: Interval | None = Field(
+        description="The share of evaluated runs that passed, with its range: under the gate, "
+                    "the two exact one-sided bounds the verdict uses; otherwise Wilson's "
+                    "two-sided interval. Null with no evaluated run.",
+    )
+    scores: ScoreSummaryOut | None = Field(
+        description="The scores' distribution, for a scored check with at least one score; "
+                    "null otherwise.",
+    )
+    statistic: Statistic | None = Field(
+        description="The statistical test's conclusion; null when it doesn't apply to this "
+                    "check (see `reason`).",
+    )
+    series: list[SeriesPoint] | None = Field(
+        description="Every run's outcome for this check, by `index`: a strip of passes and "
+                    "fails, a score scatter, a histogram, a running pass rate. Null when "
+                    "the read asked `series=false`.",
+    )
+
+
+class EntryResult(BaseModel):
+    """One entry of the scope (the test itself for a standalone batch)."""
+    entry_id: uuid.UUID | None = Field(description="The test set entry; null for a test.")
+    test_id: uuid.UUID | None = Field(description="The live test it was copied from.")
+    test_set_id: uuid.UUID | None = Field(description="Its test set; null for a test.")
+    test_set_name: str | None = Field(description="Its test set's name; null for a test.")
+    name: str
+    recorded_answer: bool = Field(
+        description="Whether it has a recorded answer: then only its judge checks can vary.",
+    )
+    runs: RunCounts = Field(description="This entry's runs by status.")
+    checks: list[CheckResult] = Field(description="Every check, in label order.")
+    strip: list[RunStripPoint] | None = Field(
+        description="This entry's runs by time: a row of the runs matrix. Null when the read "
+                    "asked `series=false`.",
+    )
+
+
+class BatchResult(BaseModel):
+    """The statistics, computed once every run has finished and stored with
+    the batch: later reads return exactly this."""
+    computed_at: datetime = Field(description="When it was computed.")
+    checks_total: int
+    checks_applicable: int = Field(description="Checks the statistical test gives a verdict.")
+    verdicts: dict[str, int] = Field(
+        description="Applicable checks by verdict: `pass`, `fail`, `inconclusive`, and "
+                    "`none` (no verdict could be drawn).",
+    )
+    summary: str = Field(description="The batch's outcome in one sentence.")
+    entries: list[EntryResult]
+
+
+class BatchSummary(BaseModel):
+    """A batch as lists show it: no per-check detail."""
+    id: uuid.UUID
+    scope: Scope
+    statistical_test: StatisticalTestName
+    parameters: dict[str, float] = Field(description="Every parameter, defaults filled in.")
+    note: str | None
+    status: BatchStatusName = Field(
+        description="`Pending` (no run started), `Running`, then `Passed` (every applicable "
+                    "check proven), `Failed` (at least one check proven to fail), "
+                    "`Inconclusive` (finished, neither proven at this size), `Incomplete` "
+                    "(stopped before every run ran) or `NotRan` (no run could be evaluated).",
+    )
+    floor: int = Field(description="The fewest times the test can conclude at.")
+    progress: BatchProgress
+    summary: str | None = Field(description="The outcome in one sentence, once computed.")
+    created_at: datetime
+    stopped_at: datetime | None = Field(description="When a stop cancelled runs; null otherwise.")
+    completed_at: datetime | None = Field(
+        description="When the result was computed: every run had finished.",
+    )
+
+
+class BatchDetails(BatchSummary):
+    """A batch with its result."""
+    result: BatchResult | None = Field(
+        description="Null while any run is Pending or Running — no verdict mid-batch: an "
+                    "interim verdict invites stopping on a lucky streak. Computed and stored "
+                    "by the first read that finds every run finished.",
+    )
+
+
+class BatchList(Pagination):
+    items: list[BatchSummary]

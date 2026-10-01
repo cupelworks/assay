@@ -222,6 +222,17 @@ class TestTypeResult(BaseModel):
             'only on results written before this field existed.'
         ),
     )
+    errored: bool = Field(
+        default=False,
+        description=(
+            'True when this check couldn\'t be evaluated at all — it raised an error '
+            '(no judge configured, the judge answered HTTP 503, an invalid pattern, a '
+            'type no longer in the catalogue) — rather than evaluating the answer and '
+            'failing. `passed` is false either way and `detail` says why; this is what '
+            'tells the two apart. Statistics count an errored check apart: it says '
+            'nothing about the application.'
+        ),
+    )
     judge: JudgeIdentity | None = Field(
         default=None,
         description=(
@@ -325,7 +336,29 @@ class RunExecutionDate(BaseModel):
     )
 
 
-class StandaloneRunCreationMetadata(RunID, RunStatus, RunCreationDate):
+class BatchMembership(BaseModel):
+    """Whether a run or execution belongs to a statistical batch
+    (`POST /statistics/batches`)."""
+    batch_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            'The statistical batch this was created by, or null for an ordinary run or '
+            'execution (run once, or replayed). A batch runs its scope N times, so its '
+            'runs and executions are listed here with everything else; filter them out '
+            'with `?batch=none`, or keep one batch\'s with `?batch=<batch_id>`. Open the '
+            'batch at `GET /statistics/batches/{batch_id}`.'
+        ),
+    )
+    batch_index: int | None = Field(
+        default=None,
+        description=(
+            'Which time of its batch this belongs to, 1 to the batch\'s '
+            '`times_requested`; null outside a batch.'
+        ),
+    )
+
+
+class StandaloneRunCreationMetadata(BatchMembership, RunID, RunStatus, RunCreationDate):
     test_case_id: TestCaseID = Field(
         ...,
         description='ID of the live test this standalone run was created for.',
@@ -401,7 +434,8 @@ class TestSetReplayedExecutionCreationMetadata(TestSetLiveRunCreationMetadata):
     )
 
 
-class TestSetExecutionMetadata(TestSetExecutionID, TestSetExecutionCreationDate):
+class TestSetExecutionMetadata(BatchMembership, TestSetExecutionID,
+                               TestSetExecutionCreationDate):
     test_set_id: TestSetID
     run_count: int = Field(
         ...,
@@ -503,7 +537,8 @@ class TestPlanReplayedExecutionCreationMetadata(TestPlanLiveRunCreationMetadata)
     )
 
 
-class TestPlanExecutionMetadata(TestPlanExecutionID, TestPlanExecutionCreationDate):
+class TestPlanExecutionMetadata(BatchMembership, TestPlanExecutionID,
+                                TestPlanExecutionCreationDate):
     test_plan_id: TestPlanID
     run_count: int = Field(
         ...,
@@ -552,7 +587,7 @@ class RunOrigin(StrEnum):
     test_plan = "TestPlan"
 
 
-class RunMetadata(RunID, RunStatus, RunCreationDate):
+class RunMetadata(BatchMembership, RunID, RunStatus, RunCreationDate):
     origin: RunOrigin = Field(
         ...,
         description=(
@@ -621,7 +656,7 @@ class ExecutionOrigin(StrEnum):
     test_plan = "TestPlan"
 
 
-class ExecutionMetadata(BaseModel):
+class ExecutionMetadata(BatchMembership):
     id: uuid.UUID = Field(
         ...,
         description=(

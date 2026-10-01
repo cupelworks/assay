@@ -74,6 +74,37 @@ class Database:
             assert added.status_code in (200, 201), added.text
         return test_set
 
+    # -- the batch's runs, worker-side --
+
+    def runs_of(self, batch_id) -> list:
+        """The batch's runs as rows (id, batch_index, status, ...), in time order."""
+        from sqlalchemy import select
+
+        from assay.models import TestRunModel
+        with self.worker_session() as session:
+            return session.execute(
+                select(TestRunModel.id, TestRunModel.batch_index, TestRunModel.status,
+                       TestRunModel.error, TestRunModel.test_set_execution_id,
+                       TestRunModel.test_plan_execution_id, TestRunModel.test_id)
+                .where(TestRunModel.batch_id == uuid.UUID(str(batch_id)))
+                .order_by(TestRunModel.batch_index)).all()
+
+    def execute(self, run_ids) -> None:
+        """Execute runs in-process, as a worker would."""
+        from assay.worker.services.execute_run import execute_run
+        for run_id in run_ids:
+            with self.worker_session() as session:
+                execute_run(run_id, session)
+
+    def set_status(self, run_id, status) -> None:
+        from sqlalchemy import update
+
+        from assay.models import TestRunModel
+        with self.worker_session() as session:
+            session.execute(update(TestRunModel).where(TestRunModel.id == run_id)
+                            .values(status=status))
+            session.commit()
+
     def test_plan(self, name, test_sets) -> dict:
         response = self.client.post("/test-plans", json={"name": name})
         assert response.status_code in (200, 201), response.text

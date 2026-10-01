@@ -9,6 +9,11 @@ from assay.models.settings import (
     TargetCheckModel,
     TargetCheckStatus,
 )
+from assay.models.statistics import (
+    IN_PROGRESS_BATCH_STATUSES,
+    BatchStatus,
+    StatisticalBatchModel,
+)
 from assay.models.stats import StatisticalVerificationModel
 from assay.models.test import (
     TERMINAL_STATUSES,
@@ -32,7 +37,9 @@ from assay.models.test import (
 )
 
 __all__ = [
+    "IN_PROGRESS_BATCH_STATUSES",
     "TERMINAL_STATUSES",
+    "BatchStatus",
     "Base",
     "Comparison",
     "ConfigFieldKind",
@@ -42,6 +49,7 @@ __all__ = [
     "SettingsModel",
     "SettingsSection",
     "StandaloneRunModel",
+    "StatisticalBatchModel",
     "StatisticalVerificationModel",
     "JudgeCheckModel",
     "TargetCheckModel",

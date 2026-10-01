@@ -57,12 +57,12 @@ def _assigned(name: str, **fields) -> TestTypeAssignment:
 
 
 def _stamped(passed: bool, row: TestTypesModel, score=None, detail=None,
-             test_type=None) -> dict:
+             test_type=None, errored=False) -> dict:
     """What a result looks like once the registry has stamped the engine on it."""
     return {
         "passed": passed, "score": score, "detail": detail,
         "engine": row.engine, "engine_settings": row.engine_settings, "answer_path": None,
-        "rubric": None, "judge": None, "test_type": test_type,
+        "rubric": None, "errored": errored, "judge": None, "test_type": test_type,
     }
 
 
@@ -209,7 +209,7 @@ def test_one_assignments_own_evaluator_failure_does_not_fail_the_whole_run():
     assert run.error is None
     assert run.results["Exact Match"] == _stamped(True, EXACT_MATCH)
     assert run.results["Toxicity"] == _stamped(False, TOXICITY, detail="Judge API timed out",
-                                               test_type="Toxicity")
+                                               test_type="Toxicity", errored=True)
 
 
 def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
@@ -237,7 +237,7 @@ def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
         "passed": False, "score": None,
         "detail": "Test type 'Retired Type' is not in the catalogue",
         "engine": None, "engine_settings": None, "answer_path": None, "rubric": None,
-        "judge": None, "test_type": "Retired Type",
+        "errored": True, "judge": None, "test_type": "Retired Type",
     }
 
 
@@ -667,8 +667,8 @@ def test_nothing_at_a_checks_path_fails_that_check_only():
         "passed": False, "score": None,
         "detail": "Nothing found at $.usage.tokens in the application's reply",
         "engine": "llm_judge", "engine_settings": TOXICITY.engine_settings,
-        "answer_path": "$.usage.tokens", "rubric": None, "judge": None,
-        "test_type": "Toxicity",
+        "answer_path": "$.usage.tokens", "rubric": None, "errored": True,
+        "judge": None, "test_type": "Toxicity",
     }
 
 

@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api.runs._batch_filter import BatchFilter
 from assay.db import get_session
 from assay.schemas import (
     PaginatedStandaloneRunCreationMetadata,
@@ -234,7 +235,8 @@ async def get_standalone_run_metadata(
         session: SessionDep,
         offset: int = Query(default=0, description="Number of records to skip for pagination."),
         limit: int = Query(default=100, description="Maximum number of records to "
-                                                    "return for pagination.")
+                                                    "return for pagination."),
+        batch: BatchFilter = None,
 ) -> PaginatedStandaloneRunCreationMetadata: # pragma: no cover
     """List every standalone run ever created for a test, newest first.
 
@@ -250,7 +252,8 @@ async def get_standalone_run_metadata(
     `test_case_id`, ordered by `created_at` descending (ties broken by `id`
     descending), plus the usual `total`, `offset`, and `limit`.
     """
-    return await get_standalone_run_metadata_all_test_runs(test_id, session, offset, limit)
+    return await get_standalone_run_metadata_all_test_runs(test_id, session, offset, limit,
+                                                            batch)
 
 
 @router.get(

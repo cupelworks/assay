@@ -47,6 +47,95 @@ from assay.services.tests._common import (
 logger = logging.getLogger(__name__)
 
 
+def _new_standalone_run(test, batch_id: uuid.UUID | None = None,
+                        batch_index: int | None = None) -> TestRunModel:
+    """A pending standalone run of a live test, with its frozen copy. Not
+    added to a session. A statistical batch passes its id and the time."""
+    created_at = datetime.now().astimezone()
+    run = TestRunModel(
+        id=uuid.uuid4(),
+        test_id=test.id,
+        status=TestStatus.pending,
+        created_at=created_at,
+        batch_id=batch_id,
+        batch_index=batch_index,
+    )
+    run.standalone_run = StandaloneRunModel(
+        id=run.id,
+        name=test.name,
+        input=test.input,
+        expected_output=test.expected_output,
+        model_output=test.model_output,
+        test_type_assignments=_frozen_test_type_assignments(test),
+        snapshot_at=created_at,
+    )
+    return run
+
+
+def _new_test_set_execution(
+        test_set_id: uuid.UUID,
+        entry_ids: list[uuid.UUID],
+        replayed_execution_id: uuid.UUID | None = None,
+        batch_id: uuid.UUID | None = None,
+        batch_index: int | None = None,
+) -> tuple[TestSetExecutionModel, list[TestRunModel]]:
+    """A test set execution and one pending run per entry. Not added to a
+    session."""
+    execution = TestSetExecutionModel(
+        id=uuid.uuid4(),
+        test_set_id=test_set_id,
+        replayed_execution_id=replayed_execution_id,
+        created_at=datetime.now().astimezone(),
+        batch_id=batch_id,
+        batch_index=batch_index,
+    )
+    runs = [
+        TestRunModel(
+            id=uuid.uuid4(),
+            status=TestStatus.pending,
+            created_at=datetime.now().astimezone(),
+            test_set_entry_id=entry_id,
+            test_set_execution_id=execution.id,
+            batch_id=batch_id,
+            batch_index=batch_index,
+        )
+        for entry_id in entry_ids
+    ]
+    return execution, runs
+
+
+def _new_test_plan_execution(
+        test_plan_id: uuid.UUID,
+        entry_ids: list[uuid.UUID],
+        replayed_execution_id: uuid.UUID | None = None,
+        batch_id: uuid.UUID | None = None,
+        batch_index: int | None = None,
+) -> tuple[TestPlanExecutionModel, list[TestRunModel]]:
+    """A test plan execution and one pending run per entry. Not added to a
+    session."""
+    execution = TestPlanExecutionModel(
+        id=uuid.uuid4(),
+        test_plan_id=test_plan_id,
+        replayed_execution_id=replayed_execution_id,
+        created_at=datetime.now().astimezone(),
+        batch_id=batch_id,
+        batch_index=batch_index,
+    )
+    runs = [
+        TestRunModel(
+            id=uuid.uuid4(),
+            status=TestStatus.pending,
+            created_at=datetime.now().astimezone(),
+            test_set_entry_id=entry_id,
+            test_plan_execution_id=execution.id,
+            batch_id=batch_id,
+            batch_index=batch_index,
+        )
+        for entry_id in entry_ids
+    ]
+    return execution, runs
+
+
 async def create_new_standalone_run(
         test_id: uuid.UUID,
         session: AsyncSession,
@@ -85,21 +174,7 @@ async def create_new_standalone_run(
     
     _check_tests_have_test_types_or_409([found])
     
-    test_run_model = TestRunModel(
-        id=uuid.uuid4(),
-        test_id=found.id,
-        status=TestStatus.pending,
-        created_at=datetime.now().astimezone(),
-    )
-    test_run_model.standalone_run = StandaloneRunModel(
-        id=test_run_model.id,
-        name=found.name,
-        input=found.input,
-        expected_output=found.expected_output,
-        model_output=found.model_output,
-        test_type_assignments=_frozen_test_type_assignments(found),
-        snapshot_at=test_run_model.created_at,
-    )
+    test_run_model = _new_standalone_run(found)
 
     session.add(test_run_model)
     await session.commit()
@@ -162,22 +237,7 @@ async def create_new_live_test_set_run(
     entries_ids = await _find_test_set_entries_ids_or_409(test_set_id, session)
     await _check_test_set_entries_have_test_types_or_409(entries_ids, session)
 
-    test_set_execution_model = TestSetExecutionModel(
-        id=uuid.uuid4(),
-        test_set_id=test_set_id,
-        created_at=datetime.now().astimezone(),
-    )
-
-    test_runs = [
-        TestRunModel(
-            id=uuid.uuid4(),
-            status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
-            test_set_entry_id=test_set_entry_id,
-            test_set_execution_id=test_set_execution_model.id
-        )
-        for test_set_entry_id in entries_ids
-    ]
+    test_set_execution_model, test_runs = _new_test_set_execution(test_set_id, entries_ids)
 
     session.add(test_set_execution_model)
     session.add_all(test_runs)
@@ -252,23 +312,8 @@ async def create_new_replay_test_set_run(
     )
     found_entries = await _find_test_set_execution_id_entries_or_409(test_set_execution_id, session)
 
-    test_set_execution_model = TestSetExecutionModel(
-        id=uuid.uuid4(),
-        test_set_id=test_set_id,
-        replayed_execution_id=test_set_execution_id,
-        created_at=datetime.now().astimezone(),
-    )
-
-    test_runs = [
-        TestRunModel(
-            id=uuid.uuid4(),
-            status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
-            test_set_entry_id=test_set_entry_id,
-            test_set_execution_id=test_set_execution_model.id,
-        )
-        for test_set_entry_id in found_entries
-    ]
+    test_set_execution_model, test_runs = _new_test_set_execution(
+        test_set_id, found_entries, replayed_execution_id=test_set_execution_id)
 
     session.add(test_set_execution_model)
     session.add_all(test_runs)
@@ -348,23 +393,9 @@ async def create_new_live_test_plan_run(
     test_sets_entries_ids = await _find_test_sets_entries_ids_or_409(test_plan_entries_ids, session)
     await _check_test_set_entries_have_test_types_or_409(test_sets_entries_ids, session)
     
-    test_plan_execution_model = TestPlanExecutionModel(
-        id=uuid.uuid4(),
-        test_plan_id=test_plan_id,
-        created_at=datetime.now().astimezone(),
-    )
+    test_plan_execution_model, test_runs = _new_test_plan_execution(
+        test_plan_id, test_sets_entries_ids)
 
-    test_runs = [
-        TestRunModel(
-            id=uuid.uuid4(),
-            status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
-            test_set_entry_id=test_set_entry_id,
-            test_plan_execution_id=test_plan_execution_model.id,
-        )
-        for test_set_entry_id in test_sets_entries_ids
-    ]
-    
     session.add(test_plan_execution_model)
     session.add_all(test_runs)
     await session.commit()
@@ -444,24 +475,9 @@ async def create_new_replay_test_plan_run(
         test_plan_execution_id, session
     )
 
-    test_plan_execution_model = TestPlanExecutionModel(
-        id=uuid.uuid4(),
-        test_plan_id=test_plan_id,
-        replayed_execution_id=test_plan_execution_id,
-        created_at=datetime.now().astimezone(),
-    )
-    
-    test_runs = [
-        TestRunModel(
-            id=uuid.uuid4(),
-            status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
-            test_set_entry_id=test_set_entry_id,
-            test_plan_execution_id=test_plan_execution_model.id,
-        )
-        for test_set_entry_id in found_entries
-    ]
-    
+    test_plan_execution_model, test_runs = _new_test_plan_execution(
+        test_plan_id, found_entries, replayed_execution_id=test_plan_execution_id)
+
     session.add(test_plan_execution_model)
     session.add_all(test_runs)
     await session.commit()

@@ -156,6 +156,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
                 passed=False, score=None, detail=sentence(str(exc)), engine=engine,
                 engine_settings=catalogue_row.engine_settings if catalogue_row else None,
                 answer_path=assignment.answer_path, test_type=assignment.name,
+                errored=True,
             )
 
     passed_flags = [result.passed for result in results.values()]

@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -470,6 +470,12 @@ class TestSetExecutionModel(Base):
     replayed_execution_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_set_executions.id"), nullable=True, index=True
     )
+    # Set when the execution is one time of a statistical batch
+    # (docs/statistics/): the batch, and which time (1-based) it is
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("statistical_batches.id"), nullable=True, index=True
+    )
+    batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )
@@ -599,6 +605,12 @@ class TestPlanExecutionModel(Base):
     replayed_execution_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_plan_executions.id"), nullable=True, index=True
     )
+    # Set when the execution is one time of a statistical batch
+    # (docs/statistics/): the batch, and which time (1-based) it is
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("statistical_batches.id"), nullable=True, index=True
+    )
+    batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )
@@ -720,6 +732,13 @@ class TestRunModel(Base):
     test_plan_execution_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_plan_executions.id"), nullable=True, index=True
     )
+
+    # Set when the run belongs to a statistical batch: the batch, and which
+    # time (1-based) of it — the same on every run of one execution
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("statistical_batches.id"), nullable=True, index=True
+    )
+    batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     test: Mapped["TestModel | None"] = relationship(
         back_populates="runs",

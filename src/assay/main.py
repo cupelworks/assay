@@ -11,6 +11,7 @@ from assay.config import settings
 from assay.exception_handlers import register_exception_handlers
 from assay.logging_config import configure_logging
 from assay.middleware import REQUEST_ID_HEADER, RequestContextMiddleware
+from assay.openapi_examples import keep_example_nulls
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
+    keep_example_nulls(app)
     Instrumentator().instrument(app).expose(app)
 
     logger.info(

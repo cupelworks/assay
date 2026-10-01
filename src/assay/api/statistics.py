@@ -1,13 +1,30 @@
 """Run with statistics (docs/statistics/): the catalogue of statistical tests,
 the estimate shown before a batch is created, batches, and comparisons."""
+import inspect
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.db import get_session
-from assay.schemas.statistics import Estimate, EstimateRequest, StatisticalTestCatalogue
-from assay.services.statistics import catalogue, estimate_batch
+from assay.schemas.statistics import (
+    BatchDetails,
+    BatchList,
+    BatchRequest,
+    BatchStatusName,
+    Estimate,
+    EstimateRequest,
+    StatisticalTestCatalogue,
+)
+from assay.services.statistics import (
+    catalogue,
+    create_batch,
+    estimate_batch,
+    get_batch,
+    list_batches,
+    stop_batch,
+)
 
 router = APIRouter(tags=["statistics"])
 
@@ -266,3 +283,455 @@ async def estimate(request: EstimateRequest, session: SessionDep) -> Estimate:  
     batch created from this estimate's numbers unless you estimate again.
     """
     return await estimate_batch(request, session)
+
+
+# ── batches ──────────────────────────────────────────────────────────────────
+
+_BATCH_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+_ENTRY_ID = "d4e5f6a7-b8c9-0123-def4-56789012345a"
+_EXECUTION_IDS = ["1b4e28ba-2fa1-11d2-883f-0016d3cca427", "6fa459ea-ee8a-3ca4-894e-db77e160355e",
+                  "886313e1-3b8a-5372-9b90-0c9aee199e5d"]
+_RUN_IDS = ["9b2f7c1e-0f4a-4d3b-8a51-2c7e5d9f1a01", "9b2f7c1e-0f4a-4d3b-8a51-2c7e5d9f1a02",
+            "9b2f7c1e-0f4a-4d3b-8a51-2c7e5d9f1a03"]
+
+
+def _counts(**given) -> dict:
+    return {key: given.get(key, 0)
+            for key in ("Pending", "Running", "Green", "Amber", "Red", "NotRan")}
+
+
+_BATCH_COMMON = {
+    "id": _BATCH_ID,
+    "scope": _SCOPE_SET,
+    "statistical_test": "binomial_gate",
+    "parameters": {"target": 0.9, "confidence": 0.95},
+    "note": "Prompt v3, temperature 0.2",
+    "floor": 29,
+    "created_at": "2026-10-01T09:30:00+02:00",
+    "stopped_at": None,
+}
+
+_BATCH_PENDING = {
+    **_BATCH_COMMON,
+    "status": "Pending",
+    "progress": {
+        "times_requested": 30, "times_done": 0, "runs_total": 60, "runs_done": 0,
+        "runs": _counts(Pending=60), "runs_cancelled": 0, "times_cancelled": 0,
+        "calls": {"application": {"planned": 60, "finished": 0, "in_flight": 0},
+                  "judge": {"planned": 30, "finished": 0, "in_flight": 0}},
+    },
+    "summary": None,
+    "completed_at": None,
+    "result": None,
+}
+
+_BATCH_RUNNING = {
+    **_BATCH_PENDING,
+    "status": "Running",
+    "progress": {
+        "times_requested": 30, "times_done": 12, "runs_total": 60, "runs_done": 25,
+        "runs": _counts(Pending=33, Running=2, Green=22, Amber=2, NotRan=1),
+        "runs_cancelled": 0, "times_cancelled": 0,
+        "calls": {"application": {"planned": 60, "finished": 25, "in_flight": 2},
+                  "judge": {"planned": 30, "finished": 12, "in_flight": 1}},
+    },
+}
+
+
+def _point(index: int, passed: bool | None, status_: str = "Green", score=None,
+           error=None) -> dict:
+    return {"index": index, "run_id": _RUN_IDS[index - 1],
+            "execution_id": _EXECUTION_IDS[index - 1], "status": status_, "passed": passed,
+            "score": score, "error": error}
+
+
+_GATE_PASS_CHECK = {
+    "label": "Mentions the reset link", "test_type": "Contains", "applies": True,
+    "reason": None, "scale": None, "threshold": None, "comparison": None, "target": 0.9,
+    "counts": {"evaluated": 30, "passed": 30, "failed": 0, "errored": 0, "not_ran": 0},
+    "pass_rate": {"lower": 0.905, "point": 1.0, "upper": 1.0, "method": "exact",
+                  "level": 0.95, "sides": "one"},
+    "scores": None,
+    "statistic": {
+        "verdict": "pass",
+        "reason": "95% confident it passes at least 90% of the time (30 of 30).",
+        "n": 30,
+        "interval": {"lower": 0.905, "point": 1.0, "upper": 1.0, "method": "exact",
+                     "level": 0.95, "sides": "one"},
+        "p_value_pass": 0.0424, "p_value_fail": 1.0,
+        "rule": {"times": 30, "pass_at_least": 30, "fail_at_most": 23},
+        "t": None, "df": None, "standard_error": None,
+        "times_to_decide": None, "times_to_decide_message": None,
+    },
+    "series": [_point(1, True), _point(2, True), _point(3, True)],
+}
+
+_GATE_UNDECIDED_CHECK = {
+    "label": "Relevance", "test_type": "Relevance", "applies": True, "reason": None,
+    "scale": None, "threshold": None, "comparison": None, "target": 0.9,
+    "counts": {"evaluated": 30, "passed": 28, "failed": 2, "errored": 0, "not_ran": 0},
+    "pass_rate": {"lower": 0.8047, "point": 0.9333, "upper": 0.988, "method": "exact",
+                  "level": 0.95, "sides": "one"},
+    "scores": None,
+    "statistic": {
+        "verdict": "inconclusive",
+        "reason": "Not proven either way at 30 runs: 28 of 30 passed, against a target of "
+                  "90%.",
+        "n": 30,
+        "interval": {"lower": 0.8047, "point": 0.9333, "upper": 0.988, "method": "exact",
+                     "level": 0.95, "sides": "one"},
+        "p_value_pass": 0.4114, "p_value_fail": 0.8163,
+        "rule": {"times": 30, "pass_at_least": 30, "fail_at_most": 23},
+        "t": None, "df": None, "standard_error": None,
+        "times_to_decide": 215,
+        "times_to_decide_message": "A new batch of about 215 times would likely prove it at "
+                                   "least 90%.",
+    },
+    "series": [_point(1, True, "Amber"), _point(2, False, "Amber"), _point(3, True)],
+}
+
+_BATCH_FINISHED = {
+    **_BATCH_COMMON,
+    "status": "Inconclusive",
+    "progress": {
+        "times_requested": 30, "times_done": 30, "runs_total": 30, "runs_done": 30,
+        "runs": _counts(Green=28, Amber=2), "runs_cancelled": 0, "times_cancelled": 0,
+        "calls": {"application": {"planned": 30, "finished": 30, "in_flight": 0},
+                  "judge": {"planned": 30, "finished": 30, "in_flight": 0}},
+    },
+    "summary": "Inconclusive: 1 proven, 1 undecided of 2 checks; a bigger batch would decide "
+               "the rest.",
+    "completed_at": "2026-10-01T09:52:41+02:00",
+    "result": {
+        "computed_at": "2026-10-01T09:52:41+02:00",
+        "checks_total": 2,
+        "checks_applicable": 2,
+        "verdicts": {"pass": 1, "fail": 0, "inconclusive": 1, "none": 0},
+        "summary": "Inconclusive: 1 proven, 1 undecided of 2 checks; a bigger batch would "
+                   "decide the rest.",
+        "entries": [{
+            "entry_id": _ENTRY_ID, "test_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "test_set_id": _SET_ID, "test_set_name": "Support answers",
+            "name": "Reset a password", "recorded_answer": False,
+            "runs": _counts(Green=28, Amber=2),
+            "checks": [_GATE_PASS_CHECK, _GATE_UNDECIDED_CHECK],
+            "strip": [{"index": i, "run_id": _RUN_IDS[i - 1],
+                       "execution_id": _EXECUTION_IDS[i - 1],
+                       "status": "Amber" if i == 2 else "Green"} for i in (1, 2, 3)],
+        }],
+    },
+}
+
+_T_CHECK = {
+    "label": "ROUGE", "test_type": "ROUGE", "applies": True, "reason": None,
+    "scale": {"min": 0.0, "max": 1.0}, "threshold": 0.5, "comparison": "gte", "target": None,
+    "counts": {"evaluated": 10, "passed": 10, "failed": 0, "errored": 0, "not_ran": 0},
+    "pass_rate": {"lower": 0.7225, "point": 1.0, "upper": 1.0, "method": "wilson",
+                  "level": 0.95, "sides": "two"},
+    "scores": {"n": 10, "mean": 0.605, "sd": 0.0337, "min": 0.55, "max": 0.66, "p10": 0.568,
+               "p25": 0.5825, "median": 0.605, "p75": 0.6275, "p90": 0.642},
+    "statistic": {
+        "verdict": "pass",
+        "reason": "95% confident the mean score is at least the threshold 0.5 (mean 0.605 "
+                  "over 10 runs).",
+        "n": 10,
+        "interval": {"lower": 0.5854, "point": 0.605, "upper": 0.6246, "method": "t",
+                     "level": 0.95, "sides": "one"},
+        "p_value_pass": 0.0, "p_value_fail": 1.0, "rule": None,
+        "t": 9.8389, "df": 9, "standard_error": 0.0107,
+        "times_to_decide": None, "times_to_decide_message": None,
+    },
+    "series": [
+        {"index": 1, "run_id": _RUN_IDS[0], "execution_id": None, "status": "Green",
+         "passed": True, "score": 0.61, "error": None},
+        {"index": 2, "run_id": _RUN_IDS[1], "execution_id": None, "status": "Green",
+         "passed": True, "score": 0.58, "error": None},
+    ],
+}
+
+_BATCH_STOPPED = {
+    **_BATCH_COMMON,
+    "status": "Incomplete",
+    "stopped_at": "2026-10-01T09:41:07+02:00",
+    "progress": {
+        "times_requested": 30, "times_done": 30, "runs_total": 60, "runs_done": 60,
+        "runs": _counts(Green=22, Amber=2, NotRan=36), "runs_cancelled": 36,
+        "times_cancelled": 18,
+        "calls": {"application": {"planned": 60, "finished": 24, "in_flight": 0},
+                  "judge": {"planned": 30, "finished": 12, "in_flight": 0}},
+    },
+    "summary": "Incomplete: stopped after 12 of 30 times ran; 0 proven, 0 undecided, 3 "
+               "without a verdict of 3 checks.",
+    "completed_at": "2026-10-01T09:41:09+02:00",
+}
+
+_BATCH_404 = {
+    "description": "No batch with this id.",
+    "content": {"application/json": {"example": {
+        "detail": f"Statistical batch with ID {_BATCH_ID} not found"}}},
+}
+
+_BATCH_ANATOMY = """
+**Reading a batch** (one shape for every status):
+
+- **`status`** — `Pending` (no run started yet) → `Running` → one outcome: `Passed` (every
+  applicable check proven), `Failed` (at least one check proven to fail — one proven failure
+  fails the batch), `Inconclusive` (finished, but not every check could be decided at this
+  size), `Incomplete` (stopped before every run ran) or `NotRan` (no run could be evaluated,
+  e.g. no application configured). `Passed` and `Failed` are a batch's words, never a run's:
+  a run stays `Green`/`Amber`/`Red`.
+- **`progress`** — `times_done` of `times_requested` (a time is done when all its runs are),
+  `runs_done` of `runs_total`, runs by status, and `calls`: application and judge calls
+  `planned`, `finished` and `in_flight` — what's been spent, for the Stop decision.
+- **`result`** — null until every run has finished: there are **no verdicts mid-batch**
+  (an interim verdict invites stopping on a lucky streak). The first read that finds every
+  run finished computes it and stores it; later reads return exactly the same.
+  `summary` is the outcome in a sentence; `verdicts` counts the applicable checks by
+  verdict; then `entries` — one per entry of the scope (one for a test), each with:
+  - `runs` by status and `strip`, its runs by time (a row of the runs matrix: one row per
+    entry, one column per time);
+  - `checks`, in label order, each with
+    - the chart's **frame**: `scale` (`min`/`max`, the y axis of a scored check),
+      `threshold` and `comparison` (`gte`: at or above passes) for a threshold line,
+      `target` for the gate's line on a pass-rate chart;
+    - **`counts`**: `evaluated` = `passed` + `failed` is the sample; `errored` (the check
+      itself failed to run in that run — a judge timeout) and `not_ran` (the whole run was
+      Not Ran) are counted apart and say nothing about the check;
+    - **`pass_rate`** with its range, and for scored checks **`scores`** (mean, sd, min,
+      max, p10, p25, median, p75, p90 — a box plot without recomputing);
+    - **`statistic`** — `verdict` (`pass`/`fail`/`inconclusive`, or null when none could
+      be drawn), `reason` as a sentence, `interval` (the very bounds the verdict used, so
+      a whisker can't contradict it), p-values each way, the gate's `rule` at this size,
+      the t-test's `t`/`df`/`standard_error`, and when inconclusive `times_to_decide`: the
+      size of a **new** batch that would likely decide it (never an extension of this one).
+      Null when the test doesn't apply to the check (`reason` says why);
+    - **`series`** — one point per run, by `index` (the time): `passed`, `score`, the run's
+      `status`, and `error` when there's no result. A pass/fail strip, a score scatter, a
+      histogram, a running pass rate, and a click-through to the run (`run_id`,
+      `execution_id`).
+
+Every interval says what it is: `method` (`exact` Clopper–Pearson, `wilson`, `t`), `level`,
+and `sides` (`one`: each bound is one-sided at `level` — the kind a verdict "at least X"
+is drawn from). Numbers are rounded to four decimals; `null` means the value doesn't exist,
+never zero.
+"""
+
+
+_CREATE_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
+    Run a test, a test set or a test plan **N times as one batch**, and get a statistical
+    answer once every run has finished.
+
+    What it creates, in one transaction:
+    - a **test**: N standalone runs, each with its own frozen copy of the test (all the
+      same, since they're created together);
+    - a **test set**: N live executions of the set, one run per entry each;
+    - a **test plan**: N live executions of the plan, one run per entry of every linked set.
+
+    Every run and execution carries the batch's `batch_id` and its `batch_index` (the
+    time, 1 to N). They're ordinary runs: executed by the workers like any other, readable
+    through the usual run endpoints, and listed with the scope's executions (filter them in
+    or out with `?batch=`). A replay of one of them is an ordinary replay, outside the batch.
+
+    The body is the estimate's — send the same body to `POST /statistics/estimate` first to
+    show the cost — plus an optional `note`. `times` left out takes the estimate's default
+    suggestion. The guards are the estimate's, so what it shows is exactly what this
+    creates: the scope's own run guards (404, 409), then the parameters and size (422).
+
+    Every run is paid for (application calls for entries with no recorded answer, judge
+    calls for LLM checks): the response's `progress.calls.*.planned` repeats the bill. A
+    batch can be stopped (`POST /statistics/batches/{batch_id}/stop`) but not deleted:
+    like an execution, it's history.
+    """) + "\n" + _BATCH_ANATOMY
+
+
+@router.post(
+    path="/statistics/batches",
+    summary="Run with statistics: create a batch",
+    description=_CREATE_STATISTICAL_BATCH_DOC,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        202: {
+            "description": (
+                "The batch and its runs are created and dispatched to the workers. It "
+                "starts `Pending`; poll `GET /statistics/batches/{batch_id}` for progress "
+                "and, once every run has finished, the result."
+            ),
+            "content": {"application/json": {"example": _BATCH_PENDING}},
+        },
+        404: _SCOPE_404,
+        409: _SCOPE_409,
+        422: {
+            "description": (
+                "The same validation as `POST /statistics/estimate`, every problem at once in "
+                "FastAPI's list shape — plus `note` longer than 500 characters. Nothing is "
+                "created."
+            ),
+            "content": {"application/json": {"examples": {
+                "below_floor": {"summary": "Fewer times than the floor", "value":
+                    _validation_error((["body", "times"],
+                                       "At least 29 times for the Binomial gate with these "
+                                       "parameters: below that no result could conclude "
+                                       "anything"))},
+                "too_many_runs": {"summary": "More runs than a batch can create", "value":
+                    _validation_error((["body", "times"],
+                                       "1000 times × 11 runs each is 11000 runs, more than "
+                                       "the 10000 a batch can create: at most 909 times for "
+                                       "this scope"))},
+            }}},
+        },
+    },
+)
+async def create_statistical_batch(
+        request: BatchRequest, session: SessionDep) -> BatchDetails:  # pragma: no cover
+    return await create_batch(request, session)
+
+
+@router.get(
+    path="/statistics/batches",
+    summary="List batches",
+    responses={200: {
+        "description": (
+            "Batches, newest first, without their per-check results (open one for those). "
+            "Each has its status, progress and, once finished, its one-sentence `summary`."
+        ),
+        "content": {"application/json": {"example": {
+            "items": [{k: v for k, v in _BATCH_FINISHED.items() if k != "result"},
+                      {k: v for k, v in _BATCH_RUNNING.items() if k != "result"}],
+            "total": 2, "offset": 0, "limit": 100,
+        }}},
+    }},
+)
+async def list_statistical_batches(
+        session: SessionDep,
+        test_id: Annotated[uuid.UUID | None, Query(
+            description="Only batches of this standalone test.")] = None,
+        test_set_id: Annotated[uuid.UUID | None, Query(
+            description="Only batches of this test set.")] = None,
+        test_plan_id: Annotated[uuid.UUID | None, Query(
+            description="Only batches of this test plan.")] = None,
+        batch_status: Annotated[BatchStatusName | None, Query(
+            alias="status", description="Only batches with this status.")] = None,
+        offset: Annotated[int, Query(ge=0, description="Batches to skip.")] = 0,
+        limit: Annotated[int, Query(ge=1, le=500, description="Batches to return.")] = 100,
+) -> BatchList:  # pragma: no cover
+    """The batches of a scope — the **Statistics** panel of a test, set or plan page — or
+    of every scope. Filters combine.
+
+    Any batch still `Pending` or `Running` is brought up to date before the list is
+    answered, so `?status=Running` is the truth now, and a batch that finished since it
+    was last read gets its result computed here (then shows its `summary`).
+    """
+    return await list_batches(session, offset=offset, limit=limit, test_id=test_id,
+                              test_set_id=test_set_id, test_plan_id=test_plan_id,
+                              status=batch_status)
+
+
+_GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
+    One batch. Poll it while it runs: `progress` moves, `status` goes `Pending` →
+    `Running` → its outcome, and `result` appears once every run has finished — computed
+    by that read and stored, so every later read returns the same numbers.
+    """) + "\n" + _BATCH_ANATOMY
+
+
+@router.get(
+    path="/statistics/batches/{batch_id}",
+    summary="Get a batch: progress, then its result",
+    description=_GET_STATISTICAL_BATCH_DOC,
+    responses={
+        200: {
+            "description": "The batch: its progress while it runs, its result once every "
+                           "run has finished. Series are shortened to three points in these "
+                           "examples; a real batch has one per time.",
+            "content": {"application/json": {"examples": {
+                "pending": {"summary": "Just created: nothing started",
+                            "value": _BATCH_PENDING},
+                "running": {"summary": "Running: progress and spend, no verdict yet",
+                            "value": _BATCH_RUNNING},
+                "inconclusive": {"summary": "Finished: one check proven, one undecided",
+                                 "value": _BATCH_FINISHED},
+                "t_test": {"summary": "A t-test check, as it appears in a result",
+                           "value": {**_BATCH_FINISHED, "statistical_test": "one_sample_t",
+                                     "parameters": {"confidence": 0.95, "difference": 0.05,
+                                                    "spread": 0.1},
+                                     "status": "Passed",
+                                     "summary": "Passed: the check is proven.",
+                                     "result": {**_BATCH_FINISHED["result"],
+                                                "checks_total": 1, "checks_applicable": 1,
+                                                "verdicts": {"pass": 1, "fail": 0,
+                                                             "inconclusive": 0, "none": 0},
+                                                "summary": "Passed: the check is proven.",
+                                                "entries": [{
+                                                    **_BATCH_FINISHED["result"]["entries"][0],
+                                                    "checks": [_T_CHECK]}]}}},
+                "stopped": {"summary": "Stopped early, below the floor: no verdicts",
+                            "value": {**_BATCH_STOPPED, "result": None}},
+                "no_series": {"summary": "With ?series=false",
+                              "value": {**_BATCH_FINISHED, "result": {
+                                  **_BATCH_FINISHED["result"],
+                                  "entries": [{
+                                      **_BATCH_FINISHED["result"]["entries"][0],
+                                      "strip": None,
+                                      "checks": [{**c, "series": None} for c in (
+                                          _GATE_PASS_CHECK, _GATE_UNDECIDED_CHECK)]}]}}},
+            }}},
+        },
+        404: _BATCH_404,
+    },
+)
+async def get_statistical_batch(
+        batch_id: uuid.UUID, session: SessionDep,
+        series: Annotated[bool, Query(
+            description="`false` leaves out every `series` and `strip` (the per-run points): "
+                        "the summaries alone, for lists and small screens.")] = True,
+) -> BatchDetails:  # pragma: no cover
+    return await get_batch(batch_id, series, session)
+
+
+@router.post(
+    path="/statistics/batches/{batch_id}/stop",
+    summary="Stop a batch",
+    responses={
+        200: {
+            "description": (
+                "The batch after stopping. Its pending runs are now `NotRan` with the reason "
+                "\"Stopped before it ran: the batch was stopped\"; runs already executing "
+                "finish. It's `Incomplete` with its partial result once none is running "
+                "(at once when none was), `Running` until then. A batch with nothing pending "
+                "comes back unchanged."
+            ),
+            "content": {"application/json": {"examples": {
+                "stopped": {"summary": "Stopped with nothing running: Incomplete at once",
+                            "value": {**_BATCH_STOPPED, "result": None}},
+                "finishing": {"summary": "Stopped while two runs were executing",
+                              "value": {**_BATCH_RUNNING,
+                                        "stopped_at": "2026-10-01T09:41:07+02:00",
+                                        "progress": {**_BATCH_RUNNING["progress"],
+                                                     "runs": _counts(Running=2, Green=22,
+                                                                     Amber=2, NotRan=34),
+                                                     "runs_cancelled": 33,
+                                                     "times_cancelled": 16,
+                                                     "runs_done": 58}}},
+            }}},
+        },
+        404: _BATCH_404,
+    },
+)
+async def stop_statistical_batch(
+        batch_id: uuid.UUID, session: SessionDep) -> BatchDetails:  # pragma: no cover
+    """Stop a batch midway — the cost is adding up, or the answer is no longer needed.
+    What ran, ran; the rest never will.
+
+    Every run of the batch still `Pending` becomes `NotRan`, in one statement. It's safe
+    against the workers: a worker only claims a run while it's `Pending`, so a cancelled run
+    is never executed, and a run a worker claimed first finishes and counts (a model call in
+    flight can't be recalled, and it's paid for either way). `stopped_at` is set when at
+    least one run was cancelled.
+
+    The result of a stopped batch covers the runs that did complete, so the money spent
+    isn't wasted: pass rates, ranges and scores always; a verdict only for a check whose
+    evaluated runs still reach the test's `floor`. The status stays `Incomplete` either
+    way — the batch didn't run what was asked.
+
+    Stopping a batch that has nothing left pending changes nothing and returns it.
+    """
+    return await stop_batch(batch_id, session)

@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api.runs._batch_filter import BatchFilter
 from assay.db import get_session
 from assay.schemas import (
     PaginatedTestSetExecutionMetadata,
@@ -418,6 +419,7 @@ async def get_test_set_execution_metadata(
         limit: int = Query(
             default=100, description="Maximum number of records to return for pagination."
         ),
+        batch: BatchFilter = None,
 ) -> PaginatedTestSetExecutionMetadata: # pragma: no cover
     """List every execution ever triggered for a test set, newest first.
 
@@ -435,7 +437,8 @@ async def get_test_set_execution_metadata(
     `created_at` descending (ties broken by `id` descending), plus the
     usual `total`, `offset`, and `limit`.
     """
-    return await get_test_set_execution_metadata_all_executions(test_set_id, session, offset, limit)
+    return await get_test_set_execution_metadata_all_executions(test_set_id, session, offset,
+                                                                limit, batch)
 
 
 @router.get(
