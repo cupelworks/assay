@@ -35,19 +35,21 @@ _RUN_DETAIL_RECORDED = {
     "test_plan_execution_id": {
         "id": "b3c4d5e6-f7a8-9012-bcde-456789012345"
     },
+    # keyed by label, in label order; each result says which type it ran
     "results": {
-        "Exact Match": {
-            "passed": True, "score": None, "detail": None,
-            "engine": "exact_match",
-            "engine_settings": {"trim": True, "case_sensitive": True},
-        },
         "BLEU": {
-            "passed": True, "score": 100.0, "detail": None,
+            "passed": True, "score": 100.0, "detail": None, "test_type": "BLEU",
             "engine": "bleu", "engine_settings": {"smooth_method": "exp", "lowercase": False},
+        },
+        "Exact Match": {
+            "passed": True, "score": None, "detail": None, "test_type": "Exact Match",
+            "engine": "exact_match",
+            "engine_settings": {"trim": True, "case_sensitive": True,
+                                "normalize_lookalikes": True},
         },
     },
     "error": None,
-    "evaluated_output": "Go to Settings → Security and choose Reset password.",
+    "evaluated_output": "Hello, Alice!",
     "output_source": "recorded",
     "executed_at": "2026-07-20T09:12:08.554021",
     "test_case_id": {
@@ -58,8 +60,8 @@ _RUN_DETAIL_RECORDED = {
     "expected_output": "Hello, Alice!",
     "model_output": "Hello, Alice!",
     "test_type_assignments": [
-        {"name": "Exact Match", "config": None},
-        {"name": "BLEU", "config": {"threshold": "20"}},
+        {"name": "BLEU", "label": "BLEU", "config": {"threshold": "20"}},
+        {"name": "Exact Match", "label": "Exact Match", "config": None},
     ],
     "test_case_snapshot_at": {
         "snapshot_at": "2026-07-20T09:10:41.117903"
@@ -72,27 +74,30 @@ _RUN_DETAIL_RECORDED = {
     },
 }
 
-# The same run, answered by the application under test: the whole reply is
-# kept, and the BLEU check reads its own part of it (answer_path).
+# The same test, answered by the application under test: the whole reply is
+# kept, the default answer is its output object as JSON text, and both checks
+# read the greeting inside it (answer_path).
 _RUN_DETAIL_FROM_APPLICATION = {
     **_RUN_DETAIL_RECORDED,
     "results": {
-        **_RUN_DETAIL_RECORDED["results"],
-        "BLEU": {**_RUN_DETAIL_RECORDED["results"]["BLEU"], "answer_path": "$.output.greeting"},
+        label: {**result, "answer_path": "$.output.greeting"}
+        for label, result in _RUN_DETAIL_RECORDED["results"].items()
     },
     "evaluated_output": '{"greeting": "Hello, Alice!"}',
     "output_source": "application",
     "application_reply": {
         "output": {"greeting": "Hello, Alice!"},
-        "model": "claude-sonnet-5",
+        "model": "claude-sonnet-5-5",
         "stop_reason": "end_turn",
         "input_tokens": 812,
         "output_tokens": 64,
     },
     "model_output": None,
     "test_type_assignments": [
-        {"name": "Exact Match", "config": None},
-        {"name": "BLEU", "config": {"threshold": "20"}, "answer_path": "$.output.greeting"},
+        {"name": "BLEU", "label": "BLEU", "config": {"threshold": "20"},
+         "answer_path": "$.output.greeting"},
+        {"name": "Exact Match", "label": "Exact Match", "config": None,
+         "answer_path": "$.output.greeting"},
     ],
 }
 
