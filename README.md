@@ -197,6 +197,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Returns `{"status": "ok"}` |
+| `GET` | `/health/worker` | Whether runs and checks sent now will be executed: `status` `ready`, `no_worker`, `outdated` (a worker lacks a task the API sends — restart it on the current code) or `broker_unreachable`, with the broker's reachability and each answering worker's missing tasks. Always 200; takes up to about 2 s |
 
 ### Datasets
 | Method | Path | Description |
