@@ -468,6 +468,18 @@ The API logs to stdout, one record per line, and lets the platform collect it fr
 uv run pytest
 ```
 
+### Skipped and deselected tests
+
+A plain `uv run pytest` reports some tests as skipped and some as deselected. That's by design: these tests need something the `dev` extra doesn't install, so they step aside instead of failing.
+
+| Tests | Reported as | Why | To run them |
+|---|---|---|---|
+| METEOR's scoring tests (`tests/worker/evaluators/test_meteor.py`) | skipped | They need NLTK's WordNet data, a separate download | `uv run python -m nltk.downloader wordnet`, then `uv run pytest` |
+| BERTScore's scoring tests (`tests/worker/evaluators/test_bertscore.py`) | skipped | The scoring arithmetic runs on PyTorch, which only the `nlp` extra installs | `uv sync --extra dev --extra nlp`, then `uv run pytest` |
+| BERTScore and Cosine Similarity on the real models (`tests/worker/evaluators/test_embedding_engines_slow.py`) | deselected | Marked `slow`: they need the `nlp` extra and download about 800 MB of models the first time | `uv run pytest -m slow` |
+
+Each skip names its reason; `uv run pytest -rs` lists them. Everything else in these files runs without the extra dependencies.
+
 ### Coverage
 
 Run with terminal coverage report (shows which lines were not hit):
