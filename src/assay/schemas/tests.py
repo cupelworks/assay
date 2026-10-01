@@ -1,16 +1,19 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from assay.models import Comparison, ConfigFieldKind, TestTypes, TestTypesCost
 from assay.schemas import DataSetID, Pagination
+
+MAX_LABEL_LENGTH = 100
 
 
 class TestTypeAssignment(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {"name": "Regex Match", "config": {"pattern": "^\\d{3}-\\d{4}$"}}
+            "example": {"name": "Contains", "label": "Mentions the order number",
+                        "config": {"substring": "4471"}}
         }
     )
     name: str = Field(
@@ -33,6 +36,26 @@ class TestTypeAssignment(BaseModel):
                     "Checked to parse on save — a 422 otherwise.",
         examples=["$.stop_reason"],
     )
+    label: str | None = Field(
+        None,
+        max_length=MAX_LABEL_LENGTH,
+        description="What this check is called within the test, unique there (ignoring "
+                    "letter case): a type can be assigned more than once, and the label "
+                    "tells the assignments apart — a run's `results` are keyed by it. "
+                    "Optional: left out, it's the type's name, numbered when that's taken "
+                    "(`Contains`, `Contains 2`). A label sent is kept as it is, so send "
+                    "back the labels a GET returned to keep each check's identity — and "
+                    "its results comparable across runs — when you replace the list.",
+        examples=["Mentions the order number"],
+    )
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _blank_label_is_unset(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
 
 
 class CreateTestCaseRequest(BaseModel):
@@ -115,7 +138,10 @@ class ModifyTestCaseRequest(BaseModel):
         None,
         description="Test types to assign to this test case, with any config "
                     "each one needs. Replaces the full assignment list — not merged "
-                    "with what's already assigned. null or left out: unchanged.",
+                    "with what's already assigned; `[]` removes them all. null or left "
+                    "out: unchanged. A type may appear more than once, told apart by "
+                    "`label`: send back the labels a GET returned to keep each check's "
+                    "identity.",
     )
 
 

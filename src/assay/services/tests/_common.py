@@ -12,7 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
 
-from assay.models import ConfigFieldKind, DatasetRowModel, TestModel, TestTypesModel
+from assay.models import (
+    ConfigFieldKind,
+    DatasetRowModel,
+    TestModel,
+    TestTypeAssignmentModel,
+    TestTypesModel,
+)
 from assay.schemas import TestTypeAssignment
 
 
@@ -20,13 +26,21 @@ def _frozen_test_type_assignments(test: TestModel) -> list[dict]:
     """The test's assigned types with their config, in the frozen JSON shape
     every snapshot of a test stores — a TestSetEntryModel when the test is
     added to a set, a StandaloneRunModel when a standalone run is created:
-    `[{"name": ..., "config": ..., "answer_path": ...}]`. The test's assignments must be loaded.
+    `[{"name": ..., "label": ..., "config": ..., "answer_path": ...}]`. The
+    test's assignments must be loaded.
     """
     return [
-        {"name": assignment.test_type_name, "config": assignment.config,
-         "answer_path": assignment.answer_path}
+        {"name": assignment.test_type_name, "label": assignment.label,
+         "config": assignment.config, "answer_path": assignment.answer_path}
         for assignment in test.test_type_assignments
     ]
+
+
+def _assignment_schema(assignment: TestTypeAssignmentModel) -> TestTypeAssignment:
+    """A stored assignment as the API returns it."""
+    return TestTypeAssignment(name=assignment.test_type_name, label=assignment.label,
+                              config=assignment.config, answer_path=assignment.answer_path)
+
 
 
 def _check_difference_between_found_tests_and_requested_tests(
@@ -140,8 +154,9 @@ async def _validate_test_type_assignments(
         assignments: list[TestTypeAssignment]) -> None:
     """Checks that every assigned test type exists in the catalogue, that
     each assignment supplies a value for every required config field its
-    type declares, and that every value given is valid for its field's
-    kind — see _invalid_reason — as is an assignment's own answer_path.
+    type declares, that every value given is valid for its field's kind —
+    see _invalid_reason — as is an assignment's own answer_path, and that no
+    two assignments were sent with the same label (ignoring letter case).
 
     A broken value is refused here rather than left to fail when a run
     executes: there it would fail its check and turn the run Amber or Red,
@@ -158,7 +173,8 @@ async def _validate_test_type_assignments(
             type's name and any per-field config values supplied for it.
 
     Raises:
-        HTTPException: 422 listing unknown test type names, assignments
+        HTTPException: 422 listing unknown test type names, duplicate labels,
+            assignments
             missing a required (non-reference) config field, and values
             that aren't valid for their field, if any is found. All
             are reported together in one exception rather than failing on
@@ -175,6 +191,15 @@ async def _validate_test_type_assignments(
     unknown_names = set(requested_names) - set(config_fields_by_name)
 
     field_problems = []
+    seen_labels: dict[str, str] = {}
+    duplicate_labels: list[str] = []
+    for assignment in assignments:
+        if not assignment.label:
+            continue
+        key = assignment.label.casefold()
+        if key in seen_labels and seen_labels[key] not in duplicate_labels:
+            duplicate_labels.append(seen_labels[key])
+        seen_labels.setdefault(key, assignment.label)
     for assignment in assignments:
         config_fields = config_fields_by_name.get(assignment.name)
         if config_fields is None:
@@ -203,12 +228,14 @@ async def _validate_test_type_assignments(
                     f"'{assignment.name}' config field '{field['key']}' {reason}"
                 )
 
-    if not unknown_names and not field_problems:
+    if not unknown_names and not duplicate_labels and not field_problems:
         return
 
     problems = []
     if unknown_names:
         problems.append(f"Unknown test types: {sorted(unknown_names)}")
+    if duplicate_labels:
+        problems.append(f"Duplicate labels (letter case aside): {duplicate_labels}")
     problems.extend(field_problems)
 
     raise HTTPException(

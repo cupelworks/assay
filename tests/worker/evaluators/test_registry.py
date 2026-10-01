@@ -120,3 +120,12 @@ def test_the_deterministic_engines_score_for_real_through_the_registry():
     result = evaluate(TestTypeAssignment(name="Exact Match"), row, entry, "hi\n")
 
     assert (result.passed, result.score, result.engine) == (True, None, "exact_match")
+
+
+def test_stamps_which_type_the_result_is():
+    with patch.dict(ENGINES, {"rouge": lambda e: TestTypeResult(passed=True, score=0.81,
+                                                                 detail=None)}):
+        result = evaluate(TestTypeAssignment(name="ROUGE", label="Summary overlap"), ROUGE,
+                          ENTRY, "Summary")
+
+    assert result.test_type == "ROUGE"

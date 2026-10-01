@@ -212,6 +212,16 @@ class TestTypeResult(BaseModel):
             'this field existed.'
         ),
     )
+    test_type: str | None = Field(
+        default=None,
+        description=(
+            'The catalogue type this check ran, e.g. `Contains`. A run\'s `results` '
+            'are keyed by each assignment\'s label, which is the type\'s name '
+            'unless it was renamed or the type is assigned more than once '
+            '(`Contains 2`), so this is what says which type a result is. Null '
+            'only on results written before this field existed.'
+        ),
+    )
     judge: JudgeIdentity | None = Field(
         default=None,
         description=(
@@ -228,15 +238,18 @@ class RunResults(BaseModel):
     results: dict[str, TestTypeResult] | None = Field(
         ...,
         description=(
-            'Per-test-type results, keyed by assigned test type name (e.g. '
+            'Per-check results, keyed by each assignment\'s label — the test '
+            'type\'s name unless renamed, numbered when a type is assigned more '
+            'than once (`Contains`, `Contains 2`); each result\'s `test_type` '
+            'says which type it is (e.g. '
             '`{"ROUGE": {"passed": true, "score": 0.81, "detail": null, '
             '"engine": "rouge", "engine_settings": {"variant": "rougeL", ...}}, '
             '"Toxicity": {"passed": false, "score": null, "detail": "...", '
             '"engine": "llm_judge", "engine_settings": {...}}}`. Each entry also '
             'records the engine and settings it was scored with, so the result '
             'stays interpretable if the catalogue changes later. Populated once '
-            'the run reaches `Green`, `Amber`, or `Red` — one entry per test '
-            'type that was assigned to the test/entry this run targeted. Null '
+            'the run reaches `Green`, `Amber`, or `Red` — one entry per check '
+            'assigned to the test/entry this run targeted. Null '
             'while `Pending`/`Running`, and for `NotRan` (see `error` instead).'
         ),
     )

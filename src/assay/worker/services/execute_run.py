@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from assay.assignment_labels import labelled
 from assay.judge_settings import resolve_judge_settings
 from assay.messages import sentence
 from assay.models import (
@@ -62,6 +63,11 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
 
     try:
         entry, resolved = _resolve_content(run, session)
+        # Results are keyed by label. Every copy saved since labels exist
+        # carries them; labelled() gives any other one the labels the API
+        # would have, so two checks of one type never share a key.
+        resolved = list(zip(labelled([assignment for assignment, _ in resolved]),
+                            [row for _, row in resolved], strict=True))
     except Exception as exc:
         # Nothing could be attempted at all - the entry/assignments
         # themselves couldn't be read. This is exactly what NotRan means:
@@ -134,21 +140,22 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         try:
             if engine == JUDGE_ENGINE and judge_problem:
                 raise ValueError(judge_problem)
-            results[assignment.name] = evaluators.evaluate(
+            results[assignment.label] = evaluators.evaluate(
                 assignment, catalogue_row, entry,
                 _answer_for(assignment.answer_path, answer, reply, output_source),
                 judge=judge,
             )
         except Exception as exc:
             logger.warning(
-                "Evaluator %s (engine %s) failed for run %s: %s",
-                assignment.name, engine, run_id, exc,
-                exc_info=True, extra={"test_type": assignment.name, "engine": engine},
+                "Check %s (%s, engine %s) failed for run %s: %s",
+                assignment.label, assignment.name, engine, run_id, exc,
+                exc_info=True, extra={"label": assignment.label, "test_type": assignment.name,
+                                      "engine": engine},
             )
-            results[assignment.name] = TestTypeResult(
+            results[assignment.label] = TestTypeResult(
                 passed=False, score=None, detail=sentence(str(exc)), engine=engine,
                 engine_settings=catalogue_row.engine_settings if catalogue_row else None,
-                answer_path=assignment.answer_path,
+                answer_path=assignment.answer_path, test_type=assignment.name,
             )
 
     passed_flags = [result.passed for result in results.values()]
@@ -244,7 +251,9 @@ def _resolve_content(
     of how that type is scored (engine, settings, comparison) — two different
     things, read from two different places, and the registry is what
     combines them. A type whose name isn't in the catalogue gets None here,
-    and fails as that one type when evaluated, not as the whole run.
+    and fails as that one check when evaluated, not as the whole run. A
+    type assigned twice is two assignments with their own labels, and the
+    run's results are keyed by label.
     """
     entry = run.standalone_run if run.test_id is not None else run.test_set_entry
     raw_assignments = entry.test_type_assignments
@@ -257,8 +266,8 @@ def _resolve_content(
     }
     return entry, [
         (
-            TestTypeAssignment(name=raw.get("name"), config=raw.get("config"),
-                               answer_path=raw.get("answer_path")),
+            TestTypeAssignment(name=raw.get("name"), label=raw.get("label"),
+                               config=raw.get("config"), answer_path=raw.get("answer_path")),
             rows_by_name.get(raw.get("name")),
         )
         for raw in raw_assignments

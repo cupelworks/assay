@@ -134,6 +134,7 @@ def test_modify_test_type_assignments_none_leaves_assignments_untouched():
     mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
     mock_assignment = MagicMock()
     mock_assignment.test_type_name = "ROUGE"
+    mock_assignment.label = "ROUGE"
     mock_assignment.config = None
     mock_assignment.answer_path = None
     mock_test.test_type_assignments = [mock_assignment]
@@ -144,7 +145,8 @@ def test_modify_test_type_assignments_none_leaves_assignments_untouched():
         response = _call_api_orchestrator(mock_test_id, mock_request, session)
 
     session.commit.assert_called_once()
-    assert response.test_type_assignments == [TestTypeAssignment(name="ROUGE", config=None)]
+    assert response.test_type_assignments == [
+        TestTypeAssignment(name="ROUGE", label="ROUGE", config=None)]
 
 
 def test_modify_raises_422_when_clearing_expected_output_with_reference_required_type_assigned():
@@ -153,6 +155,7 @@ def test_modify_raises_422_when_clearing_expected_output_with_reference_required
     mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
     mock_assignment = MagicMock()
     mock_assignment.test_type_name = "Exact Match"
+    mock_assignment.label = "Exact Match"
     mock_assignment.config = None
     mock_assignment.answer_path = None
     mock_test.test_type_assignments = [mock_assignment]
@@ -197,7 +200,8 @@ def test_modify_passes_assigning_reference_required_type_with_existing_expected_
     response = _call_api_orchestrator(mock_test_id, mock_request, session)
 
     session.commit.assert_called_once()
-    assert response.test_type_assignments == [TestTypeAssignment(name="Exact Match", config=None)]
+    assert response.test_type_assignments == [
+        TestTypeAssignment(name="Exact Match", label="Exact Match", config=None)]
 
 
 # -- null clears a nullable field, a missing key keeps it --
@@ -253,6 +257,7 @@ def test_modify_raises_422_when_nulling_expected_output_with_reference_required_
     mock_test = _get_mock_test_without_test_type_assignments(mock_test_id)
     mock_assignment = MagicMock()
     mock_assignment.test_type_name = "Exact Match"
+    mock_assignment.label = "Exact Match"
     mock_assignment.config = None
     mock_assignment.answer_path = None
     mock_test.test_type_assignments = [mock_assignment]
@@ -284,3 +289,101 @@ def test_modify_logs_a_cleared_field_but_not_an_ignored_null(caplog):
 
     (record,) = [r for r in caplog.records if r.name == "assay.services.tests.update_test"]
     assert record.fields == ["model_output"]
+
+
+# -- labels: replacing the list with a type assigned more than once --
+
+
+def _stored(type_name, label, config):
+    assignment = MagicMock()
+    assignment.test_type_name, assignment.label = type_name, label
+    assignment.config, assignment.answer_path = config, None
+    return assignment
+
+
+def _patch_assignments(mock_test, assignments):
+    session = _get_session(mock_test)
+    with patch("assay.services.tests.update_test._validate_test_type_assignments"):
+        return _call_api_orchestrator(
+            mock_test.id, ModifyTestCaseRequest(test_type_assignments=assignments), session)
+
+
+def _saved(mock_test):
+    return [(a.test_type_name, a.label, a.config) for a in mock_test.test_type_assignments]
+
+
+def test_modify_saves_the_same_type_twice_instead_of_keeping_only_the_last():
+    mock_test = _get_mock_test_without_test_type_assignments(uuid.uuid4())
+
+    response = _patch_assignments(mock_test, [
+        TestTypeAssignment(name="Contains", config={"substring": "refund"}),
+        TestTypeAssignment(name="Contains", config={"substring": "4471"}),
+    ])
+
+    assert _saved(mock_test) == [("Contains", "Contains", {"substring": "refund"}),
+                                 ("Contains", "Contains 2", {"substring": "4471"})]
+    assert [a.label for a in response.test_type_assignments] == ["Contains", "Contains 2"]
+
+
+def test_modify_keeps_the_seconds_label_when_the_first_of_two_is_removed():
+    mock_test = _get_mock_test_without_test_type_assignments(uuid.uuid4())
+    mock_test.test_type_assignments = [
+        _stored("Contains", "Contains", {"substring": "refund"}),
+        _stored("Contains", "Contains 2", {"substring": "4471"}),
+    ]
+
+    _patch_assignments(mock_test, [
+        TestTypeAssignment(name="Contains", label="Contains 2", config={"substring": "4471"}),
+    ])
+
+    assert _saved(mock_test) == [("Contains", "Contains 2", {"substring": "4471"})]
+
+
+def test_modify_gives_a_new_check_the_next_free_number_and_keeps_the_sent_labels():
+    mock_test = _get_mock_test_without_test_type_assignments(uuid.uuid4())
+
+    _patch_assignments(mock_test, [
+        TestTypeAssignment(name="Contains", label="Contains 2", config={"substring": "4471"}),
+        TestTypeAssignment(name="Contains", config={"substring": "refund"}),
+        TestTypeAssignment(name="Contains", config={"substring": "today"}),
+    ])
+
+    assert [label for _, label, _ in _saved(mock_test)] == ["Contains 2", "Contains",
+                                                           "Contains 3"]
+
+
+def test_modify_null_and_empty_still_mean_untouched_and_remove_all_with_labels():
+    stored = [_stored("Contains", "Refund", {"substring": "refund"}),
+              _stored("Contains", "Contains 2", {"substring": "4471"})]
+    mock_test = _get_mock_test_without_test_type_assignments(uuid.uuid4())
+    mock_test.test_type_assignments = list(stored)
+
+    response = _patch_assignments(mock_test, None)
+    assert mock_test.test_type_assignments == stored
+    assert [a.label for a in response.test_type_assignments] == ["Refund", "Contains 2"]
+
+    _patch_assignments(mock_test, [])
+    assert mock_test.test_type_assignments == []
+
+
+def test_modify_with_duplicate_labels_is_a_422_and_changes_nothing():
+    stored = [_stored("Contains", "Contains", {"substring": "refund"})]
+    mock_test = _get_mock_test_without_test_type_assignments(uuid.uuid4())
+    mock_test.test_type_assignments = list(stored)
+    session = _get_session(mock_test)
+    catalogue_row = MagicMock()
+    catalogue_row.name = "Contains"
+    catalogue_row.config_fields = [{"key": "substring", "label": "Substring",
+                                    "kind": "multiline", "required": True}]
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[catalogue_row]))
+
+    with pytest.raises(HTTPException) as exc:
+        _call_api_orchestrator(mock_test.id, ModifyTestCaseRequest(test_type_assignments=[
+            TestTypeAssignment(name="Contains", label="Refund", config={"substring": "a"}),
+            TestTypeAssignment(name="Contains", label="refund", config={"substring": "b"}),
+        ]), session)
+
+    assert exc.value.status_code == 422
+    assert "Duplicate labels" in exc.value.detail
+    assert mock_test.test_type_assignments == stored
+    session.commit.assert_not_called()

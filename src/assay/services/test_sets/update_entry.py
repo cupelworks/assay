@@ -3,6 +3,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.assignment_labels import labelled as _labelled
 from assay.schemas import ModifyTestCaseRequest, TestCaseID, TestSetEntryDetails, TestTypeAssignment
 from assay.services.test_sets._common import (
     _check_test_set_entry_has_no_runs_or_409,
@@ -82,9 +83,9 @@ async def modify_entry_by_id(
     if request.test_type_assignments is not None:
         await _validate_test_type_assignments(session, request.test_type_assignments)
         found.test_type_assignments = [
-            {"name": assignment.name, "config": assignment.config,
-             "answer_path": assignment.answer_path}
-            for assignment in request.test_type_assignments
+            {"name": assignment.name, "label": assignment.label,
+             "config": assignment.config, "answer_path": assignment.answer_path}
+            for assignment in _labelled(request.test_type_assignments)
         ]
 
     await session.commit()

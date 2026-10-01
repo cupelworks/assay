@@ -5,6 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.assignment_labels import labelled as _labelled
 from assay.models import TestModel, TestTypeAssignmentModel
 from assay.schemas import (
     CreateTestCaseFromDatasetRequest,
@@ -79,6 +80,7 @@ async def create_new_test(
         await _check_reference_required_types_have_expected_output_or_422(
             session, request.test_type_assignments, request.expected_output
         )
+    assignments = _labelled(request.test_type_assignments)
 
     test = TestModel(
         id=uuid.uuid4(),
@@ -92,10 +94,11 @@ async def create_new_test(
         TestTypeAssignmentModel(
             test_id=test.id,
             test_type_name=assignment.name,
+            label=assignment.label,
             config=assignment.config,
             answer_path=assignment.answer_path,
         )
-        for assignment in request.test_type_assignments
+        for assignment in assignments
     ]
 
     session.add(test)
@@ -113,7 +116,7 @@ async def create_new_test(
         input=test.input,
         model_output=test.model_output,
         expected_output=test.expected_output,
-        test_type_assignments=request.test_type_assignments,
+        test_type_assignments=assignments,
     )
 
 
@@ -154,6 +157,7 @@ async def create_new_test_from_dataset(
         await _check_reference_required_types_have_expected_output_for_rows_or_422(
             session, request.test_type_assignments, rows
         )
+    assignments = _labelled(request.test_type_assignments)
 
     next_number = await _next_new_test_number(session)
 
@@ -173,10 +177,11 @@ async def create_new_test_from_dataset(
         TestTypeAssignmentModel(
             test_id=test.id,
             test_type_name=assignment.name,
+            label=assignment.label,
             config=assignment.config,
             answer_path=assignment.answer_path,
         )
-        for test in tests for assignment in request.test_type_assignments
+        for test in tests for assignment in assignments
     ]
 
     session.add_all(tests)

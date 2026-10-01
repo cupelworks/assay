@@ -1293,3 +1293,104 @@ def test_upgrade_leaves_runs_without_results_alone_and_downgrade_does_nothing(sc
     assert _run(db_path, pending) == before
     command.downgrade(config, "45dabe26c054")
     assert _run(db_path, pending) == before
+
+
+# --- e47a76f674f0: assignment labels ---
+
+_TEST = f"{1:032x}"
+
+
+def _seed_for_labels(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("INSERT INTO tests (id, name, input, created_at) "
+                           "VALUES (?, 't', 'q', '2026-01-01')", (_TEST,))
+        connection.execute("INSERT INTO test_type_assignments (test_id, test_type_name, config) "
+                           "VALUES (?, 'Contains', '{\"substring\": \"refund\"}')", (_TEST,))
+        # an entry PATCH could store a type twice before labels existed
+        connection.execute(
+            "INSERT INTO test_set_entries (id, test_id, name, input, snapshot_at, "
+            "test_type_assignments) VALUES (?, ?, 'e', 'q', '2026-01-01', ?)",
+            (f"{2:032x}", _TEST, json.dumps([
+                {"name": "Contains", "config": {"substring": "refund"}},
+                {"name": "Contains", "config": {"substring": "4471"}},
+                {"name": "ROUGE", "config": {"threshold": "0.6"}},
+            ])))
+        connection.execute(
+            "INSERT INTO standalone_runs (id, name, input, snapshot_at, test_type_assignments) "
+            "VALUES (?, 's', 'q', '2026-01-01', ?)",
+            (f"{3:032x}", json.dumps([{"name": "Exact Match", "config": None}])))
+
+
+def _json_column(db_path: Path, table: str, column: str) -> list:
+    with sqlite3.connect(db_path) as connection:
+        return [json.loads(value) for (value,) in connection.execute(
+            f"SELECT {column} FROM {table} ORDER BY id")]
+
+
+def _primary_key(db_path: Path) -> list[str]:
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute("PRAGMA table_info(test_type_assignments)").fetchall()
+    return [name for _, name, _, _, _, pk in sorted(rows, key=lambda r: r[5]) if pk]
+
+
+def test_upgrade_keys_assignments_by_label_and_labels_every_copy(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "d649f666f728")
+    _seed_for_labels(db_path)
+    run_id = _insert_run(db_path, 9, "green", results={
+        "Contains": {"passed": True, "score": None, "detail": None}})
+
+    command.upgrade(config, "e47a76f674f0")
+
+    assert _primary_key(db_path) == ["test_id", "label"]
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT test_type_name, label FROM test_type_assignments"
+                                  ).fetchall() == [("Contains", "Contains")]
+    (entry,) = _json_column(db_path, "test_set_entries", "test_type_assignments")
+    assert [a["label"] for a in entry] == ["Contains", "Contains 2", "ROUGE"]
+    (standalone,) = _json_column(db_path, "standalone_runs", "test_type_assignments")
+    assert standalone[0]["label"] == "Exact Match"
+    assert _run(db_path, run_id)["results"]["Contains"]["test_type"] == "Contains"
+
+
+def test_upgrade_lets_a_test_hold_a_type_twice(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "d649f666f728")
+    _seed_for_labels(db_path)
+    command.upgrade(config, "e47a76f674f0")
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO test_type_assignments (test_id, test_type_name, label, config) "
+            "VALUES (?, 'Contains', 'Contains 2', '{\"substring\": \"4471\"}')", (_TEST,))
+        with pytest.raises(sqlite3.IntegrityError):  # the label is the key
+            connection.execute(
+                "INSERT INTO test_type_assignments (test_id, test_type_name, label) "
+                "VALUES (?, 'Contains', 'Contains 2')", (_TEST,))
+
+
+def test_downgrade_restores_the_type_key_and_drops_labels(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "d649f666f728")
+    _seed_for_labels(db_path)
+    command.upgrade(config, "e47a76f674f0")
+
+    command.downgrade(config, "d649f666f728")
+
+    assert _primary_key(db_path) == ["test_id", "test_type_name"]
+    (entry,) = _json_column(db_path, "test_set_entries", "test_type_assignments")
+    assert all("label" not in a for a in entry)
+
+
+def test_downgrade_fails_while_a_test_holds_a_type_twice(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "d649f666f728")
+    _seed_for_labels(db_path)
+    command.upgrade(config, "e47a76f674f0")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO test_type_assignments (test_id, test_type_name, label) "
+            "VALUES (?, 'Contains', 'Contains 2')", (_TEST,))
+
+    with pytest.raises(Exception, match="UNIQUE constraint failed"):
+        command.downgrade(config, "d649f666f728")

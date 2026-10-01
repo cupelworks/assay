@@ -51,12 +51,18 @@ def _mock_successful_claim(session: MagicMock, run: TestRunModel) -> None:
     session.get.return_value = None
 
 
-def _stamped(passed: bool, row: TestTypesModel, score=None, detail=None) -> dict:
+def _assigned(name: str, **fields) -> TestTypeAssignment:
+    """An assignment as a frozen copy holds it: labelled, here by its type's name."""
+    return TestTypeAssignment(name=name, label=name, **fields)
+
+
+def _stamped(passed: bool, row: TestTypesModel, score=None, detail=None,
+             test_type=None) -> dict:
     """What a result looks like once the registry has stamped the engine on it."""
     return {
         "passed": passed, "score": score, "detail": detail,
         "engine": row.engine, "engine_settings": row.engine_settings, "answer_path": None,
-        "rubric": None, "judge": None,
+        "rubric": None, "judge": None, "test_type": test_type,
     }
 
 
@@ -109,8 +115,8 @@ def test_every_type_passing_rolls_up_to_green():
     _mock_successful_claim(session, run)
     resolved = (
         _recorded_entry(),
-        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
-         (TestTypeAssignment(name="Toxicity"), TOXICITY)],
+        [(_assigned("Exact Match"), EXACT_MATCH),
+         (_assigned("Toxicity"), TOXICITY)],
     )
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
@@ -132,7 +138,7 @@ def test_evaluate_is_handed_the_assignment_its_catalogue_row_and_the_entry():
     session = MagicMock()
     _mock_successful_claim(session, run)
     entry = _recorded_entry("the recorded answer")
-    assignment = TestTypeAssignment(name="ROUGE", config={"threshold": "0.7"})
+    assignment = _assigned("ROUGE", config={"threshold": "0.7"})
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=(entry, [(assignment, ROUGE)])), \
             patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"ROUGE"})) as mock_evaluate:
@@ -147,7 +153,7 @@ def test_every_type_failing_rolls_up_to_red():
     run = TestRunModel(id=run_id, status=TestStatus.running)
     session = MagicMock()
     _mock_successful_claim(session, run)
-    resolved = (_recorded_entry(), [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+    resolved = (_recorded_entry(), [(_assigned("Exact Match"), EXACT_MATCH)])
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
             patch(_PATCH_EVALUATE, side_effect=_fake_evaluate(set())):
@@ -163,8 +169,8 @@ def test_mixed_pass_fail_rolls_up_to_amber():
     _mock_successful_claim(session, run)
     resolved = (
         _recorded_entry(),
-        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
-         (TestTypeAssignment(name="Toxicity"), TOXICITY)],
+        [(_assigned("Exact Match"), EXACT_MATCH),
+         (_assigned("Toxicity"), TOXICITY)],
     )
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
@@ -183,8 +189,8 @@ def test_one_assignments_own_evaluator_failure_does_not_fail_the_whole_run():
     _mock_successful_claim(session, run)
     resolved = (
         _recorded_entry(),
-        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
-         (TestTypeAssignment(name="Toxicity"), TOXICITY)],
+        [(_assigned("Exact Match"), EXACT_MATCH),
+         (_assigned("Toxicity"), TOXICITY)],
     )
 
     def fake_evaluate(assignment, catalogue_row, entry, answer, judge=None):
@@ -202,7 +208,8 @@ def test_one_assignments_own_evaluator_failure_does_not_fail_the_whole_run():
     assert run.status == TestStatus.amber
     assert run.error is None
     assert run.results["Exact Match"] == _stamped(True, EXACT_MATCH)
-    assert run.results["Toxicity"] == _stamped(False, TOXICITY, detail="Judge API timed out")
+    assert run.results["Toxicity"] == _stamped(False, TOXICITY, detail="Judge API timed out",
+                                               test_type="Toxicity")
 
 
 def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
@@ -212,8 +219,8 @@ def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
     _mock_successful_claim(session, run)
     resolved = (
         _recorded_entry(),
-        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
-         (TestTypeAssignment(name="Retired Type"), None)],
+        [(_assigned("Exact Match"), EXACT_MATCH),
+         (_assigned("Retired Type"), None)],
     )
 
     def fake_evaluate(assignment, catalogue_row, entry, answer, judge=None):
@@ -230,7 +237,7 @@ def test_a_type_missing_from_the_catalogue_fails_that_type_with_no_engine():
         "passed": False, "score": None,
         "detail": "Test type 'Retired Type' is not in the catalogue",
         "engine": None, "engine_settings": None, "answer_path": None, "rubric": None,
-        "judge": None,
+        "judge": None, "test_type": "Retired Type",
     }
 
 
@@ -243,7 +250,7 @@ def test_a_recorded_answer_is_scored_and_copied_onto_the_run():
     session = MagicMock()
     _mock_successful_claim(session, run)
     resolved = (_recorded_entry("Go to Settings\n"),
-                [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+                [(_assigned("Exact Match"), EXACT_MATCH)])
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
             patch(_PATCH_GET_ANSWER) as get_answer, \
@@ -263,7 +270,7 @@ def test_without_a_recorded_answer_the_application_is_asked_and_its_reply_scored
     session = MagicMock()
     _mock_successful_claim(session, run)
     entry = _recorded_entry(model_output=None)
-    assignment = TestTypeAssignment(name="Exact Match")
+    assignment = _assigned("Exact Match")
     reply = TargetResponse(answer="Go to Settings", status=200, latency_ms=12.5, attempts=1)
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=(entry, [(assignment, EXACT_MATCH)])), \
@@ -287,7 +294,7 @@ def test_an_empty_recorded_answer_is_still_a_recorded_answer():
     run = TestRunModel(id=run_id, status=TestStatus.running)
     session = MagicMock()
     _mock_successful_claim(session, run)
-    resolved = (_recorded_entry(""), [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+    resolved = (_recorded_entry(""), [(_assigned("Exact Match"), EXACT_MATCH)])
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
             patch(_PATCH_GET_ANSWER) as get_answer, \
@@ -306,7 +313,7 @@ def test_a_failed_application_call_is_not_ran_with_the_reason_and_nothing_evalua
     entry = _recorded_entry(model_output=None)
 
     with patch(_PATCH_RESOLVE_CONTENT,
-               return_value=(entry, [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])), \
+               return_value=(entry, [(_assigned("Exact Match"), EXACT_MATCH)])), \
             patch(_PATCH_GET_ANSWER, side_effect=TargetError("Application answered HTTP 503 "
                                                              "after 3 attempt(s)")), \
             patch(_PATCH_EVALUATE) as evaluate:
@@ -327,7 +334,7 @@ def test_a_failed_application_call_is_logged_as_an_error_without_a_second_traceb
 
     with (
         patch(_PATCH_RESOLVE_CONTENT,
-              return_value=(entry, [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])),
+              return_value=(entry, [(_assigned("Exact Match"), EXACT_MATCH)])),
         patch(_PATCH_GET_ANSWER, side_effect=TargetError("No application configured")),
         caplog.at_level(logging.INFO, logger=_LOGGER),
     ):
@@ -351,7 +358,7 @@ def test_settings_saved_from_the_ui_are_the_ones_the_application_is_called_with(
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=(
                 _recorded_entry(model_output=None),
-                [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])), \
+                [(_assigned("Exact Match"), EXACT_MATCH)])), \
             patch(_PATCH_GET_ANSWER, return_value=reply) as get_answer, \
             patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match"})):
         execute_run(run_id, session)
@@ -373,7 +380,7 @@ def test_saved_settings_that_no_longer_validate_are_not_ran_with_the_reason():
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=(
                 _recorded_entry(model_output=None),
-                [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])), \
+                [(_assigned("Exact Match"), EXACT_MATCH)])), \
             patch(_PATCH_GET_ANSWER) as get_answer, \
             patch(_PATCH_EVALUATE) as evaluate:
         execute_run(run_id, session)
@@ -398,7 +405,7 @@ def test_resolve_content_standalone_reads_its_frozen_copy_not_the_live_test():
         id=run_id,
         name="greets the user",
         input="Say hello",
-        test_type_assignments=[{"name": "Exact Match", "config": None}],
+        test_type_assignments=[{"name": "Exact Match", "label": "Exact Match", "config": None}],
     )
     run = TestRunModel(id=run_id, test_id=live_test.id)
     run.test = live_test
@@ -409,7 +416,7 @@ def test_resolve_content_standalone_reads_its_frozen_copy_not_the_live_test():
     entry, resolved = _resolve_content(run, session)
 
     assert entry is frozen_copy
-    assert resolved == [(TestTypeAssignment(name="Exact Match", config=None), EXACT_MATCH)]
+    assert resolved == [(_assigned("Exact Match", config=None), EXACT_MATCH)]
 
 
 def test_resolve_content_test_set_entry():
@@ -417,8 +424,8 @@ def test_resolve_content_test_set_entry():
         id=uuid.uuid4(),
         input="Say hello",
         test_type_assignments=[
-            {"name": "ROUGE", "config": {"threshold": "0.7"}},
-            {"name": "Toxicity", "config": None},
+            {"name": "ROUGE", "label": "ROUGE", "config": {"threshold": "0.7"}},
+            {"name": "Toxicity", "label": "Toxicity", "config": None},
         ],
     )
     run = TestRunModel(id=uuid.uuid4(), test_set_entry_id=entry.id)
@@ -432,8 +439,8 @@ def test_resolve_content_test_set_entry():
 
     assert resolved_entry is entry
     assert resolved == [
-        (TestTypeAssignment(name="ROUGE", config={"threshold": "0.7"}), ROUGE),
-        (TestTypeAssignment(name="Toxicity", config=None), TOXICITY),
+        (_assigned("ROUGE", config={"threshold": "0.7"}), ROUGE),
+        (_assigned("Toxicity", config=None), TOXICITY),
     ]
 
 
@@ -442,8 +449,8 @@ def test_resolve_content_leaves_none_for_a_type_the_catalogue_no_longer_has():
         id=uuid.uuid4(),
         input="Say hello",
         test_type_assignments=[
-            {"name": "Exact Match", "config": None},
-            {"name": "Retired Type", "config": None},
+            {"name": "Exact Match", "label": "Exact Match", "config": None},
+            {"name": "Retired Type", "label": "Retired Type", "config": None},
         ],
     )
     run = TestRunModel(id=uuid.uuid4(), test_set_entry_id=entry.id)
@@ -454,8 +461,8 @@ def test_resolve_content_leaves_none_for_a_type_the_catalogue_no_longer_has():
     _, resolved = _resolve_content(run, session)
 
     assert resolved == [
-        (TestTypeAssignment(name="Exact Match", config=None), EXACT_MATCH),
-        (TestTypeAssignment(name="Retired Type", config=None), None),
+        (_assigned("Exact Match", config=None), EXACT_MATCH),
+        (_assigned("Retired Type", config=None), None),
     ]
 
 
@@ -488,8 +495,8 @@ def test_a_finished_run_logs_what_ran_and_its_outcome(caplog):
     _mock_successful_claim(session, run)
     resolved = (
         _recorded_entry(),
-        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
-         (TestTypeAssignment(name="Toxicity"), TOXICITY)],
+        [(_assigned("Exact Match"), EXACT_MATCH),
+         (_assigned("Toxicity"), TOXICITY)],
     )
 
     with (
@@ -531,7 +538,7 @@ def test_an_evaluator_failure_is_a_warning_with_the_traceback_and_the_engine(cap
     run_id = uuid.uuid4()
     session = MagicMock()
     _mock_successful_claim(session, TestRunModel(id=run_id, status=TestStatus.running))
-    resolved = (_recorded_entry(), [(TestTypeAssignment(name="Toxicity"), TOXICITY)])
+    resolved = (_recorded_entry(), [(_assigned("Toxicity"), TOXICITY)])
 
     with (
         patch(_PATCH_RESOLVE_CONTENT, return_value=resolved),
@@ -542,7 +549,8 @@ def test_an_evaluator_failure_is_a_warning_with_the_traceback_and_the_engine(cap
 
     warning = next(r for r in _records(caplog) if r.levelno == logging.WARNING)
     assert warning.getMessage() == (
-        f"Evaluator Toxicity (engine llm_judge) failed for run {run_id}: judge API timed out"
+        f"Check Toxicity (Toxicity, engine llm_judge) failed for run {run_id}: "
+        "judge API timed out"
     )
     assert warning.exc_info[0] is RuntimeError
     assert (warning.test_type, warning.engine) == ("Toxicity", "llm_judge")
@@ -557,7 +565,7 @@ def _application_run(reply):
     session = MagicMock()
     _mock_successful_claim(session, run)
     resolved = (_recorded_entry(model_output=None),
-                [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+                [(_assigned("Exact Match"), EXACT_MATCH)])
     return run_id, run, session, resolved
 
 
@@ -635,9 +643,9 @@ def _run_with(entry, assignments, reply=None):
 
 def test_a_check_with_an_answer_path_reads_that_part_of_the_reply_the_others_the_answer():
     run, seen = _run_with(_recorded_entry(model_output=None), [
-        (TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
-        (TestTypeAssignment(name="Toxicity", answer_path="$.stop_reason"), TOXICITY),
-        (TestTypeAssignment(name="ROUGE", answer_path="$.result"), ROUGE),
+        (_assigned("Exact Match"), EXACT_MATCH),
+        (_assigned("Toxicity", answer_path="$.stop_reason"), TOXICITY),
+        (_assigned("ROUGE", answer_path="$.result"), ROUGE),
     ], reply=_REPLY)
 
     assert seen == {"Exact Match": "We refunded order 4471.", "Toxicity": "end_turn",
@@ -650,8 +658,8 @@ def test_a_check_with_an_answer_path_reads_that_part_of_the_reply_the_others_the
 
 def test_nothing_at_a_checks_path_fails_that_check_only():
     run, _ = _run_with(_recorded_entry(model_output=None), [
-        (TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
-        (TestTypeAssignment(name="Toxicity", answer_path="$.usage.tokens"), TOXICITY),
+        (_assigned("Exact Match"), EXACT_MATCH),
+        (_assigned("Toxicity", answer_path="$.usage.tokens"), TOXICITY),
     ], reply=_REPLY)
 
     assert run.status == TestStatus.amber
@@ -660,6 +668,7 @@ def test_nothing_at_a_checks_path_fails_that_check_only():
         "detail": "Nothing found at $.usage.tokens in the application's reply",
         "engine": "llm_judge", "engine_settings": TOXICITY.engine_settings,
         "answer_path": "$.usage.tokens", "rubric": None, "judge": None,
+        "test_type": "Toxicity",
     }
 
 
@@ -667,7 +676,7 @@ def test_a_recorded_json_answer_is_read_by_the_checks_path():
     entry = _recorded_entry(model_output='{"category": "refund", "urgency": "high"}')
 
     run, seen = _run_with(entry, [
-        (TestTypeAssignment(name="Exact Match", answer_path="$.category"), EXACT_MATCH),
+        (_assigned("Exact Match", answer_path="$.category"), EXACT_MATCH),
     ])
 
     assert seen == {"Exact Match": "refund"}
@@ -676,7 +685,7 @@ def test_a_recorded_json_answer_is_read_by_the_checks_path():
 
 def test_a_recorded_answer_that_isnt_json_fails_a_check_with_a_path():
     run, _ = _run_with(_recorded_entry(model_output="Go to Settings"), [
-        (TestTypeAssignment(name="Exact Match", answer_path="$.category"), EXACT_MATCH),
+        (_assigned("Exact Match", answer_path="$.category"), EXACT_MATCH),
     ])
 
     assert run.results["Exact Match"]["detail"] == (
@@ -703,8 +712,8 @@ def test_a_run_with_a_judge_check_reads_the_judge_settings_once_and_hands_them_o
     monkeypatch.setattr(settings, "judge_provider", "anthropic")
     monkeypatch.setattr(settings, "judge_model", "claude-sonnet-5-5")
     run_id, run, session, resolved = _judge_run(
-        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
-         (TestTypeAssignment(name="Toxicity"), TOXICITY)])
+        [(_assigned("Exact Match"), EXACT_MATCH),
+         (_assigned("Toxicity"), TOXICITY)])
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
             patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match", "Toxicity"})) \
@@ -719,7 +728,7 @@ def test_a_run_with_a_judge_check_reads_the_judge_settings_once_and_hands_them_o
 
 def test_a_run_without_a_judge_check_never_reads_the_judge_settings():
     run_id, run, session, resolved = _judge_run(
-        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH)])
+        [(_assigned("Exact Match"), EXACT_MATCH)])
 
     with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved), \
             patch(_PATCH_EVALUATE, side_effect=_fake_evaluate({"Exact Match"})) as evaluate:
@@ -732,8 +741,8 @@ def test_a_run_without_a_judge_check_never_reads_the_judge_settings():
 def test_invalid_saved_judge_settings_fail_the_judge_checks_only():
     broken = SettingsModel(section=SettingsSection.judge, value={"provider": "anthropic"})
     run_id, run, session, resolved = _judge_run(
-        [(TestTypeAssignment(name="Exact Match"), EXACT_MATCH),
-         (TestTypeAssignment(name="Toxicity"), TOXICITY)],
+        [(_assigned("Exact Match"), EXACT_MATCH),
+         (_assigned("Toxicity"), TOXICITY)],
         session_get=lambda model, key: broken if key == SettingsSection.judge else None,
     )
 
@@ -748,3 +757,44 @@ def test_invalid_saved_judge_settings_fail_the_judge_checks_only():
     assert toxicity["detail"] == ("The saved judge settings are invalid: model: Required when "
                                   "a provider is set")
     assert toxicity["engine"] == "llm_judge"
+
+
+def test_the_same_type_twice_gives_two_results_keyed_by_label():
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    contains = TestTypesModel(name="Contains", engine="contains",
+                              engine_settings={"case_sensitive": True}, comparison=None)
+    entry = _recorded_entry("Your refund is on its way")
+    resolved = (entry, [
+        (TestTypeAssignment(name="Contains", label="Contains",
+                            config={"substring": "refund"}), contains),
+        (TestTypeAssignment(name="Contains", label="Order number",
+                            config={"substring": "4471"}), contains),
+    ])
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved):
+        execute_run(run_id, session)
+
+    assert run.status == TestStatus.amber
+    assert {label: (r["test_type"], r["passed"]) for label, r in run.results.items()} == {
+        "Contains": ("Contains", True), "Order number": ("Contains", False)}
+
+
+def test_a_copy_without_labels_is_labelled_so_its_results_never_collide():
+    run_id = uuid.uuid4()
+    run = TestRunModel(id=run_id, status=TestStatus.running)
+    session = MagicMock()
+    _mock_successful_claim(session, run)
+    contains = TestTypesModel(name="Contains", engine="contains",
+                              engine_settings={"case_sensitive": True}, comparison=None)
+    resolved = (_recorded_entry("refund"), [
+        (TestTypeAssignment(name="Contains", config={"substring": "refund"}), contains),
+        (TestTypeAssignment(name="Contains", config={"substring": "4471"}), contains),
+    ])
+
+    with patch(_PATCH_RESOLVE_CONTENT, return_value=resolved):
+        execute_run(run_id, session)
+
+    assert sorted(run.results) == ["Contains", "Contains 2"]

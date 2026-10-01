@@ -6,8 +6,8 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.expression import select
 
 from assay.models import TestModel
-from assay.schemas import CreateTestCaseResponse, PaginatedTestCases, TestTypeAssignment
-from assay.services.tests._common import _find_test_by_id_or_404
+from assay.schemas import CreateTestCaseResponse, PaginatedTestCases
+from assay.services.tests._common import _assignment_schema, _find_test_by_id_or_404
 
 
 async def get_all_created_tests(
@@ -47,8 +47,7 @@ async def get_all_created_tests(
                 model_output=test.model_output,
                 expected_output=test.expected_output,
                 test_type_assignments=[
-                    TestTypeAssignment(name=ta.test_type_name, config=ta.config,
-                                   answer_path=ta.answer_path)
+                    _assignment_schema(ta)
                     for ta in test.test_type_assignments
                 ],
             )
@@ -85,8 +84,7 @@ async def get_test_case_by_id(
         model_output=test.model_output,
         expected_output=test.expected_output,
         test_type_assignments=[
-            TestTypeAssignment(name=ta.test_type_name, config=ta.config,
-                                   answer_path=ta.answer_path)
+            _assignment_schema(ta)
             for ta in test.test_type_assignments
         ],
     )

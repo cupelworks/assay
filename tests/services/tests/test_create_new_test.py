@@ -103,8 +103,8 @@ def test_create_new_test_with_test_names():
 
     mock_session.commit.assert_called_once()
     assert response.test_type_assignments == [
-        TestTypeAssignment(name="ROUGE"),
-        TestTypeAssignment(name="BERTScore"),
+        TestTypeAssignment(name="ROUGE", label="ROUGE"),
+        TestTypeAssignment(name="BERTScore", label="BERTScore"),
     ]
 
 
@@ -808,3 +808,51 @@ def test_validate_raises_for_an_answer_path_that_does_not_parse():
 
     assert exc.value.status_code == 422
     assert exc.value.detail.startswith("'Contains' answer_path is not a valid JSONPath: ")
+
+
+# -- labels: a type assigned more than once --
+
+
+def _contains_session():
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(all=MagicMock(return_value=[_catalogue_row(
+        "Contains", [{"key": "substring", "label": "Substring", "kind": "multiline",
+                      "required": True}],
+    )]))
+    return session
+
+
+def test_validate_passes_the_same_type_twice_with_distinct_labels():
+    asyncio.run(_validate_test_type_assignments(_contains_session(), [
+        TestTypeAssignment(name="Contains", config={"substring": "refund"}),
+        TestTypeAssignment(name="Contains", label="Order number", config={"substring": "4471"}),
+    ]))  # no raise: the unlabelled one gets "Contains"
+
+
+def test_validate_raises_for_duplicate_labels_ignoring_case_and_lists_each_once():
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_validate_test_type_assignments(_contains_session(), [
+            TestTypeAssignment(name="Contains", label="Refund", config={"substring": "a"}),
+            TestTypeAssignment(name="Contains", label="refund", config={"substring": "b"}),
+            TestTypeAssignment(name="Contains", label="REFUND", config={"substring": "c"}),
+        ]))
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "Duplicate labels (letter case aside): ['Refund']"
+
+
+def test_create_saves_a_repeated_type_as_separate_labelled_assignments():
+    session = _contains_session()
+    request = CreateTestCaseRequest(name="t", input="q", test_type_assignments=[
+        TestTypeAssignment(name="Contains", config={"substring": "refund"}),
+        TestTypeAssignment(name="Contains", config={"substring": "4471"}),
+    ])
+
+    response = asyncio.run(create_new_test(request, session))
+
+    saved = session.add_all.call_args.args[0]
+    assert [(a.test_type_name, a.label, a.config) for a in saved] == [
+        ("Contains", "Contains", {"substring": "refund"}),
+        ("Contains", "Contains 2", {"substring": "4471"}),
+    ]
+    assert [a.label for a in response.test_type_assignments] == ["Contains", "Contains 2"]

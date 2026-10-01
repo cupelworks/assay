@@ -4,9 +4,11 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped
 
+from assay.assignment_labels import labelled as _labelled
 from assay.models import TestModel, TestSetEntryModel, TestTypeAssignmentModel
-from assay.schemas import CreateTestCaseResponse, ModifyTestCaseRequest, TestTypeAssignment
+from assay.schemas import CreateTestCaseResponse, ModifyTestCaseRequest
 from assay.services.tests._common import (
+    _assignment_schema,
     _check_reference_required_types_have_expected_output_or_422,
     _find_test_by_id_or_404,
     _validate_test_type_assignments,
@@ -96,10 +98,11 @@ async def _apply_test_type_assignments_update(
             TestTypeAssignmentModel(
                 test_id=found.id,
                 test_type_name=assignment.name,
+                label=assignment.label,
                 config=assignment.config,
                 answer_path=assignment.answer_path,
             )
-            for assignment in request.test_type_assignments
+            for assignment in _labelled(request.test_type_assignments)
         ]
 
 
@@ -144,8 +147,7 @@ async def modify_test_by_id(
     effective_assignments = (
         request.test_type_assignments if request.test_type_assignments is not None
         else [
-            TestTypeAssignment(name=a.test_type_name, config=a.config,
-                               answer_path=a.answer_path)
+            _assignment_schema(a)
             for a in found.test_type_assignments
         ]
     )
@@ -170,8 +172,7 @@ async def modify_test_by_id(
         model_output=found.model_output,
         expected_output=found.expected_output,
         test_type_assignments=[
-            TestTypeAssignment(name=a.test_type_name, config=a.config,
-                               answer_path=a.answer_path)
+            _assignment_schema(a)
             for a in found.test_type_assignments
         ],
     )

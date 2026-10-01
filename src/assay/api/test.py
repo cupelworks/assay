@@ -458,6 +458,13 @@ async def update_test(
     | `name`, `input` | set | unchanged (neither can be empty) | unchanged |
     | `test_type_assignments` | replaces the whole list (`[]` removes all) | unchanged | unchanged |
 
+    Each assignment has a `label`, unique within the test (ignoring letter case), so a
+    type can be assigned more than once — two Contains, two JSON Field Equals on different
+    paths. A label sent is kept as it is; one left out is the type's name, numbered past
+    every label in use (`Contains`, `Contains 2`). When replacing the list, send back the
+    labels a GET returned: each check keeps its identity, and a run's `results`, keyed by
+    label, stay comparable across runs. Duplicate labels are a 422.
+
     Clearing `model_output` means runs of this test ask the application under test for
     the answer. Clearing `expected_output` is refused (422) while a type that needs it
     (e.g. Exact Match, ROUGE) stays assigned.

@@ -339,9 +339,14 @@ class TestModel(Base):
         back_populates="test",
         cascade="all, delete-orphan",
     )
+    # Read-only: a type can be assigned more than once, so writing through
+    # this shortcut couldn't say which assignment is meant — and it would
+    # list a repeated type twice. Assignments are written through
+    # test_type_assignments.
     test_types: Mapped[list["TestTypesModel"]] = relationship(
         secondary="test_type_assignments",
         overlaps="test_type_assignments",
+        viewonly=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -368,16 +373,26 @@ class TestTypeAssignmentModel(Base):
     keeps the data human-readable directly in the DB — if test_types is
     reseeded with new UUIDs, no assignment records need to be updated.
 
-    The composite primary key (test_id, test_type_name) naturally enforces
-    uniqueness — a test type can only be assigned once per test.
+    A type can be assigned more than once — two Contains checks, two JSON
+    Field Equals on different paths — so the assignment's own `label`, unique
+    within its test, identifies it: the primary key is (test_id, label). A
+    run's results are keyed by the label too. Keeping the key natural rather
+    than a generated id matters for PATCH, which replaces the whole list in
+    one flush: SQLAlchemy turns "delete (test, label), insert (test, label)"
+    into an update, where a generated id with a unique label would insert
+    before deleting and collide.
     """
 
     __tablename__ = "test_type_assignments"
 
     test_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tests.id", ondelete="CASCADE"),
                                                primary_key=True,)
+    # What the check is called within its test: unique there, ignoring letter
+    # case (checked by the API, not the database). Defaults to the type's
+    # name, numbered when taken ("Contains 2").
+    label: Mapped[str] = mapped_column(Text, primary_key=True)
     # References TestTypesModel.name — stable, human-readable, unique.
-    test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), primary_key=True)
+    test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), nullable=False)
     # Per-assignment config values, keyed by the test type's config_fields[].key.
     # Null if the type has no non-reference config fields. A "reference"-kind
     # field is never stored here — it always resolves to the live test's own

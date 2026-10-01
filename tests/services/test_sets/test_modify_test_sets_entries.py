@@ -154,7 +154,7 @@ def test_general_happy_path_with_test_type_assignments_on_none():
     session.scalar.return_value = TestSetEntryModel(
         id=entry_id,
         test_id=uuid.uuid4(),
-        test_type_assignments=[{"name": "ROUGE", "config": None}],
+        test_type_assignments=[{"name": "ROUGE", "label": "ROUGE", "config": None}],
         name="Old name",
         input="Old input",
         expected_output="Old expected output",
@@ -170,7 +170,8 @@ def test_general_happy_path_with_test_type_assignments_on_none():
         )
 
     assert response.id == entry_id
-    assert response.test_type_assignments == [TestTypeAssignment(name="ROUGE", config=None)]
+    assert response.test_type_assignments == [
+        TestTypeAssignment(name="ROUGE", label="ROUGE", config=None)]
     assert response.name == request.name
     assert response.input == request.input
     assert response.model_output == "Old model output"
@@ -255,7 +256,8 @@ def test_passes_assigning_reference_required_type_with_existing_expected_output(
         )
 
     session.commit.assert_called_once()
-    assert response.test_type_assignments == [TestTypeAssignment(name="Exact Match", config=None)]
+    assert response.test_type_assignments == [
+        TestTypeAssignment(name="Exact Match", label="Exact Match", config=None)]
 
 
 # -- null clears a nullable field, a missing key keeps it --
@@ -323,3 +325,24 @@ def test_raises_422_when_nulling_expected_output_with_reference_required_type_as
     session.commit.assert_not_called()
     assert e.value.status_code == 422
     assert entry.expected_output == "Expected"
+
+
+def test_the_same_type_twice_is_saved_with_distinct_labels():
+    entry = _entry(test_type_assignments=[
+        {"name": "Contains", "label": "Contains 2", "config": {"substring": "4471"}}])
+
+    with patch("assay.services.test_sets.update_entry._validate_test_type_assignments"), \
+            patch("assay.services.test_sets.update_entry."
+                  "_check_reference_required_types_have_expected_output_or_422"):
+        response, _ = _modify(entry, {"test_type_assignments": [
+            {"name": "Contains", "label": "Contains 2", "config": {"substring": "4471"}},
+            {"name": "Contains", "config": {"substring": "refund"}},
+        ]})
+
+    assert entry.test_type_assignments == [
+        {"name": "Contains", "label": "Contains 2", "config": {"substring": "4471"},
+         "answer_path": None},
+        {"name": "Contains", "label": "Contains", "config": {"substring": "refund"},
+         "answer_path": None},
+    ]
+    assert [a.label for a in response.test_type_assignments] == ["Contains 2", "Contains"]

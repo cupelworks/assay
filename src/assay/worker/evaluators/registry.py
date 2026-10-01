@@ -100,6 +100,7 @@ def evaluate(
     )
     result = engine(evaluation)
     return result.model_copy(update={
+        "test_type": assignment.name,
         "engine": catalogue_row.engine,
         "engine_settings": catalogue_row.engine_settings,
         "answer_path": assignment.answer_path,
