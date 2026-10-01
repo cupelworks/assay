@@ -685,3 +685,311 @@ def runs_needed_for_proportions(rate_a: float, rate_b: float, confidence: float,
     numerator = (z_alpha * math.sqrt(2 * pooled * (1 - pooled))
                  + z_beta * math.sqrt(rate_a * (1 - rate_a) + rate_b * (1 - rate_b)))
     return max(2, math.ceil(numerator ** 2 / (rate_a - rate_b) ** 2))
+
+
+# ── the second wave (docs/statistics/dev_notes.md note 24) ───────────────────
+
+
+def regularized_upper_gamma(a: float, x: float) -> float:
+    """Q(a, x) = Γ(a, x) / Γ(a), the regularised upper incomplete gamma
+    function (Numerical Recipes' gammq: the series below a + 1, the continued
+    fraction above)."""
+    if x <= 0:
+        return 1.0
+    log_front = -x + a * math.log(x) - math.lgamma(a)
+    if x < a + 1:
+        term = total = 1 / a
+        denominator = a
+        for _ in range(_MAX_ITERATIONS * 10):
+            denominator += 1
+            term *= x / denominator
+            total += term
+            if abs(term) < abs(total) * 1e-15:
+                break
+        return max(0.0, 1 - total * math.exp(log_front))
+    tiny = 1e-300
+    b = x + 1 - a
+    c = 1 / tiny
+    d = 1 / b
+    h = d
+    for i in range(1, _MAX_ITERATIONS * 10):
+        an = -i * (i - a)
+        b += 2
+        d = an * d + b
+        d = tiny if abs(d) < tiny else d
+        c = b + an / c
+        c = tiny if abs(c) < tiny else c
+        d = 1 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1) < 1e-15:
+            break
+    return min(1.0, math.exp(log_front) * h)
+
+
+def chi_square_sf(statistic: float, df: int) -> float:
+    """P(X >= statistic) for chi-square with df degrees of freedom."""
+    return regularized_upper_gamma(df / 2, statistic / 2)
+
+
+@dataclass(frozen=True)
+class KByTwo:
+    """Pearson's chi-square test of homogeneity on k rows × (pass, fail): do
+    the rows fail at the same rate? min_expected says whether the chi-square
+    approximation can be trusted (every expected count at least 5)."""
+    chi_square: float
+    df: int
+    p_value: float
+    min_expected: float
+
+
+def chi_square_kx2(rows: list[tuple[int, int]]) -> KByTwo:
+    """rows: (passes, fails) per row, each row with at least one count. With
+    no fail (or no pass) anywhere there's nothing to locate: 0, p = 1."""
+    if len(rows) < 2:
+        raise ValueError("A k×2 test needs at least two rows")
+    passes = sum(p for p, _ in rows)
+    fails = sum(f for _, f in rows)
+    total = passes + fails
+    if passes == 0 or fails == 0:
+        return KByTwo(chi_square=0.0, df=len(rows) - 1, p_value=1.0, min_expected=0.0)
+    statistic, min_expected = 0.0, math.inf
+    for p, f in rows:
+        n = p + f
+        for observed, column in ((p, passes), (f, fails)):
+            expected = n * column / total
+            min_expected = min(min_expected, expected)
+            statistic += (observed - expected) ** 2 / expected
+    df = len(rows) - 1
+    return KByTwo(chi_square=statistic, df=df, p_value=chi_square_sf(statistic, df),
+                  min_expected=min_expected)
+
+
+def _two_sided_t_p(t: float, df: float) -> float:
+    return min(1.0, 2 * t_sf(abs(t), df))
+
+
+@dataclass(frozen=True)
+class MeanDifference:
+    """B − A on mean scores (Welch), or the mean of paired differences (the
+    paired t-test): the estimate, its two-sided t interval and p-value."""
+    n_a: int
+    n_b: int
+    mean_a: float
+    mean_b: float
+    difference: float
+    standard_error: float
+    df: float | None
+    t: float | None
+    p_value: float
+    lower: float
+    upper: float
+
+
+def welch(values_a: list[float], values_b: list[float], confidence: float) -> MeanDifference:
+    """Welch's two-sample t-test of B − A (unequal variances, the
+    Welch–Satterthwaite degrees of freedom), two-sided. Each side needs two
+    scores. Two sides with no spread at all are compared exactly: the
+    difference is known, p is 0 when it isn't 0 and 1 when it is."""
+    n_a, n_b = len(values_a), len(values_b)
+    if n_a < 2 or n_b < 2:
+        raise ValueError("Welch's t-test needs at least two scores on each side")
+    mean_a, mean_b = math.fsum(values_a) / n_a, math.fsum(values_b) / n_b
+    var_a = math.fsum((v - mean_a) ** 2 for v in values_a) / (n_a - 1)
+    var_b = math.fsum((v - mean_b) ** 2 for v in values_b) / (n_b - 1)
+    difference = mean_b - mean_a
+    se_squared = var_a / n_a + var_b / n_b
+    if se_squared == 0:
+        return MeanDifference(n_a, n_b, mean_a, mean_b, difference, 0.0, None, None,
+                              0.0 if difference else 1.0, difference, difference)
+    se = math.sqrt(se_squared)
+    df = se_squared ** 2 / ((var_a / n_a) ** 2 / (n_a - 1) + (var_b / n_b) ** 2 / (n_b - 1))
+    t = difference / se
+    critical = t_quantile(1 - (1 - confidence) / 2, df)
+    return MeanDifference(n_a, n_b, mean_a, mean_b, difference, se, df, t,
+                          _two_sided_t_p(t, df), difference - critical * se,
+                          difference + critical * se)
+
+
+def paired_t(differences: list[float], confidence: float) -> MeanDifference:
+    """The paired t-test: the mean of the per-pair differences (B − A) against
+    0, two-sided. Needs two pairs; differences that never vary are exact."""
+    n = len(differences)
+    if n < 2:
+        raise ValueError("A paired t-test needs at least two pairs")
+    mean = math.fsum(differences) / n
+    sd = math.sqrt(math.fsum((d - mean) ** 2 for d in differences) / (n - 1))
+    if sd == 0:
+        return MeanDifference(n, n, 0.0, mean, mean, 0.0, None, None,
+                              0.0 if mean else 1.0, mean, mean)
+    se = sd / math.sqrt(n)
+    df = n - 1
+    t = mean / se
+    critical = t_quantile(1 - (1 - confidence) / 2, df)
+    return MeanDifference(n, n, 0.0, mean, mean, se, df, t, _two_sided_t_p(t, df),
+                          mean - critical * se, mean + critical * se)
+
+
+def _ranks(values: list[float]) -> tuple[list[float], list[int]]:
+    """Average ranks (1-based) of the values, and the size of every tie group."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    ties, i = [], 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = (i + j) / 2 + 1
+        ties.append(j - i + 1)
+        i = j + 1
+    return ranks, ties
+
+
+@dataclass(frozen=True)
+class RankComparison:
+    """Mann–Whitney's U for B against A. `effect` is the probability that a
+    score of B beats one of A (ties count half): 0.5 is no difference."""
+    u_b: float
+    effect: float
+    p_value: float
+    method: str  # "exact" or "normal"
+
+
+def _mann_whitney_exact_sf(u: int, n_a: int, n_b: int) -> float:
+    """P(U >= u) for B's U with no ties, from the exact distribution: N(i, j, s),
+    the arrangements of i scores of A and j of B with U = s, built up by where
+    the largest score is — B's (it beats all i of A's) or A's (U unchanged)."""
+    top = n_a * n_b
+    counts = [[1] + [0] * top for _ in range(n_b + 1)]  # i = 0: U is 0
+    for i in range(1, n_a + 1):
+        new = [[1] + [0] * top] + [[0] * (top + 1) for _ in range(n_b)]
+        for j in range(1, n_b + 1):
+            for s in range(top + 1):
+                new[j][s] = (new[j - 1][s - i] if s >= i else 0) + counts[j][s]
+        counts = new
+    return sum(counts[n_b][u:]) / math.comb(n_a + n_b, n_a)
+
+
+def mann_whitney(values_a: list[float], values_b: list[float]) -> RankComparison:
+    """The Mann–Whitney U test of B against A, two-sided, as scipy's
+    `mannwhitneyu` computes it by default: exact when either side has fewer
+    than 8 scores and nothing ties, otherwise the normal approximation with
+    the tie correction and a continuity correction."""
+    n_a, n_b = len(values_a), len(values_b)
+    if n_a == 0 or n_b == 0:
+        raise ValueError("Mann–Whitney needs scores on both sides")
+    ranks, ties = _ranks(list(values_a) + list(values_b))
+    rank_sum_b = math.fsum(ranks[n_a:])
+    u_b = rank_sum_b - n_b * (n_b + 1) / 2
+    effect = u_b / (n_a * n_b)
+    if min(n_a, n_b) < 8 and all(t == 1 for t in ties):
+        u_high = max(u_b, n_a * n_b - u_b)
+        p = 2 * _mann_whitney_exact_sf(round(u_high), n_a, n_b)
+        return RankComparison(u_b=u_b, effect=effect, p_value=min(1.0, p), method="exact")
+    n = n_a + n_b
+    mean = n_a * n_b / 2
+    tie_term = math.fsum(t ** 3 - t for t in ties) / (n * (n - 1))
+    variance = n_a * n_b / 12 * ((n + 1) - tie_term)
+    if variance <= 0:
+        return RankComparison(u_b=u_b, effect=effect, p_value=1.0, method="normal")
+    u_high = max(u_b, n_a * n_b - u_b)
+    z = (u_high - mean - 0.5) / math.sqrt(variance)
+    return RankComparison(u_b=u_b, effect=effect, p_value=min(1.0, 2 * normal_sf(z)),
+                          method="normal")
+
+
+@dataclass(frozen=True)
+class SignedRank:
+    """Wilcoxon's signed-rank test of paired differences against 0. Zero
+    differences are dropped (Wilcoxon's own rule), `n` is what's left."""
+    n: int
+    statistic: float  # the smaller of the two signed rank sums
+    p_value: float
+    method: str  # "exact" or "normal"
+
+
+def wilcoxon_signed_rank(differences: list[float]) -> SignedRank:
+    """Two-sided. Exact (the distribution of the rank sum by counting subsets)
+    when nothing ties and at most 50 differences are left, as scipy's
+    `wilcoxon` does by default; otherwise the normal approximation with the
+    tie correction, no continuity correction."""
+    nonzero = [d for d in differences if d != 0]
+    n = len(nonzero)
+    if n == 0:
+        return SignedRank(n=0, statistic=0.0, p_value=1.0, method="exact")
+    ranks, ties = _ranks([abs(d) for d in nonzero])
+    plus = math.fsum(r for r, d in zip(ranks, nonzero, strict=True) if d > 0)
+    minus = math.fsum(r for r, d in zip(ranks, nonzero, strict=True) if d < 0)
+    statistic = min(plus, minus)
+    if n <= 50 and all(t == 1 for t in ties):
+        top = n * (n + 1) // 2
+        ways = [0] * (top + 1)
+        ways[0] = 1
+        for rank in range(1, n + 1):
+            for s in range(top, rank - 1, -1):
+                ways[s] += ways[s - rank]
+        p = 2 * sum(ways[: int(statistic) + 1]) / 2 ** n
+        return SignedRank(n=n, statistic=statistic, p_value=min(1.0, p), method="exact")
+    mean = n * (n + 1) / 4
+    variance = n * (n + 1) * (2 * n + 1) / 24 - math.fsum(t ** 3 - t for t in ties) / 48
+    if variance <= 0:
+        return SignedRank(n=n, statistic=statistic, p_value=1.0, method="normal")
+    z = (statistic - mean) / math.sqrt(variance)
+    return SignedRank(n=n, statistic=statistic, p_value=min(1.0, 2 * normal_sf(abs(z))),
+                      method="normal")
+
+
+@dataclass(frozen=True)
+class NonInferiority:
+    """Is B no worse than A by more than `margin`? From Newcombe's interval of
+    B − A with one-sided bounds at the confidence level (the two-sided interval
+    at 2·confidence − 1): `no_worse` when the lower bound is above −margin,
+    `worse` when the upper bound is below it, `inconclusive` otherwise."""
+    lower: float
+    difference: float
+    upper: float
+    verdict: str  # "no_worse", "worse" or "inconclusive"
+
+
+def non_inferiority(passes_a: int, n_a: int, passes_b: int, n_b: int, margin: float,
+                    confidence: float) -> NonInferiority:
+    _check_counts(passes_a, n_a)
+    _check_counts(passes_b, n_b)
+    lower, difference, upper = newcombe_interval(passes_a, n_a, passes_b, n_b,
+                                                 2 * confidence - 1)
+    if lower > -margin:
+        verdict = "no_worse"
+    elif upper < -margin:
+        verdict = "worse"
+    else:
+        verdict = "inconclusive"
+    return NonInferiority(lower=lower, difference=difference, upper=upper, verdict=verdict)
+
+
+def runs_needed_for_non_inferiority(rate_a: float, rate_b: float, margin: float,
+                                    confidence: float, power: float = 0.8) -> int | None:
+    """Runs per batch for a non-inferiority test to show B no worse than A by
+    more than `margin`, with the given power, if the rates are as observed
+    (normal approximation). None when B is already worse than the margin
+    allows: no size would show it no worse."""
+    gap = rate_b - rate_a + margin
+    if gap <= 0:
+        return None
+    variance = rate_a * (1 - rate_a) + rate_b * (1 - rate_b)
+    if variance == 0:
+        return 2
+    z = z_quantile(confidence) + z_quantile(power)
+    return max(2, math.ceil(z ** 2 * variance / gap ** 2))
+
+
+def runs_needed_for_means(spread: float, difference: float, confidence: float,
+                          power: float = 0.8) -> int | None:
+    """Scores per batch for a two-sided two-sample test to see a difference
+    of means, with the given power: n = 2 · ((z₁₋α/₂ + z_power) · σ / δ)²
+    (the normal approximation). σ = 0.1, δ = 0.05 → 63 per batch. None when
+    the difference or the spread is zero."""
+    if difference == 0 or spread <= 0:
+        return None
+    z = z_quantile(1 - (1 - confidence) / 2) + z_quantile(power)
+    return max(2, math.ceil(2 * (z * spread / abs(difference)) ** 2))

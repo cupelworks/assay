@@ -260,3 +260,60 @@ def test_nothing_evaluated_is_not_ran_with_the_first_reason():
     assert compute.summary(status, result, 29, 29, runs) == (
         "Not Ran: no run could be evaluated — No application URL is set")
     assert result.verdicts == {"pass": 0, "fail": 0, "inconclusive": 0, "none": 1}
+
+
+# --- failures by entry ---
+
+
+def _entry_runs(name, outcomes):
+    """outcomes: True pass, False fail, None Not Ran, "e" every check errored."""
+    runs = []
+    for index, outcome in enumerate(outcomes, start=1):
+        if outcome is None:
+            runs.append(_run(index, status=TestStatus.not_ran, error="x"))
+        elif outcome == "e":
+            runs.append(_run(index, status=TestStatus.red, results={"Contains": {
+                "passed": False, "score": None, "detail": "timeout", "errored": True}}))
+        else:
+            runs.append(_run(index, results=_passed("Contains", passed=outcome)))
+    return BatchEntry(entry_id=uuid.uuid4(), test_id=None, test_set_id=None,
+                      test_set_name="s", name=name, recorded_answer=False,
+                      assignments=[TestTypeAssignment(name="Contains", label="Contains")],
+                      runs=runs)
+
+
+def test_failures_concentrated_in_one_entry_are_located():
+    entries = [_entry_runs("steady", [True] * 29), _entry_runs("flaky", [True] * 15 + [False] * 14),
+               _entry_runs("fine", [True] * 28 + [False])]
+
+    diagnostic = compute.failures_by_entry(entries, 0.95)
+
+    assert diagnostic.verdict == "concentrated"
+    assert [e.name for e in diagnostic.entries] == ["flaky", "fine", "steady"]
+    assert diagnostic.reason.startswith("Failures concentrate in some entries (p = ")
+    assert "most in flaky, fine" in diagnostic.reason
+    assert diagnostic.df == 2
+
+
+def test_evenly_spread_failures_are_no_evidence():
+    entries = [_entry_runs(n, [True] * 26 + [False] * 3) for n in ("a", "b", "c")]
+
+    diagnostic = compute.failures_by_entry(entries, 0.95)
+
+    assert diagnostic.verdict == "no_evidence"
+    assert diagnostic.p_value == 1.0
+    assert diagnostic.approximate is True
+
+
+def test_errored_and_not_ran_runs_are_left_out_and_nothing_failing_has_no_verdict():
+    entries = [_entry_runs("a", [True, None, "e"]), _entry_runs("b", [True, True])]
+
+    diagnostic = compute.failures_by_entry(entries, 0.95)
+
+    assert diagnostic.verdict is None
+    assert diagnostic.reason == "No run failed: there are no failures to locate."
+    assert [(e.passed, e.failed) for e in diagnostic.entries] == [(1, 0), (2, 0)]
+
+
+def test_a_single_entry_has_no_diagnostic():
+    assert compute.failures_by_entry([_entry_runs("a", [False])], 0.95) is None

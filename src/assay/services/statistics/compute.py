@@ -22,7 +22,9 @@ from assay.schemas.statistics import (
     CheckCounts,
     CheckResult,
     CheckVerdict,
+    EntryFailures,
     EntryResult,
+    FailuresByEntry,
     GateRuleSchema,
     Interval,
     IntervalMethod,
@@ -95,11 +97,21 @@ def threshold_of(assignment: TestTypeAssignment) -> float | None:
     return value if math.isfinite(value) else None
 
 
-def applies(name: StatisticalTestName, row: TestTypesModel | None) -> tuple[bool, str | None]:
+JUDGE_ENGINE = "llm_judge"
+
+
+def applies(name: StatisticalTestName, row: TestTypesModel | None,
+            recorded_answer: bool = True) -> tuple[bool, str | None]:
     """Whether a batch test gives a check of this type a verdict, and why not
-    (the same rule as the estimate's)."""
+    (the estimate and the result use this one rule)."""
     if name == StatisticalTestName.one_sample_t and (row is None or row.comparison is None):
         return False, "Pass/fail only: a t-test needs a score on a scale"
+    if name == StatisticalTestName.judge_stability:
+        if row is None or row.engine != JUDGE_ENGINE:
+            return False, "Not an LLM judge: judge stability tests the judge's own consistency"
+        if not recorded_answer:
+            return False, ("The answer varies between runs: a changed verdict can't be pinned "
+                           "on the judge")
     return True, None
 
 
@@ -215,6 +227,38 @@ def _t_test(scores: list[float], threshold: float, higher_is_better: bool,
     )
 
 
+def _agreement(passed: int, n: int, target: float, confidence: float) -> Statistic:
+    """Judge stability: the gate on the runs that gave the judge's usual
+    verdict (its majority: pass or fail)."""
+    agreeing = max(passed, n - passed)
+    usual = "pass" if passed >= n - passed else "fail"
+    gate = stats_math.binomial_gate(agreeing, n, target, confidence)
+    rule = GateRuleSchema(times=n, pass_at_least=gate.rule.pass_at_least,
+                          fail_at_most=gate.rule.fail_at_most)
+    interval = make_interval(gate.lower, agreeing / n, gate.upper, IntervalMethod.exact,
+                             confidence, IntervalSides.one)
+    sure, goal = percent(confidence), percent(target)
+    told = f"{agreeing} of {n} runs said {usual}"
+    times_to_decide = message = None
+    if gate.verdict == stats_math.Verdict.passed:
+        reason = (f"{sure} confident the judge agrees with itself at least {goal} of the "
+                  f"time ({told}).")
+    elif gate.verdict == stats_math.Verdict.failed:
+        reason = (f"{sure} confident the judge agrees with itself less than {goal} of the "
+                  f"time ({told}).")
+    else:
+        reason = f"Not proven either way at {n} runs: {told}, against a target of {goal}."
+        times_to_decide = stats_math.binomial_gate_runs_to_decide(agreeing, n, target,
+                                                                  confidence)
+        side = f"at least {goal}" if agreeing / n > target else f"below {goal}"
+        message = _decide_message(times_to_decide, side)
+    return Statistic(
+        verdict=CheckVerdict(gate.verdict.value), reason=reason, n=n, interval=interval,
+        p_value_pass=r4(gate.p_value_pass), p_value_fail=r4(gate.p_value_fail), rule=rule,
+        times_to_decide=times_to_decide, times_to_decide_message=message,
+    )
+
+
 def _no_verdict(reason: str, n: int) -> Statistic:
     return Statistic(verdict=None, reason=reason, n=n, interval=None, p_value_pass=None,
                      p_value_fail=None, rule=None, times_to_decide=None,
@@ -223,13 +267,14 @@ def _no_verdict(reason: str, n: int) -> Statistic:
 
 def check_result(name: StatisticalTestName, parameters: dict[str, float], floor: int,
                  stopped: bool, assignment: TestTypeAssignment, row: TestTypesModel | None,
-                 runs: list[BatchRun]) -> CheckResult:
+                 runs: list[BatchRun], recorded_answer: bool = True) -> CheckResult:
     confidence = parameters["confidence"]
     series, counts = fold(runs, assignment.label)
     decided = [p for p in series if p.passed is not None]
     passed = counts.passed
     is_gate = name == StatisticalTestName.binomial_gate
-    target = parameters["target"] if is_gate else None
+    is_stability = name == StatisticalTestName.judge_stability
+    target = parameters["target"] if is_gate or is_stability else None
 
     pass_rate = None
     if decided:
@@ -254,10 +299,10 @@ def check_result(name: StatisticalTestName, parameters: dict[str, float], floor:
                                   max=r4(s.maximum), p10=r4(s.p10), p25=r4(s.p25),
                                   median=r4(s.median), p75=r4(s.p75), p90=r4(s.p90))
 
-    does_apply, why_not = applies(name, row)
-    statistic = None
+    does_apply, why_not = applies(name, row, recorded_answer)
+    statistic = agreement = None
     if does_apply:
-        n = len(decided) if is_gate else len(scores)
+        n = len(scores) if name == StatisticalTestName.one_sample_t else len(decided)
         if n == 0:
             statistic = _no_verdict(
                 "No run decided this check: every one errored or was Not Ran.", 0)
@@ -268,6 +313,9 @@ def check_result(name: StatisticalTestName, parameters: dict[str, float], floor:
                 "verdict. The rate and range above describe what ran.", n)
         elif is_gate:
             statistic = _gate(passed, n, target, confidence)
+        elif is_stability:
+            statistic = _agreement(passed, n, target, confidence)
+            agreement = statistic.interval
         elif threshold is None:
             statistic = _no_verdict(
                 "The check's threshold isn't a number: there's nothing to test the mean "
@@ -279,7 +327,8 @@ def check_result(name: StatisticalTestName, parameters: dict[str, float], floor:
         label=assignment.label, test_type=assignment.name, applies=does_apply,
         reason=why_not, scale=scale, threshold=threshold,
         comparison=row.comparison.value if scale else None, target=target, counts=counts,
-        pass_rate=pass_rate, scores=summary, statistic=statistic, series=series,
+        pass_rate=pass_rate, agreement=agreement, scores=summary, statistic=statistic,
+        series=series,
     )
 
 
@@ -291,6 +340,61 @@ def strip(runs: list[BatchRun]) -> list[RunStripPoint]:
                           status=run.status.value) for run in runs]
 
 
+def run_passed(run: BatchRun) -> bool | None:
+    """A run's outcome over its decided checks: True when every one passed,
+    False when one failed, None when it decided nothing (Not Ran, or every
+    check errored) — errored checks aren't failures of the application."""
+    if run.status == TestStatus.not_ran:
+        return None
+    decided = [r for r in (run.results or {}).values() if not r.get("errored")]
+    if not decided:
+        return None
+    return all(r.get("passed") for r in decided)
+
+
+def failures_by_entry(entries: list[BatchEntry], confidence: float) -> FailuresByEntry | None:
+    """Do failures concentrate in some entries? A k×2 chi-square on entries ×
+    (passed, failed) runs. None for a single entry."""
+    if len(entries) < 2:
+        return None
+    rows = []
+    for entry in entries:
+        outcomes = [o for o in (run_passed(run) for run in entry.runs) if o is not None]
+        rows.append(EntryFailures(entry_id=entry.entry_id, name=entry.name,
+                                  test_set_name=entry.test_set_name,
+                                  passed=sum(outcomes), failed=len(outcomes) - sum(outcomes)))
+    counted = [row for row in rows if row.passed + row.failed]
+    worst = sorted(rows, key=lambda r: (-(r.failed / (r.passed + r.failed or 1)), r.name))
+    failed = sum(r.failed for r in counted)
+    empty = FailuresByEntry(verdict=None, reason="", chi_square=None, df=None, p_value=None,
+                            approximate=False, entries=worst)
+    if len(counted) < 2:
+        empty.reason = "Fewer than two entries had a run that decided anything."
+        return empty
+    if failed == 0:
+        empty.reason = "No run failed: there are no failures to locate."
+        return empty
+    if failed == sum(r.passed + r.failed for r in counted):
+        empty.reason = "Every run failed: the failures are everywhere."
+        return empty
+    test = stats_math.chi_square_kx2([(r.passed, r.failed) for r in counted])
+    approximate = test.min_expected < 5
+    if test.p_value <= 1 - confidence:
+        names = [r.name for r in worst if r.failed][:3]
+        verdict = "concentrated"
+        reason = (f"Failures concentrate in some entries (p = {test.p_value:.4g}): most in "
+                  f"{', '.join(names)}.")
+    else:
+        verdict = "no_evidence"
+        reason = (f"No evidence that failures concentrate in particular entries "
+                  f"(p = {test.p_value:.4g}).")
+    if approximate:
+        reason = reason[:-1] + " — some expected counts are under 5, so p is approximate."
+    return FailuresByEntry(verdict=verdict, reason=reason, chi_square=r4(test.chi_square),
+                           df=test.df, p_value=r4(test.p_value), approximate=approximate,
+                           entries=worst)
+
+
 def compute(name: StatisticalTestName, parameters: dict[str, float], floor: int,
             stopped: bool, entries: list[BatchEntry], types: dict[str, TestTypesModel],
             computed_at) -> BatchResult:
@@ -298,7 +402,7 @@ def compute(name: StatisticalTestName, parameters: dict[str, float], floor: int,
     results = []
     for entry in entries:
         checks = [check_result(name, parameters, floor, stopped, assignment,
-                               types.get(assignment.name), entry.runs)
+                               types.get(assignment.name), entry.runs, entry.recorded_answer)
                   for assignment in entry.assignments]
         results.append(EntryResult(
             entry_id=entry.entry_id, test_id=entry.test_id, test_set_id=entry.test_set_id,
@@ -318,6 +422,7 @@ def compute(name: StatisticalTestName, parameters: dict[str, float], floor: int,
         computed_at=computed_at, checks_total=checks_total,
         checks_applicable=sum(verdicts.values()), verdicts=verdicts, summary="",
         entries=results,
+        failures_by_entry=failures_by_entry(entries, parameters["confidence"]),
     )
 
 

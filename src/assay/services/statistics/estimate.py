@@ -21,6 +21,7 @@ from assay.schemas.statistics import (
     StatisticalTestName,
     Warning_,
 )
+from assay.services.statistics import compute
 from assay.services.statistics._scope import ResolvedScope, ScopeEntry, resolve_scope
 from assay.services.statistics.catalogue import (
     _invalid,
@@ -33,10 +34,21 @@ from assay.target_settings import resolve_target_settings
 
 def applies(name: StatisticalTestName, scope: ResolvedScope, entry: ScopeEntry,
             assignment: TestTypeAssignment) -> tuple[bool, str | None]:
-    """Whether a batch test gives this check a verdict, and why not."""
-    if name == StatisticalTestName.one_sample_t and not scope.is_scored(assignment):
-        return False, "Pass/fail only: a t-test needs a score on a scale"
-    return True, None
+    """Whether a batch test gives this check a verdict, and why not: the
+    result's own rule (compute.applies), so the estimate never promises a
+    verdict the result won't give."""
+    return compute.applies(name, scope.types.get(assignment.name), entry.recorded_answer)
+
+
+_NOTHING_APPLIES = {
+    StatisticalTestName.one_sample_t:
+        "None of this scope's checks is scored on a scale: a t-test needs ROUGE, BLEU, "
+        "METEOR, BERTScore or Cosine Similarity",
+    StatisticalTestName.judge_stability:
+        "None of this scope's checks is an LLM judge on a recorded answer: judge stability "
+        "needs one (Correctness, Relevance, Bias, Toxicity or Hallucination, on an entry "
+        "with a recorded answer)",
+}
 
 
 async def estimate_batch(request: EstimateRequest, session: AsyncSession) -> Estimate:
@@ -77,9 +89,7 @@ async def build_estimate(name: StatisticalTestName, parameters: dict[str, float]
             recorded_answer=entry.recorded_answer, checks=checks,
         ))
     if applicable == 0:
-        raise _invalid([(("statistical_test",),
-                         "None of this scope's checks is scored on a scale: a t-test needs "
-                         "ROUGE, BLEU, METEOR, BERTScore or Cosine Similarity")])
+        raise _invalid([(("statistical_test",), _NOTHING_APPLIES[name])])
     check_times(times, scope.runs_per_time, size.floor, name, parameters)
 
     application_per_time = sum(not entry.recorded_answer for entry in scope.entries)

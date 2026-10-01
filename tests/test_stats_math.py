@@ -276,3 +276,109 @@ def test_the_module_imports_nothing_outside_the_standard_library():
     imported |= {node.module.split(".")[0] for node in ast.walk(tree)
                  if isinstance(node, ast.ImportFrom) and node.module}
     assert imported <= {"math", "dataclasses", "enum", "statistics"}
+
+
+# --- the second wave: reference values from scipy 1.x / statsmodels ---
+
+
+@pytest.mark.parametrize("statistic,df,expected", [
+    (3.84, 1, 0.05004352124870519), (10.0, 4, 0.04042768199451279),
+    (0.5, 3, 0.9188914116546758), (25.0, 9, 0.002971180485917624),
+    (100.0, 50, 3.454931382984871e-05),
+])
+def test_chi_square_sf_matches_scipy(statistic, df, expected):
+    assert m.chi_square_sf(statistic, df) == pytest.approx(expected, rel=1e-8)
+
+
+def test_k_by_2_matches_scipys_chi2_contingency():
+    result = m.chi_square_kx2([(20, 9), (28, 1), (25, 4)])
+
+    assert result.chi_square == pytest.approx(8.342465753424658)
+    assert result.p_value == pytest.approx(0.015433221131026959)
+    assert result.df == 2
+
+
+def test_k_by_2_with_nothing_failing_has_nothing_to_locate():
+    assert m.chi_square_kx2([(29, 0), (29, 0)]).p_value == 1.0
+
+
+_A = [0.61, 0.58, 0.66, 0.55, 0.63, 0.6, 0.57, 0.64, 0.59, 0.62]
+_B = [0.7, 0.65, 0.72, 0.61, 0.69, 0.74, 0.66, 0.7]
+
+
+def test_welch_matches_scipys_ttest_ind():
+    result = m.welch(_A, _B, 0.95)
+
+    assert result.t == pytest.approx(4.325077064478218)
+    assert result.p_value == pytest.approx(0.0007712979247125992)
+    assert result.df == pytest.approx(13.391013331563231)
+    assert (result.lower, result.upper) == pytest.approx((0.0395309472886767, 0.1179690527113235))
+
+
+def test_welch_on_two_sides_without_spread_is_exact():
+    result = m.welch([0.4] * 5, [0.6] * 5, 0.95)
+
+    assert (result.difference, result.p_value) == (pytest.approx(0.2), 0.0)
+
+
+def test_paired_t_matches_scipys_ttest_1samp():
+    result = m.paired_t([0.1, 0.05, -0.02, 0.08, 0.12, 0.0, 0.03], 0.95)
+
+    assert result.t == pytest.approx(2.6279005796420702)
+    assert result.p_value == pytest.approx(0.03916955027562465)
+    assert result.lower == pytest.approx(0.0035419877842360267)
+
+
+@pytest.mark.parametrize("a,b,method,u,p", [
+    ([1.2, 3.4, 2.2, 5.1, 0.3], [4.4, 6.1, 5.5, 3.9, 7.0, 2.8], "exact", 26.0,
+     0.05194805194805195),
+    (_A, _B, "normal", 74.0, 0.002871479297644031),
+    ([0.5] * 5 + [0.7] * 6, [0.7] * 8 + [0.9] * 4, "normal", 108.0, 0.003399606849835931),
+])
+def test_mann_whitney_matches_scipys_mannwhitneyu(a, b, method, u, p):
+    result = m.mann_whitney(a, b)
+
+    assert (result.method, result.u_b) == (method, u)
+    assert result.p_value == pytest.approx(p)
+
+
+@pytest.mark.parametrize("differences,method,statistic,p", [
+    ([0.1, 0.05, -0.02, 0.08, 0.12, 0.03, 0.07, -0.04], "exact", 4.0, 0.0546875),
+    ([0.1, 0.1, -0.05, 0.2, 0.0, 0.1, 0.15, -0.1, 0.05, 0.3], "normal", 6.0,
+     0.04839420715740645),
+])
+def test_wilcoxon_matches_scipys_wilcoxon(differences, method, statistic, p):
+    result = m.wilcoxon_signed_rank(differences)
+
+    assert (result.method, result.statistic) == (method, statistic)
+    assert result.p_value == pytest.approx(p)
+
+
+def test_six_same_sign_differences_are_the_least_that_can_conclude():
+    # note 5: the maths can conclude from 6 (p = 0.031)
+    assert m.wilcoxon_signed_rank([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]).p_value == pytest.approx(
+        0.03125)
+    assert m.wilcoxon_signed_rank([0.1, 0.2, 0.3, 0.4, 0.5]).p_value == pytest.approx(0.0625)
+
+
+def test_non_inferiority_uses_newcombes_one_sided_bounds():
+    result = m.non_inferiority(27, 29, 25, 29, 0.1, 0.95)
+
+    # statsmodels' newcomb interval at alpha 0.10
+    assert (result.lower, result.upper) == pytest.approx(
+        (-0.21273981254782617, 0.07178475833455553))
+    assert result.verdict == "inconclusive"
+    assert m.non_inferiority(29, 29, 29, 29, 0.15, 0.95).verdict == "no_worse"
+    assert m.non_inferiority(29, 29, 10, 29, 0.1, 0.95).verdict == "worse"
+
+
+def test_runs_needed_for_non_inferiority():
+    # (z.95 + z.8)² · (0.09 + 0.09) / 0.05² = 445.2
+    assert m.runs_needed_for_non_inferiority(0.9, 0.9, 0.05, 0.95) == 446
+    assert m.runs_needed_for_non_inferiority(0.9, 0.7, 0.1, 0.95) is None
+
+
+def test_runs_needed_for_means():
+    # 2 · ((1.96 + 0.8416) · 0.1 / 0.05)² = 62.8
+    assert m.runs_needed_for_means(0.1, 0.05, 0.95) == 63
+    assert m.runs_needed_for_means(0.1, 0.0, 0.95) is None

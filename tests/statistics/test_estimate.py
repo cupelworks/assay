@@ -22,7 +22,8 @@ def test_the_catalogue_lists_each_test_with_its_parameters_and_floor(db):
     catalogue = db.client.get("/statistics/tests").json()
 
     by_id = {item["id"]: item for item in catalogue["items"]}
-    assert {"binomial_gate", "one_sample_t", "pass_rates"} <= set(by_id)
+    assert set(by_id) == {"binomial_gate", "one_sample_t", "judge_stability", "pass_rates",
+                          "no_worse", "mean_scores", "score_ranks", "paired_entries"}
     gate = by_id["binomial_gate"]
     assert (gate["kind"], gate["reads"], gate["applies_to"]) == (
         "batch", "pass_fail", "every_check")
@@ -35,7 +36,8 @@ def test_the_catalogue_lists_each_test_with_its_parameters_and_floor(db):
 
 
 def test_the_catalogues_worked_examples_are_what_the_estimate_computes(db):
-    test = db.test(checks=[ROUGE])
+    # a recorded answer with a scored and a judge check: every batch test applies
+    test = db.test(checks=[ROUGE, TOXICITY])
     for item in db.client.get("/statistics/tests").json()["items"]:
         if item["kind"] != "batch":
             continue
@@ -291,3 +293,32 @@ def test_the_estimate_creates_nothing(db):
 
     assert db.client.get(f"/runs/standalone/{test['id']}/test-runs").json()["total"] == 0
     assert db.dispatched == []
+
+
+def test_judge_stability_applies_to_judge_checks_of_recorded_answers_only(db):
+    recorded = db.test(name="recorded", checks=[CONTAINS, TOXICITY])
+    asks = db.test(name="asks", model_output=None, checks=[TOXICITY])
+    test_set = db.test_set("judged", [recorded, asks])
+
+    estimate = _estimate(db, test_set_id=test_set["id"],
+                         statistical_test="judge_stability").json()
+
+    checks = {(e["name"], c["label"]): (c["applies"], c["reason"])
+              for e in estimate["entries"] for c in e["checks"]}
+    assert checks == {
+        ("asks", "Toxicity"): (False, "The answer varies between runs: a changed verdict "
+                                      "can't be pinned on the judge"),
+        ("recorded", "Contains"): (False, "Not an LLM judge: judge stability tests the "
+                                          "judge's own consistency"),
+        ("recorded", "Toxicity"): (True, None),
+    }
+    assert estimate["floor"] == 29
+
+
+def test_judge_stability_needs_a_judge_check_on_a_recorded_answer(db):
+    test = db.test()
+
+    response = _estimate(db, test_id=test["id"], statistical_test="judge_stability")
+
+    assert response.status_code == 422
+    assert "judge stability needs one" in _messages(response)[0][1]

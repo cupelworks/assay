@@ -25,7 +25,12 @@ class StatisticalTestName(StrEnum):
     are run as a batch and which compare two batches."""
     binomial_gate = "binomial_gate"
     one_sample_t = "one_sample_t"
+    judge_stability = "judge_stability"
     pass_rates = "pass_rates"
+    no_worse = "no_worse"
+    mean_scores = "mean_scores"
+    score_ranks = "score_ranks"
+    paired_entries = "paired_entries"
 
 
 class StatisticalTestKind(StrEnum):
@@ -583,14 +588,20 @@ class CheckResult(BaseModel):
                     "for pass/fail checks.",
     )
     target: float | None = Field(
-        description="The binomial gate's target pass rate, for a line on a pass-rate chart; "
-                    "null under other tests.",
+        description="The binomial gate's target pass rate (or judge stability's target "
+                    "agreement), for a line on the chart; null under other tests.",
     )
     counts: CheckCounts
     pass_rate: Interval | None = Field(
         description="The share of evaluated runs that passed, with its range: under the gate, "
                     "the two exact one-sided bounds the verdict uses; otherwise Wilson's "
                     "two-sided interval. Null with no evaluated run.",
+    )
+    agreement: Interval | None = Field(
+        default=None,
+        description="Judge stability only: the share of runs that gave the judge's usual "
+                    "verdict, with the two exact one-sided bounds the verdict uses. Null "
+                    "under other tests.",
     )
     scores: ScoreSummaryOut | None = Field(
         description="The scores' distribution, for a scored check with at least one score; "
@@ -625,6 +636,37 @@ class EntryResult(BaseModel):
     )
 
 
+class EntryFailures(BaseModel):
+    entry_id: uuid.UUID | None
+    name: str
+    test_set_name: str | None
+    passed: int = Field(description="Runs in which every decided check passed.")
+    failed: int = Field(description="Runs in which at least one decided check failed.")
+
+
+class FailuresByEntry(BaseModel):
+    """Do failures concentrate in some entries, or spread evenly? Pearson's
+    chi-square on entries × (passed, failed) runs — a diagnostic beside the
+    verdicts, for a set or plan batch (docs/statistics/dev_notes.md note 24)."""
+    verdict: str | None = Field(
+        description="`concentrated`: some entries fail significantly more than others — "
+                    "look at them first. `no_evidence`: nothing says the failures cluster. "
+                    "Null when there's nothing to locate (no run failed, or every run did).",
+    )
+    reason: str = Field(description="In one sentence, naming the entries that fail most.")
+    chi_square: float | None
+    df: int | None = Field(description="Entries − 1.")
+    p_value: float | None
+    approximate: bool = Field(
+        description="True when an expected count is under 5: the p-value is then only "
+                    "approximate.",
+    )
+    entries: list[EntryFailures] = Field(
+        description="Each entry's runs that passed and failed (Not Ran runs, and runs whose "
+                    "every check errored, left out), worst first.",
+    )
+
+
 class BatchResult(BaseModel):
     """The statistics, computed once every run has finished and stored with
     the batch: later reads return exactly this."""
@@ -637,6 +679,11 @@ class BatchResult(BaseModel):
     )
     summary: str = Field(description="The batch's outcome in one sentence.")
     entries: list[EntryResult]
+    failures_by_entry: FailuresByEntry | None = Field(
+        default=None,
+        description="For a batch of two or more entries: whether failures concentrate in "
+                    "some of them. Null for a single test.",
+    )
 
 
 class BatchSummary(BaseModel):
@@ -712,9 +759,13 @@ class ComparisonRequest(BaseModel):
 
 
 class ComparisonVerdictName(StrEnum):
+    """`better` / `worse` / `no_difference` for the difference tests;
+    `no_worse` / `worse` / `inconclusive` for the non-inferiority test."""
     better = "better"
     worse = "worse"
     no_difference = "no_difference"
+    no_worse = "no_worse"
+    inconclusive = "inconclusive"
 
 
 class ComparisonSide(BaseModel):
@@ -723,6 +774,11 @@ class ComparisonSide(BaseModel):
     pass_rate: Interval | None = Field(
         description="The batch's pass rate for this check with Wilson's two-sided interval; "
                     "null with no evaluated run.",
+    )
+    scores: ScoreSummaryOut | None = Field(
+        default=None,
+        description="The scores' distribution, for a scored check: two box plots side by "
+                    "side. Null for a pass/fail check.",
     )
     series: list[SeriesPoint] | None = Field(
         description="The batch's runs for this check, by time — draw the two strips or "
@@ -737,9 +793,17 @@ class CheckComparison(BaseModel):
     a: ComparisonSide
     b: ComparisonSide
     difference: Interval | None = Field(
-        description="B's pass rate minus A's (`point`), with Newcombe's two-sided score "
-                    "interval: the one bar with whiskers to draw, and what the verdict is "
-                    "read from. Null when either side has no evaluated run.",
+        description="B − A with the interval the verdict is read from: the one bar with "
+                    "whiskers to draw. Pass rates (`pass_rates`, `paired_entries`): Newcombe's "
+                    "two-sided interval; `no_worse`: Newcombe's one-sided bounds (`sides: "
+                    "one`); `mean_scores`: Welch's t interval of the mean scores. Null for "
+                    "`score_ranks` (ranks have no difference to draw: see `effect`), or when "
+                    "either side has nothing to compare.",
+    )
+    effect: float | None = Field(
+        default=None,
+        description="`score_ranks` only: the probability that a score of B beats one of A "
+                    "(ties count half). 0.5 is no difference; 1 is B always higher.",
     )
     verdict: ComparisonVerdictName | None = Field(
         description="`better`: the interval lies above 0 — B passes more often. `worse`: "
@@ -753,12 +817,14 @@ class CheckComparison(BaseModel):
                     "expected count is at least 5, Fisher's exact otherwise.",
     )
     p_value_method: str | None = Field(
-        description="`chi_square` or `fisher_exact` — name it in the caption.",
+        description="How `p_value` was computed — name it in the caption: `chi_square` or "
+                    "`fisher_exact` (pass rates), `welch`, `mann_whitney_exact` or "
+                    "`mann_whitney_normal`.",
     )
     times_to_decide: int | None = Field(
-        description="With `no_difference` and different rates: about how many times *each* "
-                    "of two new batches would need to tell these rates apart, 80% of the "
-                    "time. Null otherwise.",
+        description="When undecided (`no_difference`, or `inconclusive` for `no_worse`): "
+                    "about how many times *each* of two new batches would need to decide it, "
+                    "80% of the time, if the checks behave as they did here. Null otherwise.",
     )
     times_to_decide_message: str | None = Field(
         description="The same as a sentence.",
@@ -787,15 +853,51 @@ class Unmatched(BaseModel):
     only_in: UnmatchedSide = Field(description="The batch it's in: `a` or `b`.")
 
 
+class Pair(BaseModel):
+    """One (entry, check) under both batches: a point of the paired chart."""
+    entry_id: uuid.UUID | None
+    name: str
+    label: str
+    rate_a: float
+    rate_b: float
+    difference: float = Field(description="rate_b − rate_a.")
+
+
+class PairedComparison(BaseModel):
+    """`paired_entries`: every (entry, check) both batches evaluated, paired
+    with itself — one verdict for the whole scope."""
+    n_pairs: int
+    pairs: list[Pair] = Field(description="Every pair, in entry then label order.")
+    difference: Interval | None = Field(
+        description="The mean per-pair difference B − A with the paired t interval "
+                    "(two-sided): what the verdict is read from.",
+    )
+    verdict: ComparisonVerdictName | None
+    reason: str
+    p_value: float | None = Field(description="The paired t-test's two-sided p-value.")
+    p_value_wilcoxon: float | None = Field(
+        description="Wilcoxon's signed-rank p-value, beside it: it doesn't assume the "
+                    "differences are bell-shaped. When the two disagree, say so.",
+    )
+    wilcoxon_method: str | None = Field(description="`exact` or `normal`.")
+
+
 class ComparisonResult(BaseModel):
     verdicts: dict[str, int] = Field(
-        description="Checks by verdict: `better`, `worse`, `no_difference`, and `none`.",
+        description="Checks by verdict: `better`, `worse`, `no_difference`, `no_worse`, "
+                    "`inconclusive`, and `none` (no verdict). For `paired_entries`, the one "
+                    "paired verdict.",
     )
     summary: str = Field(description="The comparison in one sentence.")
     entries: list[EntryComparison]
     unmatched: list[Unmatched] = Field(
         description="What only one batch has: not compared, listed so nothing goes missing "
                     "silently.",
+    )
+    paired: PairedComparison | None = Field(
+        default=None,
+        description="`paired_entries` only: the verdict over every pair. The per-check items "
+                    "above then carry each pair's numbers without a verdict of their own.",
     )
 
 

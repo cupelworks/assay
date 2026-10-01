@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api import _statistics_examples as computed
 from assay.db import get_session
 from assay.schemas.statistics import (
     BatchDetails,
@@ -19,6 +20,7 @@ from assay.schemas.statistics import (
     Estimate,
     EstimateRequest,
     StatisticalTestCatalogue,
+    StatisticalTestName,
 )
 from assay.services.statistics import (
     catalogue,
@@ -179,11 +181,23 @@ async def list_statistical_tests() -> StatisticalTestCatalogue:  # pragma: no co
     /statistics/estimate`) shows the cost before anything is created.
 
     Two kinds of test:
-    - **`batch`** — run as a batch (`POST /statistics/batches`): the **binomial gate**
-      (does each check pass at least a target share of the time?) and the **one-sample
-      t-test** (is each scored check's average on the passing side of its threshold?).
+    - **`batch`** — run as a batch (`POST /statistics/batches`):
+      - **binomial gate** — does each check pass at least a target share of the time?
+      - **one-sample t-test** — is each scored check's average on the passing side of its
+        threshold?
+      - **judge stability** — does each LLM judge give the same verdict on the same recorded
+        answer at least a target share of the time? (judge checks of recorded answers only)
     - **`comparison`** — reads two finished batches of the same scope (`POST
-      /statistics/comparisons`): **pass rates, A against B** (did my change help?).
+      /statistics/comparisons`), A the baseline and B the change:
+      - **pass rates, A against B** — did a check pass more or less often?
+      - **no worse than A** — is B at most a margin worse? The release-gate question: a
+        difference test can't prove "no difference", this proves "at most 5 points worse".
+      - **mean scores** (Welch) and **score ranks** (Mann–Whitney) — did a scored check's
+        scores move? Ranks when scores bunch against 0 or 1.
+      - **paired by entry** — on the same entries, did B do better? One verdict over every
+        (entry, check) pair: the strongest "did my change help?" for a test set.
+
+    `wave` says which build wave a test came in (1 or 2); both are available.
 
     **The floor**, and why there is one: some questions can't be answered below a certain
     size, whatever happens. If a check really passed exactly 90% of the time, 29 passes in
@@ -251,6 +265,13 @@ async def list_statistical_tests() -> StatisticalTestCatalogue:  # pragma: no co
                                        "None of this scope's checks is scored on a scale: a "
                                        "t-test needs ROUGE, BLEU, METEOR, BERTScore or "
                                        "Cosine Similarity"))},
+                "no_judge_check": {"summary": "Judge stability with no judge to test", "value":
+                    _validation_error((["body", "statistical_test"],
+                                       "None of this scope's checks is an LLM judge on a "
+                                       "recorded answer: judge stability needs one "
+                                       "(Correctness, Relevance, Bias, Toxicity or "
+                                       "Hallucination, on an entry with a recorded "
+                                       "answer)"))},
                 "scope": {"summary": "Not exactly one scope", "value":
                     _validation_error((["body"], "Value error, Give exactly one of test_id, "
                                                  "test_set_id or test_plan_id"))},
@@ -669,6 +690,25 @@ _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
                                                 "entries": [{
                                                     **_BATCH_FINISHED["result"]["entries"][0],
                                                     "checks": [_T_CHECK]}]}}},
+                "judge_stability": {
+                    "summary": "Judge stability: the judge agreed with itself 29 times of 29",
+                    "value": {**_BATCH_FINISHED, "statistical_test": "judge_stability",
+                              "status": "Passed", "summary": "Passed: the check is proven.",
+                              "result": {**_BATCH_FINISHED["result"], "checks_total": 1,
+                                         "checks_applicable": 1,
+                                         "verdicts": {"pass": 1, "fail": 0,
+                                                      "inconclusive": 0, "none": 0},
+                                         "summary": "Passed: the check is proven.",
+                                         "entries": [{
+                                             **_BATCH_FINISHED["result"]["entries"][0],
+                                             "recorded_answer": True,
+                                             "checks": [computed.judge_stability_check()]}]}}},
+                "failures_by_entry": {
+                    "summary": "A set's result with failures concentrated in some entries "
+                               "(entries cut to one)",
+                    "value": {**_BATCH_FINISHED, "result": {
+                        **_BATCH_FINISHED["result"],
+                        "failures_by_entry": computed.failures_by_entry()}}},
                 "stopped": {"summary": "Stopped early, below the floor: no verdicts",
                             "value": {**_BATCH_STOPPED, "result": None}},
                 "no_series": {"summary": "With ?series=false",
@@ -815,6 +855,42 @@ _COMPARISON = {
     },
 }
 
+def _comparison_with(test: str, parameters: dict, checks: list[dict], verdicts: dict,
+                     summary: str, paired: dict | None = None) -> dict:
+    counts = {"better": 0, "worse": 0, "no_difference": 0, "no_worse": 0,
+              "inconclusive": 0, "none": 0} | verdicts
+    return {**_COMPARISON, "statistical_test": test, "parameters": parameters,
+            "summary": summary,
+            "result": {"verdicts": counts, "summary": summary,
+                       "entries": [{**_COMPARISON["result"]["entries"][0], "checks": checks}],
+                       "unmatched": [], "paired": paired}}
+
+
+_PAIRED = computed.paired_comparison()
+_COMPARISON_EXAMPLES = {
+    "pass_rates": {"summary": "Pass rates: one check better, one no real difference",
+                   "value": _COMPARISON},
+    "no_worse": {"summary": "No worse than A, by a 10-point margin: not proven",
+                 "value": _comparison_with(
+                     "no_worse", {"confidence": 0.95, "margin": 0.1},
+                     [computed.no_worse_comparison()], {"inconclusive": 1},
+                     "B is no worse on 0 of 1 check; 1 not proven either way.")},
+    "mean_scores": {"summary": "Mean scores (Welch): ROUGE higher under B",
+                    "value": _comparison_with(
+                        "mean_scores", {"confidence": 0.95},
+                        [computed.score_comparison(StatisticalTestName.mean_scores)],
+                        {"better": 1}, "B is better on 1 of 1 check, worse on none.")},
+    "score_ranks": {"summary": "Score ranks (Mann–Whitney): ROUGE higher under B",
+                    "value": _comparison_with(
+                        "score_ranks", {"confidence": 0.95},
+                        [computed.score_comparison(StatisticalTestName.score_ranks)],
+                        {"better": 1}, "B is better on 1 of 1 check, worse on none.")},
+    "paired_entries": {"summary": "Paired by entry: seven entries, one verdict (entries and "
+                                  "pairs cut)",
+                       "value": {**_COMPARISON, "statistical_test": "paired_entries",
+                                 "summary": _PAIRED["summary"], "result": _PAIRED}},
+}
+
 _COMPARISON_404 = {
     "description": "No comparison with this id.",
     "content": {"application/json": {"example": {
@@ -876,8 +952,9 @@ _CREATE_COMPARISON_DOC = inspect.cleandoc("""
     description=_CREATE_COMPARISON_DOC,
     status_code=status.HTTP_201_CREATED,
     responses={
-        201: {"description": "The comparison, computed and stored.",
-              "content": {"application/json": {"example": _COMPARISON}}},
+        201: {"description": "The comparison, computed and stored — one example per "
+                             "comparison test.",
+              "content": {"application/json": {"examples": _COMPARISON_EXAMPLES}}},
         404: {"description": "Either batch doesn't exist.",
               "content": {"application/json": {"example": {
                   "detail": f"Statistical batch with ID {_BATCH_B_ID} not found"}}}},
@@ -956,7 +1033,7 @@ async def list_statistical_comparisons(
     responses={
         200: {"description": "The comparison.",
               "content": {"application/json": {"examples": {
-                  "full": {"summary": "A comparison", "value": _COMPARISON},
+                  **_COMPARISON_EXAMPLES,
                   "no_series": {"summary": "With ?series=false", "value": {
                       **_COMPARISON, "result": {**_COMPARISON["result"], "entries": [{
                           **_COMPARISON["result"]["entries"][0],

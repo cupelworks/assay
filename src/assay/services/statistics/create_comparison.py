@@ -18,6 +18,7 @@ from assay.schemas.statistics import ComparisonDetails, ComparisonRequest, Stati
 from assay.services.statistics._batches import (
     find_batch_or_404,
     load_entries,
+    load_types,
     refresh,
     scope_kind,
     scope_names,
@@ -64,8 +65,10 @@ async def create_comparison(request: ComparisonRequest,
     if batch_a.test_id is not None:
         await _check_same_content(batch_a, batch_b, session)
 
-    result = compare(await load_entries(batch_a, session), await load_entries(batch_b, session),
-                     parameters["confidence"])
+    entries_a = await load_entries(batch_a, session)
+    entries_b = await load_entries(batch_b, session)
+    types = await load_types(entries_a + entries_b, session)
+    result = compare(entries_a, entries_b, parameters, name, types)
     comparison = StatisticalComparisonModel(
         id=uuid.uuid4(), batch_a_id=batch_a.id, batch_b_id=batch_b.id,
         test_id=batch_a.test_id, test_set_id=batch_a.test_set_id,

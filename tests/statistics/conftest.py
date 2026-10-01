@@ -85,7 +85,8 @@ class Database:
             return session.execute(
                 select(TestRunModel.id, TestRunModel.batch_index, TestRunModel.status,
                        TestRunModel.error, TestRunModel.test_set_execution_id,
-                       TestRunModel.test_plan_execution_id, TestRunModel.test_id)
+                       TestRunModel.test_plan_execution_id, TestRunModel.test_id,
+                       TestRunModel.test_set_entry_id)
                 .where(TestRunModel.batch_id == uuid.UUID(str(batch_id)))
                 .order_by(TestRunModel.batch_index)).all()
 
@@ -95,6 +96,24 @@ class Database:
         for run_id in run_ids:
             with self.worker_session() as session:
                 execute_run(run_id, session)
+
+    def finish(self, run_id, results: dict, status=None) -> None:
+        """Write a run's outcome as the worker would, for checks this
+        environment can't execute (a judge, a model): results by label."""
+        from datetime import datetime
+
+        from sqlalchemy import update
+
+        from assay.models import TestRunModel, TestStatus
+        passed = [r["passed"] for r in results.values()]
+        status = status or (TestStatus.green if all(passed) else
+                            TestStatus.red if not any(passed) else TestStatus.amber)
+        stamped = {label: {"score": None, "detail": None, "errored": False, **result}
+                   for label, result in results.items()}
+        with self.worker_session() as session:
+            session.execute(update(TestRunModel).where(TestRunModel.id == run_id).values(
+                status=status, results=stamped, executed_at=datetime.now().astimezone()))
+            session.commit()
 
     def set_status(self, run_id, status) -> None:
         from sqlalchemy import update

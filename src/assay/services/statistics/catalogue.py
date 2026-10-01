@@ -169,8 +169,168 @@ _PASS_RATES = StatisticalTestDescriptor(
            "every expected count is at least 5, Fisher's exact otherwise.",
 )
 
+_JUDGE_STABILITY = StatisticalTestDescriptor(
+    id=StatisticalTestName.judge_stability,
+    name="Judge stability",
+    kind=StatisticalTestKind.batch,
+    wave=2,
+    question="Is the judge itself consistent? The same recorded answer judged again and "
+             "again: does each judge check give the same verdict at least a target share of "
+             "the time?",
+    reads=Reads.pass_fail,
+    applies_to=AppliesTo.judge_checks,
+    verdicts=["pass", "fail", "inconclusive"],
+    parameters=[
+        ParameterDescriptor(
+            key="target", label="Target agreement", kind=ParameterKind.rate, default=0.9,
+            min=0.6, max=0.999,
+            hint="The share of runs that must agree with the judge's usual verdict (pass or "
+                 "fail, whichever it gives more often): 0.9 means it changes its mind at most "
+                 "1 time in 10.",
+        ),
+        _CONFIDENCE,
+    ],
+    floor=FloorDescriptor(
+        kind=FloorKind.exact,
+        formula="times ≥ ln(1 − confidence) / ln(target)",
+        explanation="The binomial gate's floor, on agreement instead of passing: 29 runs "
+                    "that all agree prove \"agrees at least 90% of the time\" with 95% "
+                    "confidence. Only judge checks of entries with a recorded answer are "
+                    "tested: when the answer itself varies, a changed verdict can't be pinned "
+                    "on the judge.",
+        examples=[
+            {"target": 0.8, "confidence": 0.95, "times": 14},
+            {"target": 0.9, "confidence": 0.95, "times": 29},
+            {"target": 0.95, "confidence": 0.95, "times": 59},
+        ],
+    ),
+    recommended_times=None,
+    method="An exact binomial test each way on the agreement count — the runs that gave the "
+           "judge's majority verdict: pass when the exact one-sided lower bound of the "
+           "agreement rate is at least the target, fail when the upper bound is below it, "
+           "inconclusive otherwise.",
+)
+
+_NO_WORSE = StatisticalTestDescriptor(
+    id=StatisticalTestName.no_worse,
+    name="No worse than A",
+    kind=StatisticalTestKind.comparison,
+    wave=2,
+    question="Is B no worse than A by more than a margin? The release-gate question: a "
+             "difference test can't prove \"no difference\", only fail to find one; this "
+             "proves \"at most 5 points worse\".",
+    reads=Reads.pass_fail,
+    applies_to=AppliesTo.every_check,
+    verdicts=["no_worse", "worse", "inconclusive"],
+    parameters=[
+        ParameterDescriptor(
+            key="margin", label="Margin", kind=ParameterKind.share, default=0.05,
+            min=0.01, max=0.5,
+            hint="How much worse B may be and still count as no worse: 0.05 is 5 points of "
+                 "pass rate. Smaller margins need many more runs.",
+        ),
+        _CONFIDENCE,
+    ],
+    floor=FloorDescriptor(
+        kind=FloorKind.none,
+        formula="n ≈ (z₁₋α + z₀.₈)² · (pₐ(1 − pₐ) + p_b(1 − p_b)) / (p_b − pₐ + margin)²",
+        explanation="No minimum, but proving a small margin takes large batches: two checks "
+                    "both passing 90% of the time need about 446 times each to show a 5-point "
+                    "margin, about 112 for 10 points.",
+        examples=[{"rate_a": 0.9, "rate_b": 0.9, "margin": 0.05, "confidence": 0.95,
+                   "times": 446},
+                  {"rate_a": 0.9, "rate_b": 0.9, "margin": 0.1, "confidence": 0.95,
+                   "times": 112}],
+    ),
+    recommended_times=None,
+    method="Newcombe's interval of B − A with one-sided bounds at the confidence level (the "
+           "two-sided interval at 2 × confidence − 1): no worse when the lower bound is above "
+           "−margin, worse when the upper bound is below it, inconclusive otherwise.",
+)
+
+_MEAN_SCORES = StatisticalTestDescriptor(
+    id=StatisticalTestName.mean_scores,
+    name="Mean scores, A against B",
+    kind=StatisticalTestKind.comparison,
+    wave=2,
+    question="Did a scored check's average change between two batches? Welch's t-test on "
+             "the scores themselves, not only on pass or fail.",
+    reads=Reads.scores,
+    applies_to=AppliesTo.scored_checks,
+    verdicts=["better", "worse", "no_difference"],
+    parameters=[_CONFIDENCE],
+    floor=FloorDescriptor(
+        kind=FloorKind.rule_of_thumb,
+        formula=None,
+        explanation="About 20 scores per batch: with fewer the spread is poorly known and "
+                    "only big differences show. Two scores per batch is the least it can "
+                    "compute at. When scores bunch against 0 or 1, prefer score ranks.",
+        examples=[],
+    ),
+    recommended_times=20,
+    method="Welch's two-sample t-test (unequal variances) of B − A, two-sided: better when "
+           "its interval lies above 0 in the type's direction (higher is better for every "
+           "metric today), worse when on the other side, no real difference otherwise.",
+)
+
+_SCORE_RANKS = StatisticalTestDescriptor(
+    id=StatisticalTestName.score_ranks,
+    name="Score ranks, A against B",
+    kind=StatisticalTestKind.comparison,
+    wave=2,
+    question="Do a scored check's scores tend to be higher in B than in A? Mann–Whitney on "
+             "the ranks — for scores that pile up against a bound (0 or 1), where an average "
+             "misleads.",
+    reads=Reads.scores,
+    applies_to=AppliesTo.scored_checks,
+    verdicts=["better", "worse", "no_difference"],
+    parameters=[_CONFIDENCE],
+    floor=FloorDescriptor(
+        kind=FloorKind.exact,
+        formula=None,
+        explanation="At least 4 scores per batch: with 3 against 3, even a perfect "
+                    "separation has p = 0.1 and can't reach 95%. 10 per batch is the "
+                    "practical minimum, 20 recommended.",
+        examples=[{"confidence": 0.95, "times": 4}],
+    ),
+    recommended_times=20,
+    method="The Mann–Whitney U test, two-sided (exact for small samples without ties, the "
+           "normal approximation otherwise): better when B's scores are significantly higher "
+           "— the probability that a score of B beats one of A, `effect`, above 0.5 — worse "
+           "when lower, no real difference otherwise.",
+)
+
+_PAIRED = StatisticalTestDescriptor(
+    id=StatisticalTestName.paired_entries,
+    name="Paired by entry",
+    kind=StatisticalTestKind.comparison,
+    wave=2,
+    question="On the same entries, did B do better than A? Each entry's check is paired with "
+             "itself, so the differences between entries cancel out — the strongest form of "
+             "\"did my change help?\" for a test set.",
+    reads=Reads.pass_fail,
+    applies_to=AppliesTo.every_check,
+    verdicts=["better", "worse", "no_difference"],
+    parameters=[_CONFIDENCE],
+    floor=FloorDescriptor(
+        kind=FloorKind.exact,
+        formula=None,
+        explanation="At least 6 pairs (entries × checks) that changed: six differences of "
+                    "the same sign have p = 0.031 under Wilcoxon's test, five 0.0625. 10 "
+                    "pairs is the practical minimum.",
+        examples=[{"confidence": 0.95, "pairs": 6}],
+    ),
+    recommended_times=None,
+    method="The paired t-test of the per-pair difference in pass rate (B − A), two-sided, "
+           "decides from its interval: better above 0, worse below, no real difference "
+           "otherwise. Wilcoxon's signed-rank p-value is shown beside it, as a check that "
+           "doesn't assume the differences are bell-shaped.",
+)
+
 CATALOGUE: dict[StatisticalTestName, CatalogueEntry] = {
-    entry.id: CatalogueEntry(entry) for entry in (_GATE, _T_TEST, _PASS_RATES)
+    entry.id: CatalogueEntry(entry)
+    for entry in (_GATE, _T_TEST, _JUDGE_STABILITY, _PASS_RATES, _NO_WORSE, _MEAN_SCORES,
+                  _SCORE_RANKS, _PAIRED)
 }
 
 
@@ -236,12 +396,16 @@ class Sizing:
 
 def sizing(name: StatisticalTestName, parameters: dict[str, float]) -> Sizing:
     confidence = parameters["confidence"]
-    if name == StatisticalTestName.binomial_gate:
+    if name in (StatisticalTestName.binomial_gate, StatisticalTestName.judge_stability):
         target = parameters["target"]
         floor = stats_math.binomial_floor(target, confidence)
         one_miss = stats_math.binomial_runs_allowing(1, target, confidence)
+        perfect = ("a perfect record" if name == StatisticalTestName.binomial_gate
+                   else "every run agreeing")
+        claim = ("at least" if name == StatisticalTestName.binomial_gate
+                 else "agrees at least")
         explanation = (
-            f"At {floor} times only a perfect record proves \"at least {percent(target)}\" "
+            f"At {floor} times only {perfect} proves \"{claim} {percent(target)}\" "
             f"with {percent(confidence)} confidence: {target:g}^{floor} = "
             f"{target ** floor:.4f} is at most {1 - confidence:.4g}. With fewer, no result "
             f"could prove it."
