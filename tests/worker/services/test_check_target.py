@@ -133,3 +133,30 @@ def test_an_empty_answer_fails_the_check_with_the_reason():
 
     assert (check.ok, check.answer, check.status_code) == (False, None, 200)
     assert check.error == "The value at output path '$.output' is null"
+
+
+# --- never stuck in running ---
+
+
+def test_settings_this_code_cant_read_complete_the_check_with_the_reason():
+    check = _check(nonsense=1)
+    session = _claimed(check)
+
+    with patch(_PATCH_GET_ANSWER) as get_answer:
+        check_target(check.id, session)
+
+    get_answer.assert_not_called()
+    session.rollback.assert_called_once()
+    assert (check.status, check.ok) == (TargetCheckStatus.completed, False)
+    assert check.error == ("The check failed on the worker: nonsense: Extra inputs are not "
+                           "permitted")
+
+
+def test_an_unexpected_error_completes_the_check_with_it():
+    check = _check()
+
+    with patch(_PATCH_GET_ANSWER, side_effect=RuntimeError("boom")):
+        check_target(check.id, _claimed(check))
+
+    assert (check.status, check.ok, check.error) == (
+        TargetCheckStatus.completed, False, "The check failed on the worker: boom")

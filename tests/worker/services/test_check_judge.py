@@ -88,3 +88,41 @@ def test_a_stale_check_expires_without_asking_the_judge():
 
     ask.assert_not_called()
     assert (check.ok, check.error) == (False, "Expired before a worker picked it up")
+
+
+# --- never stuck in running ---
+
+
+def test_settings_this_code_cant_read_complete_the_check_with_the_reason():
+    check = _check()
+    check.settings = {**SETTINGS, "base_url": "http://old.example"}
+    session = _claimed(check)
+
+    with patch(_PATCH_ASK) as ask:
+        check_judge(check.id, session)
+
+    ask.assert_not_called()
+    session.rollback.assert_called_once()
+    assert (check.status, check.ok) == (TargetCheckStatus.completed, False)
+    assert check.error == ("The check failed on the worker: base_url: Extra inputs are not "
+                           "permitted")
+    assert check.completed_at is not None
+
+
+def test_an_unexpected_error_completes_the_check_with_it():
+    check = _check()
+
+    with patch(_PATCH_ASK, side_effect=RuntimeError("database is locked")):
+        check_judge(check.id, _claimed(check))
+
+    assert (check.status, check.ok) == (TargetCheckStatus.completed, False)
+    assert check.error == "The check failed on the worker: database is locked"
+
+
+def test_an_error_with_no_message_is_named_by_its_type():
+    check = _check()
+
+    with patch(_PATCH_ASK, side_effect=KeyError()):
+        check_judge(check.id, _claimed(check))
+
+    assert check.error == "The check failed on the worker: KeyError"

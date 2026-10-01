@@ -8,7 +8,7 @@ from assay.models import JudgeCheckModel
 from assay.schemas.settings import JudgeSettings
 from assay.worker import llm
 from assay.worker.evaluators.engines import llm_judge
-from assay.worker.services._checks import EXPIRED, claim, complete, expired
+from assay.worker.services._checks import EXPIRED, claim, complete, expired, fail
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,8 @@ def check_judge(check_id: uuid.UUID, session: Session) -> None:
 
     The same prompt and client a judge check in a run uses, one attempt, no
     retries — someone is waiting. `ok` means a readable verdict came back,
-    whatever it said; `answer` is the judge's rationale.
+    whatever it said; `answer` is the judge's rationale. Anything that goes
+    wrong once the check is claimed completes it with the reason.
 
     Args:
         check_id: UUID of the JudgeCheckModel to run.
@@ -37,7 +38,15 @@ def check_judge(check_id: uuid.UUID, session: Session) -> None:
         logger.info("Judge check %s not claimed: missing, already running or already "
                     "completed", check_id)
         return
+    try:
+        _ask(check, session)
+    except Exception as exc:
+        logger.exception("Judge check %s failed on the worker", check_id)
+        fail(session, check, exc)
 
+
+def _ask(check: JudgeCheckModel, session: Session) -> None:
+    check_id = check.id
     if expired(check):
         complete(check, ok=False, error=EXPIRED)
         session.commit()
