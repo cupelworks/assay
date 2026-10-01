@@ -4,6 +4,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped
 
+from assay.assignment_labels import in_label_order
 from assay.assignment_labels import labelled as _labelled
 from assay.models import TestModel, TestSetEntryModel, TestTypeAssignmentModel
 from assay.schemas import CreateTestCaseResponse, ModifyTestCaseRequest
@@ -102,7 +103,7 @@ async def _apply_test_type_assignments_update(
                 config=assignment.config,
                 answer_path=assignment.answer_path,
             )
-            for assignment in _labelled(request.test_type_assignments)
+            for assignment in in_label_order(_labelled(request.test_type_assignments))
         ]
 
 
@@ -171,8 +172,6 @@ async def modify_test_by_id(
         input=found.input,
         model_output=found.model_output,
         expected_output=found.expected_output,
-        test_type_assignments=[
-            _assignment_schema(a)
-            for a in found.test_type_assignments
-        ],
+        test_type_assignments=in_label_order(
+            [_assignment_schema(a) for a in found.test_type_assignments]),
     )

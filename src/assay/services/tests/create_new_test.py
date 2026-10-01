@@ -5,6 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.assignment_labels import in_label_order
 from assay.assignment_labels import labelled as _labelled
 from assay.models import TestModel, TestTypeAssignmentModel
 from assay.schemas import (
@@ -80,7 +81,7 @@ async def create_new_test(
         await _check_reference_required_types_have_expected_output_or_422(
             session, request.test_type_assignments, request.expected_output
         )
-    assignments = _labelled(request.test_type_assignments)
+    assignments = in_label_order(_labelled(request.test_type_assignments))
 
     test = TestModel(
         id=uuid.uuid4(),
@@ -157,7 +158,7 @@ async def create_new_test_from_dataset(
         await _check_reference_required_types_have_expected_output_for_rows_or_422(
             session, request.test_type_assignments, rows
         )
-    assignments = _labelled(request.test_type_assignments)
+    assignments = in_label_order(_labelled(request.test_type_assignments))
 
     next_number = await _next_new_test_number(session)
 

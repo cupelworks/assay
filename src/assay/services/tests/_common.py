@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
 
+from assay.assignment_labels import label_key
 from assay.models import (
     ConfigFieldKind,
     DatasetRowModel,
@@ -26,14 +27,15 @@ def _frozen_test_type_assignments(test: TestModel) -> list[dict]:
     """The test's assigned types with their config, in the frozen JSON shape
     every snapshot of a test stores — a TestSetEntryModel when the test is
     added to a set, a StandaloneRunModel when a standalone run is created:
-    `[{"name": ..., "label": ..., "config": ..., "answer_path": ...}]`. The
-    test's assignments must be loaded.
+    `[{"name": ..., "label": ..., "config": ..., "answer_path": ...}]`, in
+    label order. The test's assignments must be loaded.
     """
-    return [
+    copies = [
         {"name": assignment.test_type_name, "label": assignment.label,
          "config": assignment.config, "answer_path": assignment.answer_path}
         for assignment in test.test_type_assignments
     ]
+    return sorted(copies, key=lambda copy: label_key(copy["label"]))
 
 
 def _assignment_schema(assignment: TestTypeAssignmentModel) -> TestTypeAssignment:

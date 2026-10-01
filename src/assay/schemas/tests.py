@@ -141,7 +141,7 @@ class ModifyTestCaseRequest(BaseModel):
                     "with what's already assigned; `[]` removes them all. null or left "
                     "out: unchanged. A type may appear more than once, told apart by "
                     "`label`: send back the labels a GET returned to keep each check's "
-                    "identity.",
+                    "identity. Returned in label order, ignoring letter case.",
     )
 
 

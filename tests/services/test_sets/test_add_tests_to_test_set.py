@@ -168,9 +168,10 @@ def test_type_assignments_extracted_correctly():
 
     entry = session.add_all.call_args[0][0][0]
     assert entry.test_type_assignments == [
-        {"name": "Regex Match", "label": "Regex Match", "config": {"pattern": "^\\d+$"},
-         "answer_path": None},
+        # in label order, not the order the test lists them in
         {"name": "Hallucination", "label": "Hallucination", "config": None,
+         "answer_path": None},
+        {"name": "Regex Match", "label": "Regex Match", "config": {"pattern": "^\\d+$"},
          "answer_path": None},
     ]
 

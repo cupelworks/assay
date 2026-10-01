@@ -1,6 +1,6 @@
 import pytest
 
-from assay.assignment_labels import labelled
+from assay.assignment_labels import in_label_order, labelled
 from assay.schemas import TestTypeAssignment
 
 
@@ -47,3 +47,16 @@ def test_a_label_is_trimmed_and_bounded():
     assert TestTypeAssignment(name="Contains", label="  Refund  ").label == "Refund"
     with pytest.raises(ValueError):
         TestTypeAssignment(name="Contains", label="x" * 101)
+
+
+def test_assignments_are_ordered_by_label_ignoring_letter_case():
+    ordered = in_label_order([
+        TestTypeAssignment(name="ROUGE", label="ROUGE"),
+        TestTypeAssignment(name="Contains", label="contains 2"),
+        TestTypeAssignment(name="Contains", label="Contains"),
+        TestTypeAssignment(name="Contains", label="Économie"),
+        TestTypeAssignment(name="BLEU", label="bleu"),
+    ])
+
+    assert [a.label for a in ordered] == ["bleu", "Contains", "contains 2", "ROUGE",
+                                          "Économie"]

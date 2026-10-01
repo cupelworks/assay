@@ -339,10 +339,10 @@ def test_the_same_type_twice_is_saved_with_distinct_labels():
             {"name": "Contains", "config": {"substring": "refund"}},
         ]})
 
-    assert entry.test_type_assignments == [
-        {"name": "Contains", "label": "Contains 2", "config": {"substring": "4471"},
-         "answer_path": None},
+    assert entry.test_type_assignments == [  # saved in label order
         {"name": "Contains", "label": "Contains", "config": {"substring": "refund"},
          "answer_path": None},
+        {"name": "Contains", "label": "Contains 2", "config": {"substring": "4471"},
+         "answer_path": None},
     ]
-    assert [a.label for a in response.test_type_assignments] == ["Contains 2", "Contains"]
+    assert [a.label for a in response.test_type_assignments] == ["Contains", "Contains 2"]

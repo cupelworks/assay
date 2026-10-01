@@ -348,7 +348,8 @@ def test_modify_gives_a_new_check_the_next_free_number_and_keeps_the_sent_labels
         TestTypeAssignment(name="Contains", config={"substring": "today"}),
     ])
 
-    assert [label for _, label, _ in _saved(mock_test)] == ["Contains 2", "Contains",
+    # labels as sent or numbered past them, then saved in label order
+    assert [label for _, label, _ in _saved(mock_test)] == ["Contains", "Contains 2",
                                                            "Contains 3"]
 
 
@@ -360,7 +361,7 @@ def test_modify_null_and_empty_still_mean_untouched_and_remove_all_with_labels()
 
     response = _patch_assignments(mock_test, None)
     assert mock_test.test_type_assignments == stored
-    assert [a.label for a in response.test_type_assignments] == ["Refund", "Contains 2"]
+    assert [a.label for a in response.test_type_assignments] == ["Contains 2", "Refund"]
 
     _patch_assignments(mock_test, [])
     assert mock_test.test_type_assignments == []

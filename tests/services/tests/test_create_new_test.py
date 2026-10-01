@@ -102,9 +102,9 @@ def test_create_new_test_with_test_names():
         response = asyncio.run(create_new_test(request, mock_session))
 
     mock_session.commit.assert_called_once()
-    assert response.test_type_assignments == [
-        TestTypeAssignment(name="ROUGE", label="ROUGE"),
+    assert response.test_type_assignments == [  # in label order
         TestTypeAssignment(name="BERTScore", label="BERTScore"),
+        TestTypeAssignment(name="ROUGE", label="ROUGE"),
     ]
 
 
@@ -779,9 +779,9 @@ def test_create_stores_each_assignments_answer_path():
         response = asyncio.run(create_new_test(request, mock_session))
 
     stored = mock_session.add_all.call_args.args[0]
-    assert [(a.test_type_name, a.answer_path) for a in stored] == [
-        ("JSON Field Equals", "$.stop_reason"), ("Contains", None)]
-    assert [a.answer_path for a in response.test_type_assignments] == ["$.stop_reason", None]
+    assert [(a.test_type_name, a.answer_path) for a in stored] == [  # in label order
+        ("Contains", None), ("JSON Field Equals", "$.stop_reason")]
+    assert [a.answer_path for a in response.test_type_assignments] == [None, "$.stop_reason"]
 
 
 def _contains_session():

@@ -3,6 +3,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.assignment_labels import in_label_order
 from assay.assignment_labels import labelled as _labelled
 from assay.schemas import ModifyTestCaseRequest, TestCaseID, TestSetEntryDetails, TestTypeAssignment
 from assay.services.test_sets._common import (
@@ -85,7 +86,7 @@ async def modify_entry_by_id(
         found.test_type_assignments = [
             {"name": assignment.name, "label": assignment.label,
              "config": assignment.config, "answer_path": assignment.answer_path}
-            for assignment in _labelled(request.test_type_assignments)
+            for assignment in in_label_order(_labelled(request.test_type_assignments))
         ]
 
     await session.commit()

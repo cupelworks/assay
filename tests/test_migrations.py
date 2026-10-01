@@ -1394,3 +1394,24 @@ def test_downgrade_fails_while_a_test_holds_a_type_twice(scratch):
 
     with pytest.raises(Exception, match="UNIQUE constraint failed"):
         command.downgrade(config, "d649f666f728")
+
+
+# --- 8409d407d9dc: assignment copies and results in label order ---
+
+
+def test_upgrade_puts_stored_copies_and_results_in_label_order(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "d649f666f728")
+    _seed_for_labels(db_path)
+    run_id = _insert_run(db_path, 10, "amber", results={
+        "ROUGE": {"passed": True, "score": 0.7, "detail": None},
+        "Contains": {"passed": False, "score": None, "detail": None}})
+    command.upgrade(config, "e47a76f674f0")
+
+    command.upgrade(config, "8409d407d9dc")
+
+    (entry,) = _json_column(db_path, "test_set_entries", "test_type_assignments")
+    assert [a["label"] for a in entry] == ["Contains", "Contains 2", "ROUGE"]
+    assert list(_run(db_path, run_id)["results"]) == ["Contains", "ROUGE"]
+    command.downgrade(config, "e47a76f674f0")  # order only: nothing to undo
+    assert list(_run(db_path, run_id)["results"]) == ["Contains", "ROUGE"]
