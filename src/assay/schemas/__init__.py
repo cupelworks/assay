@@ -123,8 +123,8 @@ from assay.schemas.runs import (
 __all__ = [
     "JudgeCheck",
     "JudgeCheckRequest",
-    "JudgeProvider",
     "JudgeIdentity",
+    "JudgeProvider",
     "JudgeRubric",
     "JudgeSettings",
     "JudgeSettingsRead",

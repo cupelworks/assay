@@ -1148,3 +1148,148 @@ def test_downgrade_restores_the_fields_as_they_were(scratch):
     command.downgrade(config, "3f8cecd2afff")
 
     assert _test_types(db_path) == before
+
+
+# --- d649f666f728: correct stale run data ---
+
+_STUB_ERA = {"passed": True, "score": 1.0, "detail": None}
+
+
+def _insert_run(db_path: Path, n: int, status: str, results=None, error=None) -> str:
+    run_id = f"{n:032x}"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO test_runs (id, status, created_at, executed_at, results, error, "
+            "evaluated_output, output_source) VALUES (?, ?, '2026-01-01', ?, ?, ?, ?, ?)",
+            (run_id, status, "2026-01-02" if results is not None else None,
+             json.dumps(results) if results is not None else None, error,
+             "Paris" if results is not None else None,
+             "recorded" if results is not None else None))
+    return run_id
+
+
+def _run(db_path: Path, run_id: str) -> dict:
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        row = dict(connection.execute("SELECT * FROM test_runs WHERE id = ?",
+                                      (run_id,)).fetchone())
+    row["results"] = json.loads(row["results"]) if row["results"] else None
+    return row
+
+
+def test_upgrade_gives_every_result_the_current_shape_and_drops_deterministic_scores(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "45dabe26c054")
+    run_id = _insert_run(db_path, 1, "green", results={
+        "Exact Match": {**_STUB_ERA},                          # stub era: no engine recorded
+        "Contains": {"passed": False, "score": 0.0, "detail": "required substring not found",
+                     "engine": "contains", "engine_settings": {"case_sensitive": True},
+                     "answer_path": None},
+        "ROUGE": {"passed": True, "score": 0.81, "detail": None, "engine": "rouge",
+                  "engine_settings": {"variant": "rougeL"}, "answer_path": None},
+    })
+
+    command.upgrade(config, "d649f666f728")
+
+    results = _run(db_path, run_id)["results"]
+    keys = ["passed", "score", "detail", "engine", "engine_settings", "answer_path", "rubric",
+            "judge"]
+    assert all(list(result) == keys for result in results.values())
+    assert results["Exact Match"]["score"] is None          # deterministic by the catalogue
+    assert results["Contains"]["score"] is None             # deterministic by its engine
+    assert results["ROUGE"]["score"] == 0.81                # a metric keeps its score
+    assert results["Contains"]["detail"] == "Required substring not found"
+    assert results["Contains"]["engine_settings"] == {"normalize_lookalikes": False,
+                                                      "case_sensitive": True}
+    assert results["ROUGE"]["engine_settings"] == {"variant": "rougeL"}
+
+
+def test_upgrade_renames_results_still_keyed_by_exact_match_strict(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "45dabe26c054")
+    run_id = _insert_run(db_path, 2, "red", results={"Exact Match (strict)": {
+        "passed": False, "score": 0.0, "detail": "differs from the expected output"}})
+
+    command.upgrade(config, "d649f666f728")
+
+    assert _run(db_path, run_id)["results"] == {"Exact Match (whitespace-sensitive)": {
+        "passed": False, "score": None, "detail": "Differs from the expected output",
+        "engine": None, "engine_settings": None, "answer_path": None, "rubric": None,
+        "judge": None}}
+
+
+@pytest.mark.parametrize("old,new", [
+    ("no application configured: ASSAY_TARGET_URL is unset",
+     "No application configured: no URL is set"),
+    ("ASSAY_TARGET_HEADERS references ${API_KEY} but API_KEY is not set",
+     "A header references ${API_KEY} but API_KEY is not set on this server"),
+    ("nothing found at ASSAY_TARGET_OUTPUT_PATH '$.answer' in the application's reply",
+     "Nothing found at output path '$.answer' in the application's reply"),
+    ("application answered HTTP 503 after 3 attempt(s)",
+     "Application answered HTTP 503 after 3 attempt(s)"),
+    ("Already current", "Already current"),
+])
+def test_upgrade_brings_run_errors_to_todays_wording(scratch, old, new):
+    config, db_path = scratch
+    command.upgrade(config, "45dabe26c054")
+    run_id = _insert_run(db_path, 3, "not_ran", error=old)
+
+    command.upgrade(config, "d649f666f728")
+
+    assert _run(db_path, run_id)["error"] == new
+
+
+def test_upgrade_capitalizes_check_errors(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "45dabe26c054")
+    with sqlite3.connect(db_path) as connection:
+        for table in ("target_checks", "judge_checks"):
+            connection.execute(
+                f"INSERT INTO {table} (id, created_at, status, settings, input, ok, error) "
+                "VALUES (?, '2026-01-01', 'completed', '{}', 'q', 0, 'could not be sent to "
+                "a worker')" if table == "target_checks" else
+                f"INSERT INTO {table} (id, created_at, status, settings, ok, error) "
+                "VALUES (?, '2026-01-01', 'completed', '{}', 0, 'could not be sent to a "
+                "worker')", (f"{7:032x}",))
+
+    command.upgrade(config, "d649f666f728")
+
+    with sqlite3.connect(db_path) as connection:
+        for table in ("target_checks", "judge_checks"):
+            (error,) = connection.execute(f"SELECT error FROM {table}").fetchone()
+            assert error == "Could not be sent to a worker", table
+
+
+def test_upgrade_sends_runs_the_judge_bug_spoiled_back_to_pending(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "45dabe26c054")
+    spoiled = _insert_run(db_path, 4, "amber", results={
+        "Toxicity": {"passed": False, "score": None, "detail": "'str' object is not callable",
+                     "engine": "llm_judge", "engine_settings": {}, "answer_path": None},
+        "Contains": {"passed": True, "score": None, "detail": None, "engine": "contains",
+                     "engine_settings": {"case_sensitive": True}, "answer_path": None},
+    })
+    honest = _insert_run(db_path, 5, "red", results={
+        "Toxicity": {"passed": False, "score": None, "detail": "No judge configured: choose "
+                     "a provider and model under Settings", "engine": "llm_judge",
+                     "engine_settings": {}, "answer_path": None}})
+
+    command.upgrade(config, "d649f666f728")
+
+    run = _run(db_path, spoiled)
+    assert run["status"] == "pending"
+    assert [run[k] for k in ("results", "error", "executed_at", "evaluated_output",
+                             "output_source", "application_reply")] == [None] * 6
+    assert _run(db_path, honest)["status"] == "red"
+
+
+def test_upgrade_leaves_runs_without_results_alone_and_downgrade_does_nothing(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "45dabe26c054")
+    pending = _insert_run(db_path, 6, "pending")
+    before = _run(db_path, pending)
+
+    command.upgrade(config, "d649f666f728")
+    assert _run(db_path, pending) == before
+    command.downgrade(config, "45dabe26c054")
+    assert _run(db_path, pending) == before
