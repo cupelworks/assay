@@ -284,10 +284,24 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/settings/judge/checks/{check_id}` | A judge check as far as it has got: `completed` with `ok` (a readable verdict came back), `answer` (the judge's rationale) or `error` (e.g. `ANTHROPIC_API_KEY is not set on this server`). 404 if it doesn't exist |
 | `GET` | `/settings/target/checks/{check_id}` | A check as far as it has got: `pending`, `running`, or `completed` with `ok`, `status_code`, `latency_ms`, and the `answer` or the `error` (the same reason a run would get). A check queued over 5 minutes completes as expired without calling the application. 404 for an unknown ID |
 
-### Statistical tests
+### Run with statistics
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/statistical-tests/z-test` | One-sample z-test for metric score distributions |
+| `GET` | `/statistics/tests` | The catalogue of statistical tests: each one's question, kind (`batch` or `comparison`), what it reads, which checks it applies to, its parameters (default and range), its floor (the fewest times it can conclude at, with the kind of floor, formula, explanation and worked examples) and method; plus `max_times` and `max_runs` per batch |
+| `POST` | `/statistics/estimate` | What a batch would need and cost, creating nothing: the floor and why, the sizes worth offering (one `default`), the binomial gate's rule at `times`, runs and calls (application, judge) per time and in total, every entry with which checks get a verdict, and `warnings` (recorded answers, no judge or application configured). Same guards as a batch: 404/409 from the scope, 422 for parameters, times below the floor or over the limits |
+| `POST` | `/statistics/batches` | Run a test, test set or test plan N times as one batch — N standalone runs, or N live executions — each carrying `batch_id` and `batch_index`, all dispatched to the workers. 202 with the batch, `Pending`. The estimate's body plus an optional `note`; the estimate's guards |
+| `GET` | `/statistics/batches` | Batches newest first, without per-check detail: status, progress, the outcome's `summary`. Filters `test_id`, `test_set_id`, `test_plan_id`, `status`; in-progress batches are brought up to date first |
+| `GET` | `/statistics/batches/{batch_id}` | One batch: `progress` (times and runs done, runs by status, application and judge calls planned/finished/in flight) while it runs; once every run has finished, the `result` — computed by that read and stored — per entry and per check: counts (errored and Not Ran apart), pass rate with its interval, score summary, the verdict with the interval it used, p-values, the gate's rule, and `times_to_decide`; and the per-run `series` for charts (`?series=false` leaves them out). Status `Pending` → `Running` → `Passed`/`Failed`/`Inconclusive`/`Incomplete`/`NotRan` |
+| `POST` | `/statistics/batches/{batch_id}/stop` | Cancel the batch's `Pending` runs (`NotRan`, "Stopped before it ran: the batch was stopped"); running ones finish and count. `Incomplete` once none is running; a batch with nothing pending is returned unchanged |
+
+Every run and execution listing (`/runs`, `/runs/executions`, a test's runs, a set's or
+plan's executions) returns `batch_id`/`batch_index` and takes `?batch=none` (only what no
+batch created) or `?batch=<batch_id>`.
+
+### Statistical tests (to be removed)
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/statistical-tests/z-test` | One-sample z-test for metric score distributions — superseded by the one-sample t-test above, removed in statistics Phase 5 |
 
 ## Database
 
