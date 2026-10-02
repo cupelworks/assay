@@ -702,6 +702,11 @@ class BatchSummary(BaseModel):
     floor: int = Field(description="The fewest times the test can conclude at.")
     progress: BatchProgress
     summary: str | None = Field(description="The outcome in one sentence, once computed.")
+    verdicts: dict[str, int] | None = Field(
+        description="Applicable checks by verdict (`pass`, `fail`, `inconclusive`, `none`) "
+                    "once computed — the same counts as `result.verdicts`, here for lists; "
+                    "null while the batch runs.",
+    )
     created_at: datetime
     stopped_at: datetime | None = Field(description="When a stop cancelled runs; null otherwise.")
     completed_at: datetime | None = Field(

@@ -284,6 +284,7 @@ async def describe(batch: StatisticalBatchModel, session: AsyncSession, *, serie
         status=BatchStatusName(batch.status.value), floor=batch.plan["floor"],
         progress=done,
         summary=stored["result"]["summary"] if stored else None,
+        verdicts=stored["result"]["verdicts"] if stored else None,
         created_at=batch.created_at, stopped_at=batch.stopped_at,
         completed_at=batch.completed_at,
     )

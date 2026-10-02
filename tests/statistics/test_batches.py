@@ -91,6 +91,7 @@ def test_a_running_batch_shows_progress_and_no_result(db):
 
     assert read["status"] == "Running"
     assert read["result"] is None
+    assert read["verdicts"] is None
     progress = read["progress"]
     assert (progress["times_done"], progress["runs_done"]) == (2, 2)
     assert progress["runs"] == {"Pending": 26, "Running": 1, "Green": 2, "Amber": 0, "Red": 0,
@@ -107,6 +108,8 @@ def test_a_finished_batch_is_computed_once_and_stored(db):
 
     assert first["status"] == "Passed"
     assert first["summary"] == "Passed: the check is proven."
+    assert first["verdicts"] == {"pass": 1, "fail": 0, "inconclusive": 0, "none": 0}
+    assert first["verdicts"] == first["result"]["verdicts"]
     assert first["completed_at"] is not None
     assert first == second
     check = first["result"]["entries"][0]["checks"][0]
@@ -190,6 +193,9 @@ def test_the_list_filters_by_scope_and_status_and_refreshes_first(db):
     assert "result" not in everything["items"][0]
     assert [b["id"] for b in passed["items"]] == [done["id"]]
     assert passed["items"][0]["summary"] == "Passed: the check is proven."
+    assert passed["items"][0]["verdicts"] == {"pass": 1, "fail": 0, "inconclusive": 0,
+                                              "none": 0}
+    assert everything["items"][0]["verdicts"] is None
     assert [b["id"] for b in by_test["items"]] == [waiting["id"]]
     assert by_test["total"] == 1
 

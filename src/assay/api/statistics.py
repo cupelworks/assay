@@ -348,6 +348,7 @@ _BATCH_PENDING = {
                   "judge": {"planned": 30, "finished": 0, "in_flight": 0}},
     },
     "summary": None,
+    "verdicts": None,
     "completed_at": None,
     "result": None,
 }
@@ -428,6 +429,7 @@ _BATCH_FINISHED = {
     },
     "summary": "Inconclusive: 1 proven, 1 undecided of 2 checks; a bigger batch would decide "
                "the rest.",
+    "verdicts": {"pass": 1, "fail": 0, "inconclusive": 1, "none": 0},
     "completed_at": "2026-10-01T09:52:41+02:00",
     "result": {
         "computed_at": "2026-10-01T09:52:41+02:00",
@@ -489,8 +491,11 @@ _BATCH_STOPPED = {
     },
     "summary": "Incomplete: stopped after 12 of 30 times ran; 0 proven, 0 undecided, 3 "
                "without a verdict of 3 checks.",
+    "verdicts": {"pass": 0, "fail": 0, "inconclusive": 0, "none": 3},
     "completed_at": "2026-10-01T09:41:09+02:00",
 }
+
+_ONE_PROVEN = {"pass": 1, "fail": 0, "inconclusive": 0, "none": 0}
 
 _BATCH_404 = {
     "description": "No batch with this id.",
@@ -514,7 +519,8 @@ _BATCH_ANATOMY = """
   (an interim verdict invites stopping on a lucky streak). The first read that finds every
   run finished computes it and stores it; later reads return exactly the same.
   `summary` is the outcome in a sentence; `verdicts` counts the applicable checks by
-  verdict; then `entries` — one per entry of the scope (one for a test), each with:
+  verdict (both repeated at the top level, where lists have them too); then `entries` —
+  one per entry of the scope (one for a test), each with:
   - `runs` by status and `strip`, its runs by time (a row of the runs matrix: one row per
     entry, one column per time);
   - `checks`, in label order, each with
@@ -619,7 +625,8 @@ async def create_statistical_batch(
     responses={200: {
         "description": (
             "Batches, newest first, without their per-check results (open one for those). "
-            "Each has its status, progress and, once finished, its one-sentence `summary`."
+            "Each has its status, progress and, once finished, its one-sentence `summary` "
+            "and its `verdicts` counts."
         ),
         "content": {"application/json": {"example": {
             "items": [{k: v for k, v in _BATCH_FINISHED.items() if k != "result"},
@@ -682,10 +689,10 @@ _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
                                                     "spread": 0.1},
                                      "status": "Passed",
                                      "summary": "Passed: the check is proven.",
+                                     "verdicts": _ONE_PROVEN,
                                      "result": {**_BATCH_FINISHED["result"],
                                                 "checks_total": 1, "checks_applicable": 1,
-                                                "verdicts": {"pass": 1, "fail": 0,
-                                                             "inconclusive": 0, "none": 0},
+                                                "verdicts": _ONE_PROVEN,
                                                 "summary": "Passed: the check is proven.",
                                                 "entries": [{
                                                     **_BATCH_FINISHED["result"]["entries"][0],
@@ -694,10 +701,10 @@ _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
                     "summary": "Judge stability: the judge agreed with itself 29 times of 29",
                     "value": {**_BATCH_FINISHED, "statistical_test": "judge_stability",
                               "status": "Passed", "summary": "Passed: the check is proven.",
+                              "verdicts": _ONE_PROVEN,
                               "result": {**_BATCH_FINISHED["result"], "checks_total": 1,
                                          "checks_applicable": 1,
-                                         "verdicts": {"pass": 1, "fail": 0,
-                                                      "inconclusive": 0, "none": 0},
+                                         "verdicts": _ONE_PROVEN,
                                          "summary": "Passed: the check is proven.",
                                          "entries": [{
                                              **_BATCH_FINISHED["result"]["entries"][0],
