@@ -39,7 +39,7 @@ from assay.schemas.statistics import (
     EntryProgress,
     Scope,
     ScopeKind,
-    StatisticalTestName,
+    StatisticalEngine,
 )
 from assay.services.statistics import compute
 from assay.services.statistics._scope import JUDGE_ENGINE
@@ -221,8 +221,8 @@ async def refresh(batch: StatisticalBatchModel, session: AsyncSession
 
     stopped = batch.stopped_at is not None
     now = datetime.now().astimezone()
-    name = StatisticalTestName(batch.statistical_test)
-    result = compute.compute(name, batch.parameters, batch.plan["floor"], stopped, entries,
+    engine = StatisticalEngine(batch.engine)
+    result = compute.compute(engine, batch.parameters, batch.plan["floor"], stopped, entries,
                              types, now)
     final = compute.roll_up(result, stopped, runs)
     done = progress(batch, entries, types)
@@ -297,7 +297,7 @@ async def describe(batch: StatisticalBatchModel, session: AsyncSession, *, serie
     fields = dict(
         id=batch.id,
         scope=Scope(kind=kind, id=scope_id, name=names.get(scope_id, "")),
-        statistical_test=StatisticalTestName(batch.statistical_test),
+        statistical_test=batch.statistical_test, engine=StatisticalEngine(batch.engine),
         parameters=batch.parameters, note=batch.note,
         status=BatchStatusName(batch.status.value), floor=batch.plan["floor"],
         progress=done,

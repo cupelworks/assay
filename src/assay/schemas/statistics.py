@@ -20,9 +20,11 @@ from assay.schemas._common import Pagination
 # ── shared vocabulary ────────────────────────────────────────────────────────
 
 
-class StatisticalTestName(StrEnum):
-    """Every statistical test Assay knows. `kind` in the catalogue says which
-    are run as a batch and which compare two batches."""
+class StatisticalEngine(StrEnum):
+    """The arithmetic in code a statistical test runs. A `statistical_tests`
+    row names one, and several tests can share an engine with different
+    parameters; `kind` in the catalogue says which engines run as a batch and
+    which compare two batches."""
     binomial_gate = "binomial_gate"
     one_sample_t = "one_sample_t"
     judge_stability = "judge_stability"
@@ -182,8 +184,14 @@ class FloorDescriptor(BaseModel):
 class StatisticalTestDescriptor(BaseModel):
     """One entry of the catalogue: everything the "run with statistics" dialog
     needs to offer a test and explain it."""
-    id: StatisticalTestName = Field(description="What to send as `statistical_test`.")
+    id: str = Field(description="What to send as `statistical_test`: the catalogue row's id.")
     name: str = Field(description="Its name, e.g. \"Binomial gate\".")
+    engine: StatisticalEngine = Field(
+        description="The arithmetic in code this test runs. The catalogue is a table, like "
+                    "the check types: a row names its engine and carries the texts, each "
+                    "parameter's default and range and the engine's settings, so several "
+                    "tests can share one engine with different parameters.",
+    )
     kind: StatisticalTestKind = Field(
         description="`batch`: run as a batch of N times (POST /statistics/batches). "
                     "`comparison`: reads two finished batches (POST /statistics/comparisons).",
@@ -207,6 +215,10 @@ class StatisticalTestDescriptor(BaseModel):
     parameters: list[ParameterDescriptor] = Field(
         description="What can be set, each with its default and range. Send them under "
                     "`parameters`; any left out take the default.",
+    )
+    engine_settings: dict = Field(
+        description="The engine's own constants for this test, as its catalogue row sets "
+                    "them — the t-test's `floor` and `recommended_times`; empty for most.",
     )
     floor: FloorDescriptor = Field(
         description="The minimum number of times, and where it comes from.",
@@ -244,8 +256,9 @@ class EstimateRequest(ScopeRequest):
         ]},
     )
 
-    statistical_test: StatisticalTestName = Field(
-        description="A batch test from the catalogue (`kind: batch`).",
+    statistical_test: str = Field(
+        description="The `id` of a batch test from `GET /statistics/tests` (`kind: batch`); "
+                    "an unknown id is a 422.",
     )
     parameters: dict[str, float] = Field(
         default_factory=dict,
@@ -333,7 +346,8 @@ class EntryPlan(BaseModel):
 class Estimate(BaseModel):
     """What a batch of this scope and test would need and cost."""
     scope: Scope
-    statistical_test: StatisticalTestName
+    statistical_test: str = Field(description="The catalogue row's id, as requested.")
+    engine: StatisticalEngine = Field(description="The arithmetic that row runs.")
     parameters: dict[str, float] = Field(
         description="Every parameter, the defaults filled in.")
     floor: int = Field(description="The fewest times this test can conclude anything at.")
@@ -710,7 +724,11 @@ class BatchSummary(BaseModel):
     """A batch as lists show it: no per-check detail."""
     id: uuid.UUID
     scope: Scope
-    statistical_test: StatisticalTestName
+    statistical_test: str = Field(description="The catalogue row's id the batch was created with.")
+    engine: StatisticalEngine = Field(
+        description="The arithmetic that row named when the batch was created. The batch is "
+                    "finished with it even if the row is edited or deleted later.",
+    )
     parameters: dict[str, float] = Field(description="Every parameter, defaults filled in.")
     note: str | None
     status: BatchStatusName = Field(
@@ -768,9 +786,10 @@ class ComparisonRequest(BaseModel):
         description="The batch to judge: every difference is B − A, so \"better\" means B "
                     "passes more often than A.",
     )
-    statistical_test: StatisticalTestName = Field(
-        StatisticalTestName.pass_rates,
-        description="A comparison test from the catalogue (`kind: comparison`).",
+    statistical_test: str = Field(
+        "pass_rates",
+        description="The `id` of a comparison test from `GET /statistics/tests` "
+                    "(`kind: comparison`); an unknown id is a 422.",
     )
     parameters: dict[str, float] = Field(
         default_factory=dict,
@@ -931,7 +950,7 @@ class ComparedBatch(BaseModel):
     id: uuid.UUID
     note: str | None
     status: BatchStatusName
-    statistical_test: StatisticalTestName
+    statistical_test: str
     times_requested: int
     created_at: datetime
 
@@ -939,7 +958,8 @@ class ComparedBatch(BaseModel):
 class ComparisonSummary(BaseModel):
     id: uuid.UUID
     scope: Scope
-    statistical_test: StatisticalTestName
+    statistical_test: str = Field(description="The catalogue row's id the comparison ran.")
+    engine: StatisticalEngine = Field(description="The arithmetic that row named at the time.")
     parameters: dict[str, float]
     note: str | None
     batch_a: ComparedBatch = Field(description="The baseline.")

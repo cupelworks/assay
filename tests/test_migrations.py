@@ -1491,3 +1491,66 @@ def test_the_z_tests_table_is_dropped_and_comes_back_empty(scratch):
     command.downgrade(config, "3b7e2d9c41f6")
     assert "statistical_verifications" in tables()
     assert "z_statistic" in _table_columns(db_path, "statistical_verifications")
+
+
+# --- 7a3c5e9f1b2d: the statistical tests as rows, the engine on batches ---
+
+
+def _insert_batch(db_path: Path, n: int, statistical_test: str, engine: str | None = None) -> str:
+    """A batch row as the previous revision wrote it (the status enum is stored
+    by name); with `engine` once the column exists."""
+    batch_id = f"{n:032x}"
+    columns = ("id, statistical_test, parameters, times_requested, runs_per_time, plan, status, "
+               "created_at")
+    values = "?, ?, '{}', 29, 1, '{}', 'pending', '2026-10-01'"
+    if engine is not None:
+        columns, values = columns + ", engine", values + ", ?"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            f"INSERT INTO statistical_batches ({columns}) VALUES ({values})",
+            (batch_id, statistical_test, *([engine] if engine is not None else [])))
+    return batch_id
+
+
+def test_upgrade_seeds_the_eight_tests_and_records_the_engine_on_batches(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "5d8a1f3c9e27")
+    batch_id = _insert_batch(db_path, 30, "one_sample_t")
+
+    command.upgrade(config, "7a3c5e9f1b2d")
+
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            "SELECT id, engine, name, parameters, engine_settings FROM statistical_tests "
+            "ORDER BY created_at").fetchall()
+        batch = connection.execute(
+            "SELECT statistical_test, engine FROM statistical_batches WHERE id = ?",
+            (batch_id,)).fetchone()
+    assert [row[0] for row in rows] == [
+        "binomial_gate", "one_sample_t", "judge_stability", "pass_rates", "no_worse",
+        "mean_scores", "score_ranks", "paired_entries"]
+    assert all(row[0] == row[1] for row in rows)
+    assert rows[0][2] == "Binomial gate"
+    assert [p["key"] for p in json.loads(rows[0][3])] == ["target", "confidence"]
+    assert json.loads(rows[1][4]) == {"floor": 10, "recommended_times": 30}
+    assert batch == ("one_sample_t", "one_sample_t")
+    assert "engine" in _table_columns(db_path, "statistical_comparisons")
+
+
+def test_downgrade_drops_the_tests_table_and_the_engine_columns(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "7a3c5e9f1b2d")
+    batch_id = _insert_batch(db_path, 31, "binomial_gate", engine="binomial_gate")
+
+    command.downgrade(config, "5d8a1f3c9e27")
+
+    with sqlite3.connect(db_path) as connection:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        kept = connection.execute(
+            "SELECT statistical_test FROM statistical_batches WHERE id = ?",
+            (batch_id,)).fetchone()
+    assert "statistical_tests" not in tables
+    assert "engine" not in _table_columns(db_path, "statistical_batches")
+    assert "engine" not in _table_columns(db_path, "statistical_comparisons")
+    assert kept == ("binomial_gate",)

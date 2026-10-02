@@ -7,12 +7,12 @@ import pytest
 
 from assay.models import BatchStatus, Comparison, TestStatus, TestTypesModel
 from assay.schemas import TestTypeAssignment
-from assay.schemas.statistics import StatisticalTestName
+from assay.schemas.statistics import StatisticalEngine
 from assay.services.statistics import compute
 from assay.services.statistics.compute import BatchEntry, BatchRun
 
-GATE = StatisticalTestName.binomial_gate
-T_TEST = StatisticalTestName.one_sample_t
+GATE = StatisticalEngine.binomial_gate
+T_TEST = StatisticalEngine.one_sample_t
 GATE_PARAMETERS = {"target": 0.9, "confidence": 0.95}
 T_PARAMETERS = {"confidence": 0.95, "difference": 0.05, "spread": 0.1}
 

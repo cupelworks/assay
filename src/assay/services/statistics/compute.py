@@ -35,7 +35,7 @@ from assay.schemas.statistics import (
     ScoreSummaryOut,
     SeriesPoint,
     Statistic,
-    StatisticalTestName,
+    StatisticalEngine,
 )
 from assay.services.statistics.catalogue import MAX_TIMES, POWER, percent
 
@@ -100,13 +100,13 @@ def threshold_of(assignment: TestTypeAssignment) -> float | None:
 JUDGE_ENGINE = "llm_judge"
 
 
-def applies(name: StatisticalTestName, row: TestTypesModel | None,
+def applies(name: StatisticalEngine, row: TestTypesModel | None,
             recorded_answer: bool = True) -> tuple[bool, str | None]:
     """Whether a batch test gives a check of this type a verdict, and why not
     (the estimate and the result use this one rule)."""
-    if name == StatisticalTestName.one_sample_t and (row is None or row.comparison is None):
+    if name == StatisticalEngine.one_sample_t and (row is None or row.comparison is None):
         return False, "Pass/fail only: a t-test needs a score on a scale"
-    if name == StatisticalTestName.judge_stability:
+    if name == StatisticalEngine.judge_stability:
         if row is None or row.engine != JUDGE_ENGINE:
             return False, "Not an LLM judge: judge stability tests the judge's own consistency"
         if not recorded_answer:
@@ -265,15 +265,15 @@ def _no_verdict(reason: str, n: int) -> Statistic:
                      times_to_decide_message=None)
 
 
-def check_result(name: StatisticalTestName, parameters: dict[str, float], floor: int,
+def check_result(name: StatisticalEngine, parameters: dict[str, float], floor: int,
                  stopped: bool, assignment: TestTypeAssignment, row: TestTypesModel | None,
                  runs: list[BatchRun], recorded_answer: bool = True) -> CheckResult:
     confidence = parameters["confidence"]
     series, counts = fold(runs, assignment.label)
     decided = [p for p in series if p.passed is not None]
     passed = counts.passed
-    is_gate = name == StatisticalTestName.binomial_gate
-    is_stability = name == StatisticalTestName.judge_stability
+    is_gate = name == StatisticalEngine.binomial_gate
+    is_stability = name == StatisticalEngine.judge_stability
     target = parameters["target"] if is_gate or is_stability else None
 
     pass_rate = None
@@ -302,7 +302,7 @@ def check_result(name: StatisticalTestName, parameters: dict[str, float], floor:
     does_apply, why_not = applies(name, row, recorded_answer)
     statistic = agreement = None
     if does_apply:
-        n = len(scores) if name == StatisticalTestName.one_sample_t else len(decided)
+        n = len(scores) if name == StatisticalEngine.one_sample_t else len(decided)
         if n == 0:
             statistic = _no_verdict(
                 "No run decided this check: every one errored or was Not Ran.", 0)
@@ -395,7 +395,7 @@ def failures_by_entry(entries: list[BatchEntry], confidence: float) -> FailuresB
                            entries=worst)
 
 
-def compute(name: StatisticalTestName, parameters: dict[str, float], floor: int,
+def compute(name: StatisticalEngine, parameters: dict[str, float], floor: int,
             stopped: bool, entries: list[BatchEntry], types: dict[str, TestTypesModel],
             computed_at) -> BatchResult:
     """The result of a batch none of whose runs is Pending or Running."""

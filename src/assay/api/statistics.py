@@ -19,8 +19,8 @@ from assay.schemas.statistics import (
     ComparisonRequest,
     Estimate,
     EstimateRequest,
+    StatisticalEngine,
     StatisticalTestCatalogue,
-    StatisticalTestName,
 )
 from assay.services.statistics import (
     catalogue,
@@ -31,6 +31,7 @@ from assay.services.statistics import (
     get_comparison,
     list_batches,
     list_comparisons,
+    load_catalogue,
     stop_batch,
 )
 
@@ -72,6 +73,7 @@ _SCOPE_409 = {
 _ESTIMATE_GATE = {
     "scope": _SCOPE_SET,
     "statistical_test": "binomial_gate",
+    "engine": "binomial_gate",
     "parameters": {"target": 0.9, "confidence": 0.95},
     "floor": 29,
     "floor_explanation": "At 29 times only a perfect record proves \"at least 90.0%\" with "
@@ -117,6 +119,7 @@ _ESTIMATE_T = {
     "scope": {"kind": "test", "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
               "name": "Summarise the outage report"},
     "statistical_test": "one_sample_t",
+    "engine": "one_sample_t",
     "parameters": {"confidence": 0.95, "difference": 0.05, "spread": 0.1},
     "floor": 10,
     "floor_explanation": "Below 10 scores the spread is too poorly known for a t-test; 27 "
@@ -165,11 +168,13 @@ _ESTIMATE_T = {
     path="/statistics/tests",
     summary="List the statistical tests",
     responses={200: {
-        "description": "Every statistical test Assay offers, with what it asks, the "
-                       "parameters it takes, its floor and where the floor comes from.",
+        "description": "Every statistical test Assay offers — one per `statistical_tests` "
+                       "row — with the engine it runs, what it asks, the parameters it "
+                       "takes, its floor and where the floor comes from.",
     }},
 )
-async def list_statistical_tests() -> StatisticalTestCatalogue:  # pragma: no cover
+async def list_statistical_tests(
+        session: SessionDep) -> StatisticalTestCatalogue:  # pragma: no cover
     """The catalogue behind **Run with statistics** — the third way to run a test, a
     test set or a test plan, beside running once and replaying.
 
@@ -199,6 +204,13 @@ async def list_statistical_tests() -> StatisticalTestCatalogue:  # pragma: no co
 
     `wave` says which build wave a test came in (1 or 2); both are available.
 
+    **The catalogue is a table**, like the check types: each row names the `engine` in code
+    that does its arithmetic and carries the texts, each parameter's default and range, and
+    the engine's settings (`engine_settings`). A new test on an existing engine — a stricter
+    gate with other defaults — is a row, not code. `id` is what to send as
+    `statistical_test`; a batch records its row's id and engine and is finished with the
+    engine, so editing a row later never changes a stored batch.
+
     **The floor**, and why there is one: some questions can't be answered below a certain
     size, whatever happens. If a check really passed exactly 90% of the time, 29 passes in
     a row would happen only 4.7% of the time — rarer than 1 in 20 — so 29 straight passes
@@ -213,7 +225,7 @@ async def list_statistical_tests() -> StatisticalTestCatalogue:  # pragma: no co
 
     `max_times` and `max_runs` bound one batch (times, and times × entries).
     """
-    return catalogue()
+    return catalogue(await load_catalogue(session))
 
 
 @router.post(
@@ -331,6 +343,7 @@ _BATCH_COMMON = {
     "id": _BATCH_ID,
     "scope": _SCOPE_SET,
     "statistical_test": "binomial_gate",
+    "engine": "binomial_gate",
     "parameters": {"target": 0.9, "confidence": 0.95},
     "note": "Prompt v3, temperature 0.2",
     "floor": 29,
@@ -721,6 +734,7 @@ _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
                                  "value": _BATCH_FINISHED},
                 "t_test": {"summary": "A t-test check, as it appears in a result",
                            "value": {**_BATCH_FINISHED, "statistical_test": "one_sample_t",
+                                     "engine": "one_sample_t",
                                      "parameters": {"confidence": 0.95, "difference": 0.05,
                                                     "spread": 0.1},
                                      "status": "Passed",
@@ -736,6 +750,7 @@ _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
                 "judge_stability": {
                     "summary": "Judge stability: the judge agreed with itself 29 times of 29",
                     "value": {**_BATCH_FINISHED, "statistical_test": "judge_stability",
+                              "engine": "judge_stability",
                               "status": "Passed", "summary": "Passed: the check is proven.",
                               "verdicts": _ONE_PROVEN,
                               "result": {**_BATCH_FINISHED["result"], "checks_total": 1,
@@ -878,6 +893,7 @@ _COMPARISON_SUMMARY = {
     "id": _COMPARISON_ID,
     "scope": _SCOPE_SET,
     "statistical_test": "pass_rates",
+    "engine": "pass_rates",
     "parameters": {"confidence": 0.95},
     "note": "Prompt v3 against v2",
     "batch_a": _compared(_BATCH_ID, "Prompt v2", "2026-09-30T16:02:11+02:00"),
@@ -903,7 +919,7 @@ def _comparison_with(test: str, parameters: dict, checks: list[dict], verdicts: 
                      summary: str, paired: dict | None = None) -> dict:
     counts = {"better": 0, "worse": 0, "no_difference": 0, "no_worse": 0,
               "inconclusive": 0, "none": 0} | verdicts
-    return {**_COMPARISON, "statistical_test": test, "parameters": parameters,
+    return {**_COMPARISON, "statistical_test": test, "engine": test, "parameters": parameters,
             "summary": summary,
             "result": {"verdicts": counts, "summary": summary,
                        "entries": [{**_COMPARISON["result"]["entries"][0], "checks": checks}],
@@ -922,12 +938,12 @@ _COMPARISON_EXAMPLES = {
     "mean_scores": {"summary": "Mean scores (Welch): ROUGE higher under B",
                     "value": _comparison_with(
                         "mean_scores", {"confidence": 0.95},
-                        [computed.score_comparison(StatisticalTestName.mean_scores)],
+                        [computed.score_comparison(StatisticalEngine.mean_scores)],
                         {"better": 1}, "B is better on 1 of 1 check, worse on none.")},
     "score_ranks": {"summary": "Score ranks (Mann–Whitney): ROUGE higher under B",
                     "value": _comparison_with(
                         "score_ranks", {"confidence": 0.95},
-                        [computed.score_comparison(StatisticalTestName.score_ranks)],
+                        [computed.score_comparison(StatisticalEngine.score_ranks)],
                         {"better": 1}, "B is better on 1 of 1 check, worse on none.")},
     "paired_entries": {"summary": "Paired by entry: seven entries, one verdict (entries and "
                                   "pairs cut)",

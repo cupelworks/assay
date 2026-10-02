@@ -1,4 +1,4 @@
-from assay.services.statistics.catalogue import catalogue
+from assay.services.statistics.catalogue import catalogue, load_catalogue
 from assay.services.statistics.create_batch import create_batch
 from assay.services.statistics.create_comparison import create_comparison
 from assay.services.statistics.estimate import estimate_batch
@@ -17,5 +17,6 @@ __all__ = [
     "get_comparison",
     "list_batches",
     "list_comparisons",
+    "load_catalogue",
     "stop_batch",
 ]

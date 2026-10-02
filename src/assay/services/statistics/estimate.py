@@ -17,34 +17,36 @@ from assay.schemas.statistics import (
     Estimate,
     EstimateRequest,
     GateRuleSchema,
+    StatisticalEngine,
     StatisticalTestKind,
-    StatisticalTestName,
     Warning_,
 )
 from assay.services.statistics import compute
 from assay.services.statistics._scope import ResolvedScope, ScopeEntry, resolve_scope
 from assay.services.statistics.catalogue import (
+    CatalogueEntry,
     _invalid,
     check_times,
+    load_entry,
     resolve_parameters,
     sizing,
 )
 from assay.target_settings import resolve_target_settings
 
 
-def applies(name: StatisticalTestName, scope: ResolvedScope, entry: ScopeEntry,
+def applies(engine: StatisticalEngine, scope: ResolvedScope, entry: ScopeEntry,
             assignment: TestTypeAssignment) -> tuple[bool, str | None]:
     """Whether a batch test gives this check a verdict, and why not: the
     result's own rule (compute.applies), so the estimate never promises a
     verdict the result won't give."""
-    return compute.applies(name, scope.types.get(assignment.name), entry.recorded_answer)
+    return compute.applies(engine, scope.types.get(assignment.name), entry.recorded_answer)
 
 
 _NOTHING_APPLIES = {
-    StatisticalTestName.one_sample_t:
+    StatisticalEngine.one_sample_t:
         "None of this scope's checks is scored on a scale: a t-test needs ROUGE, BLEU, "
         "METEOR, BERTScore or Cosine Similarity",
-    StatisticalTestName.judge_stability:
+    StatisticalEngine.judge_stability:
         "None of this scope's checks is an LLM judge on a recorded answer: judge stability "
         "needs one (Correctness, Relevance, Bias, Toxicity or Hallucination, on an entry "
         "with a recorded answer)",
@@ -57,28 +59,29 @@ async def estimate_batch(request: EstimateRequest, session: AsyncSession) -> Est
     Raises:
         HTTPException: 404 for an unknown test, set or plan; 409 for an empty
             set or plan, or an entry with no checks.
-        RequestValidationError: 422 for a comparison test, parameters out of
-            range, times below the floor or above the limits, or a scope none
-            of whose checks this test applies to.
+        RequestValidationError: 422 for an unknown statistical test or a
+            comparison test, parameters out of range, times below the floor or
+            above the limits, or a scope none of whose checks this test
+            applies to.
     """
-    parameters = resolve_parameters(request.statistical_test, request.parameters,
-                                    StatisticalTestKind.batch)
+    chosen = await load_entry(request.statistical_test, StatisticalTestKind.batch, session)
+    parameters = resolve_parameters(chosen, request.parameters)
     scope = await resolve_scope(request, session)
-    return await build_estimate(request.statistical_test, parameters, request.times,
-                                scope, session)
+    return await build_estimate(chosen, parameters, request.times, scope, session)
 
 
-async def build_estimate(name: StatisticalTestName, parameters: dict[str, float],
+async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
                          times: int | None, scope: ResolvedScope,
                          session: AsyncSession) -> Estimate:
-    size = sizing(name, parameters)
+    engine = chosen.engine.id
+    size = sizing(chosen, parameters)
     times = times or size.default
 
     entries, total, applicable = [], 0, 0
     for entry in scope.entries:
         checks = []
         for assignment in entry.assignments:
-            does_apply, reason = applies(name, scope, entry, assignment)
+            does_apply, reason = applies(engine, scope, entry, assignment)
             checks.append(CheckPlan(label=assignment.label, test_type=assignment.name,
                                     applies=does_apply, reason=reason))
             total += 1
@@ -89,20 +92,20 @@ async def build_estimate(name: StatisticalTestName, parameters: dict[str, float]
             recorded_answer=entry.recorded_answer, checks=checks,
         ))
     if applicable == 0:
-        raise _invalid([(("statistical_test",), _NOTHING_APPLIES[name])])
-    check_times(times, scope.runs_per_time, size.floor, name, parameters)
+        raise _invalid([(("statistical_test",), _NOTHING_APPLIES[engine])])
+    check_times(times, scope.runs_per_time, size.floor, chosen, parameters)
 
     application_per_time = sum(not entry.recorded_answer for entry in scope.entries)
     judge_per_time = sum(scope.is_judge(a) for entry in scope.entries for a in entry.assignments)
     rule = None
-    if name == StatisticalTestName.binomial_gate:
+    if engine == StatisticalEngine.binomial_gate:
         gate_rule = stats_math.binomial_gate_rule(
             times, parameters["target"], parameters["confidence"])
         rule = GateRuleSchema(times=times, pass_at_least=gate_rule.pass_at_least,
                               fail_at_most=gate_rule.fail_at_most)
 
     return Estimate(
-        scope=scope.scope, statistical_test=name, parameters=parameters,
+        scope=scope.scope, statistical_test=chosen.id, engine=engine, parameters=parameters,
         floor=size.floor, floor_explanation=size.explanation, suggestions=size.suggestions,
         times=times, rule=rule, runs_per_time=scope.runs_per_time,
         runs_total=times * scope.runs_per_time,

@@ -24,7 +24,7 @@ from assay.services.statistics._batches import (
     scope_names,
 )
 from assay.services.statistics._comparisons import describe_many
-from assay.services.statistics.catalogue import _invalid, resolve_parameters
+from assay.services.statistics.catalogue import _invalid, load_entry, resolve_parameters
 from assay.services.statistics.compare import compare
 
 logger = logging.getLogger(__name__)
@@ -37,8 +37,9 @@ _CONTENT = (("input", "the input"), ("expected_output", "the expected output"),
 async def create_comparison(request: ComparisonRequest,
                             session: AsyncSession) -> ComparisonDetails:
     """Raises:
-        RequestValidationError: 422 for the same batch twice, a batch test,
-            parameters out of range, batches of different scopes, or a
+        RequestValidationError: 422 for the same batch twice, an unknown
+            statistical test or a batch test, parameters out of range,
+            batches of different scopes, or a
             standalone test edited between the two (its input, expected
             output or checks).
         HTTPException: 404 for an unknown batch; 409 while either batch
@@ -46,8 +47,8 @@ async def create_comparison(request: ComparisonRequest,
     """
     if request.batch_a == request.batch_b:
         raise _invalid([(("batch_b",), "Compare two different batches")])
-    name = request.statistical_test
-    parameters = resolve_parameters(name, request.parameters, StatisticalTestKind.comparison)
+    chosen = await load_entry(request.statistical_test, StatisticalTestKind.comparison, session)
+    parameters = resolve_parameters(chosen, request.parameters)
     batch_a = await find_batch_or_404(request.batch_a, session)
     batch_b = await find_batch_or_404(request.batch_b, session)
     for batch in (batch_a, batch_b):
@@ -68,11 +69,12 @@ async def create_comparison(request: ComparisonRequest,
     entries_a = await load_entries(batch_a, session)
     entries_b = await load_entries(batch_b, session)
     types = await load_types(entries_a + entries_b, session)
-    result = compare(entries_a, entries_b, parameters, name, types)
+    result = compare(entries_a, entries_b, parameters, chosen.engine.id, types)
     comparison = StatisticalComparisonModel(
         id=uuid.uuid4(), batch_a_id=batch_a.id, batch_b_id=batch_b.id,
         test_id=batch_a.test_id, test_set_id=batch_a.test_set_id,
-        test_plan_id=batch_a.test_plan_id, statistical_test=name.value,
+        test_plan_id=batch_a.test_plan_id, statistical_test=chosen.id,
+        engine=chosen.engine.id.value,
         parameters=parameters, note=(request.note or "").strip() or None,
         result=result.model_dump(mode="json"),
     )

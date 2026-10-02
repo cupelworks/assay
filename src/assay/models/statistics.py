@@ -29,6 +29,45 @@ class BatchStatus(StrEnum):
 IN_PROGRESS_BATCH_STATUSES = frozenset({BatchStatus.pending, BatchStatus.running})
 
 
+class StatisticalTestModel(Base):
+    """
+    A catalogue entry describing a statistical test a batch can run, or two
+    batches can be compared with — the counterpart of TestTypesModel.
+
+    A row configures an engine in code (services/statistics/catalogue.py,
+    ENGINES): engine names the arithmetic; parameters the inputs it takes,
+    each with its label, default, range and hint; engine_settings the
+    engine's own constants for this test (the t-test's floor and comfortable
+    size); and the texts say what the test asks, where its floor comes from
+    and how it decides. A new test on an existing engine with other defaults
+    is a row, not code. The engine's shape — its kind, what it reads, which
+    checks it applies to, its verdicts, the floor's kind and formula — is the
+    engine's and isn't stored: a row can't contradict it.
+
+    id is the plain-text key a request sends as statistical_test and a batch
+    records, with the engine's name beside it: a row edited or deleted later
+    never changes how a stored batch is finished or read.
+    """
+
+    __tablename__ = "statistical_tests"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    engine: Mapped[str] = mapped_column(Text, nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    # [{"key", "label", "kind", "default", "min", "max", "hint"}, ...]: exactly
+    # the engine's parameter keys, each with the kind the engine reads it as
+    parameters: Mapped[list] = mapped_column(JSON, nullable=False)
+    # the engine's constants for this row, e.g. {"floor": 10, "recommended_times": 30}
+    engine_settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    floor_explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    # worked values, e.g. [{"target": 0.9, "confidence": 0.95, "times": 29}]
+    floor_examples: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now().astimezone())
+
+
 class StatisticalBatchModel(Base):
     """
     One "run with statistics": a scope run N times as one batch, and the
@@ -57,9 +96,11 @@ class StatisticalBatchModel(Base):
     test_plan_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_plans.id"), nullable=True, index=True)
 
-    # A name from the catalogue (services/statistics/catalogue.py): plain
-    # text, like a check's engine — the catalogue grows with code
+    # The id of a statistical_tests row, and the engine that row named when
+    # the batch was created — both kept as text, like a result keeps its
+    # engine, so a row edited or deleted later can't reinterpret the batch
     statistical_test: Mapped[str] = mapped_column(Text, nullable=False)
+    engine: Mapped[str] = mapped_column(Text, nullable=False)
     # Every parameter, defaults filled in, as the batch was created with
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False)
     times_requested: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -109,7 +150,9 @@ class StatisticalComparisonModel(Base):
         ForeignKey("test_sets.id"), nullable=True, index=True)
     test_plan_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_plans.id"), nullable=True, index=True)
+    # the statistical_tests row's id and the engine it named, as on a batch
     statistical_test: Mapped[str] = mapped_column(Text, nullable=False)
+    engine: Mapped[str] = mapped_column(Text, nullable=False)
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     result: Mapped[dict] = mapped_column(JSON, nullable=False)

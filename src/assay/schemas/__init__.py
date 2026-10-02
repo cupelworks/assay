@@ -127,8 +127,8 @@ from assay.schemas.statistics import (
     EstimateRequest,
     Scope,
     ScopeKind,
+    StatisticalEngine,
     StatisticalTestCatalogue,
-    StatisticalTestName,
 )
 
 __all__ = [
@@ -239,5 +239,5 @@ __all__ = [
     "Scope",
     "ScopeKind",
     "StatisticalTestCatalogue",
-    "StatisticalTestName",
+    "StatisticalEngine",
 ]

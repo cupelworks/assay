@@ -28,7 +28,7 @@ from assay.schemas.statistics import (
     Pair,
     PairedComparison,
     ScoreSummaryOut,
-    StatisticalTestName,
+    StatisticalEngine,
     Unmatched,
     UnmatchedSide,
 )
@@ -228,7 +228,7 @@ def _score_ranks(common: dict, scores_a: list[float], scores_b: list[float],
     )
 
 
-def compare_check(name: StatisticalTestName, parameters: dict[str, float], label: str,
+def compare_check(name: StatisticalEngine, parameters: dict[str, float], label: str,
                   test_type: str, row: TestTypesModel | None, entry_a: BatchEntry,
                   entry_b: BatchEntry) -> CheckComparison:
     confidence = parameters["confidence"]
@@ -240,18 +240,18 @@ def compare_check(name: StatisticalTestName, parameters: dict[str, float], label
     if missing:
         return _no_verdict(common, f"Batch {' and '.join(missing)} has no evaluated run of "
                                    "this check: nothing to compare.")
-    if name in (StatisticalTestName.mean_scores, StatisticalTestName.score_ranks):
+    if name in (StatisticalEngine.mean_scores, StatisticalEngine.score_ranks):
         if not scored:
             return _no_verdict(common, "Pass/fail only: comparing scores needs a check "
                                        "scored on a scale.")
         higher_is_better = row.comparison.value == "gte"
-        compare_scores = (_mean_scores if name == StatisticalTestName.mean_scores
+        compare_scores = (_mean_scores if name == StatisticalEngine.mean_scores
                           else _score_ranks)
         return compare_scores(common, scores_a, scores_b, confidence, higher_is_better)
-    if name == StatisticalTestName.no_worse:
+    if name == StatisticalEngine.no_worse:
         return _no_worse(common, a, b, confidence, parameters["margin"])
     checked = _pass_rates(common, a, b, confidence)
-    if name == StatisticalTestName.paired_entries:
+    if name == StatisticalEngine.paired_entries:
         checked.verdict = None
         checked.reason = "Judged together with every other pair: see `paired`."
         checked.times_to_decide = checked.times_to_decide_message = None
@@ -261,7 +261,7 @@ def compare_check(name: StatisticalTestName, parameters: dict[str, float], label
 def check_comparison(label: str, test_type: str, entry_a: BatchEntry, entry_b: BatchEntry,
                      confidence: float) -> CheckComparison:
     """Pass rates, B against A, for one check."""
-    return compare_check(StatisticalTestName.pass_rates, {"confidence": confidence}, label,
+    return compare_check(StatisticalEngine.pass_rates, {"confidence": confidence}, label,
                          test_type, None, entry_a, entry_b)
 
 
@@ -318,7 +318,7 @@ def paired(entries: list[EntryComparison], confidence: float) -> PairedCompariso
 
 def compare(entries_a: list[BatchEntry], entries_b: list[BatchEntry],
             parameters: dict[str, float],
-            name: StatisticalTestName = StatisticalTestName.pass_rates,
+            name: StatisticalEngine = StatisticalEngine.pass_rates,
             types: dict[str, TestTypesModel] | None = None) -> ComparisonResult:
     types = types or {}
     by_id_b = {entry.entry_id: entry for entry in entries_b}
@@ -354,7 +354,7 @@ def compare(entries_a: list[BatchEntry], entries_b: list[BatchEntry],
 
     verdicts = {verdict.value: 0 for verdict in ComparisonVerdictName} | {"none": 0}
     paired_result = None
-    if name == StatisticalTestName.paired_entries:
+    if name == StatisticalEngine.paired_entries:
         paired_result = paired(compared, parameters["confidence"])
         verdicts[paired_result.verdict.value if paired_result.verdict else "none"] += 1
         sentence = paired_result.reason

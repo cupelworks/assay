@@ -13,7 +13,7 @@ from assay.schemas.statistics import (
     ComparisonResult,
     ComparisonSummary,
     Scope,
-    StatisticalTestName,
+    StatisticalEngine,
 )
 from assay.services.statistics._batches import scope_kind, scope_names
 
@@ -30,7 +30,7 @@ async def find_comparison_or_404(comparison_id: uuid.UUID,
 def compared(batch: StatisticalBatchModel) -> ComparedBatch:
     return ComparedBatch(id=batch.id, note=batch.note,
                          status=BatchStatusName(batch.status.value),
-                         statistical_test=StatisticalTestName(batch.statistical_test),
+                         statistical_test=batch.statistical_test,
                          times_requested=batch.times_requested, created_at=batch.created_at)
 
 
@@ -48,7 +48,8 @@ async def describe_many(comparisons: list[StatisticalComparisonModel], session: 
         fields = dict(
             id=comparison.id,
             scope=Scope(kind=kind, id=scope_id, name=names.get(scope_id, "")),
-            statistical_test=StatisticalTestName(comparison.statistical_test),
+            statistical_test=comparison.statistical_test,
+            engine=StatisticalEngine(comparison.engine),
             parameters=comparison.parameters, note=comparison.note,
             batch_a=compared(batch_a), batch_b=compared(batches[comparison.batch_b_id]),
             summary=comparison.result["summary"], created_at=comparison.created_at,

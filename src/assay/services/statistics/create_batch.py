@@ -17,7 +17,7 @@ from assay.services.runs.create_new_run import (
 )
 from assay.services.statistics._batches import describe
 from assay.services.statistics._scope import resolve_scope
-from assay.services.statistics.catalogue import resolve_parameters
+from assay.services.statistics.catalogue import load_entry, resolve_parameters
 from assay.services.statistics.estimate import build_estimate
 from assay.services.tests._common import _find_all_tests_with_details_or_404
 
@@ -34,19 +34,20 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
     Raises:
         HTTPException: 404 for an unknown test, set or plan; 409 for an empty
             set or plan, or an entry with no checks.
-        RequestValidationError: 422 for a comparison test, parameters out of
-            range, times below the floor or above the limits, or no applicable
-            check.
+        RequestValidationError: 422 for an unknown statistical test or a
+            comparison test, parameters out of range, times below the floor or
+            above the limits, or no applicable check.
     """
-    name = request.statistical_test
-    parameters = resolve_parameters(name, request.parameters, StatisticalTestKind.batch)
+    chosen = await load_entry(request.statistical_test, StatisticalTestKind.batch, session)
+    parameters = resolve_parameters(chosen, request.parameters)
     scope = await resolve_scope(request, session)
-    estimate = await build_estimate(name, parameters, request.times, scope, session)
+    estimate = await build_estimate(chosen, parameters, request.times, scope, session)
     times = estimate.times
 
     batch = StatisticalBatchModel(
         id=uuid.uuid4(), test_id=request.test_id, test_set_id=request.test_set_id,
-        test_plan_id=request.test_plan_id, statistical_test=name.value,
+        test_plan_id=request.test_plan_id, statistical_test=chosen.id,
+        engine=chosen.engine.id.value,
         parameters=parameters, times_requested=times, runs_per_time=scope.runs_per_time,
         plan={"floor": estimate.floor,
               "calls_per_time": {"application": estimate.calls.application.per_time,
@@ -75,11 +76,14 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
     await session.commit()
 
     logger.info(
-        "Created batch %s of %s %s: %s, %d times, %d runs, %d application and %d judge calls",
-        batch.id, scope.scope.kind.value, scope.scope.id, name.value, times, len(runs),
-        estimate.calls.application.total, estimate.calls.judge.total,
+        "Created batch %s of %s %s: %s (%s), %d times, %d runs, %d application and %d judge "
+        "calls",
+        batch.id, scope.scope.kind.value, scope.scope.id, chosen.id, chosen.engine.id.value,
+        times,
+        len(runs), estimate.calls.application.total, estimate.calls.judge.total,
         extra={"batch_id": batch.id, "scope_kind": scope.scope.kind.value,
-               "scope_id": scope.scope.id, "statistical_test": name.value, "times": times,
+               "scope_id": scope.scope.id, "statistical_test": chosen.id,
+               "engine": chosen.engine.id.value, "times": times,
                "run_count": len(runs),
                "application_calls": estimate.calls.application.total,
                "judge_calls": estimate.calls.judge.total},

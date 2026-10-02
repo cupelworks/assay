@@ -6,7 +6,7 @@ import uuid
 
 from assay.models import Comparison, TestStatus, TestTypesModel
 from assay.schemas import TestTypeAssignment
-from assay.schemas.statistics import StatisticalTestName
+from assay.schemas.statistics import StatisticalEngine
 from assay.services.statistics import compare, compute
 from assay.services.statistics.compute import BatchEntry, BatchRun
 
@@ -67,7 +67,7 @@ def judge_stability_check() -> dict:
     """A Toxicity judge asked 29 times about one recorded answer, every time
     saying pass: proven to agree with itself at least 90% of the time."""
     entry = _entry("Toxicity", "Toxicity", [True] * 29)
-    check = compute.check_result(StatisticalTestName.judge_stability,
+    check = compute.check_result(StatisticalEngine.judge_stability,
                                  {"target": 0.9, "confidence": 0.95}, 29, False,
                                  entry.assignments[0], _TOXICITY, entry.runs, True)
     return _dump(check)
@@ -86,7 +86,7 @@ _SCORES_A = [0.61, 0.58, 0.66, 0.55, 0.63, 0.6, 0.57, 0.64, 0.59, 0.62]
 _SCORES_B = [0.7, 0.65, 0.72, 0.61, 0.69, 0.74, 0.66, 0.7]
 
 
-def score_comparison(name: StatisticalTestName) -> dict:
+def score_comparison(name: StatisticalEngine) -> dict:
     """ROUGE under prompt v2 (A) and v3 (B)."""
     check = compare.compare_check(
         name, {"confidence": 0.95}, "ROUGE", "ROUGE", _ROUGE,
@@ -97,7 +97,7 @@ def score_comparison(name: StatisticalTestName) -> dict:
 def no_worse_comparison() -> dict:
     """27 of 29 against 29 of 29 with a 10-point margin."""
     check = compare.compare_check(
-        StatisticalTestName.no_worse, {"confidence": 0.95, "margin": 0.1}, "Contains",
+        StatisticalEngine.no_worse, {"confidence": 0.95, "margin": 0.1}, "Contains",
         "Contains", _CONTAINS, _entry("Contains", "Contains", [True] * 29),
         _entry("Contains", "Contains", [True] * 27 + [False] * 2, offset=100))
     return _dump(check)
@@ -110,7 +110,7 @@ def paired_comparison() -> dict:
     entries_b = [_entry("Contains", "Contains", [True] * 29, i, f"Entry {i + 1}",
                         1000 + 100 * i) for i in range(7)]
     result = compare.compare(entries_a, entries_b, {"confidence": 0.95},
-                             StatisticalTestName.paired_entries, {"Contains": _CONTAINS})
+                             StatisticalEngine.paired_entries, {"Contains": _CONTAINS})
     data = result.model_dump(mode="json")
     data["entries"] = data["entries"][:1]
     return _cut(data)

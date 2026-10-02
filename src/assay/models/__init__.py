@@ -14,6 +14,7 @@ from assay.models.statistics import (
     BatchStatus,
     StatisticalBatchModel,
     StatisticalComparisonModel,
+    StatisticalTestModel,
 )
 from assay.models.test import (
     TERMINAL_STATUSES,
@@ -51,6 +52,7 @@ __all__ = [
     "StandaloneRunModel",
     "StatisticalBatchModel",
     "StatisticalComparisonModel",
+    "StatisticalTestModel",
     "JudgeCheckModel",
     "TargetCheckModel",
     "TargetCheckStatus",

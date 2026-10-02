@@ -107,7 +107,7 @@ def test_the_summary_leads_with_what_got_worse():
 # --- the second wave ---
 
 from assay.models import Comparison, TestTypesModel  # noqa: E402
-from assay.schemas.statistics import StatisticalTestName as Test  # noqa: E402
+from assay.schemas.statistics import StatisticalEngine as Test  # noqa: E402
 
 ROUGE = TestTypesModel(name="ROUGE", engine="rouge", comparison=Comparison.gte,
                        config_fields=[{"key": "threshold", "min": 0.0, "max": 1.0}])
