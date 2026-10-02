@@ -37,7 +37,7 @@ def test_a_changed_recorded_answer_is_compared_and_stored(db):
     check = comparison["result"]["entries"][0]["checks"][0]
     assert check["verdict"] == "worse"
     assert (check["a"]["pass_rate"]["point"], check["b"]["pass_rate"]["point"]) == (1.0, 0.0)
-    assert comparison["summary"] == "B is worse on 1 of 1 check."
+    assert comparison["summary"] == "B is worse on the check."
     read = db.client.get(f"/statistics/comparisons/{comparison['id']}").json()
     assert read == comparison
     bare = db.client.get(f"/statistics/comparisons/{comparison['id']}",

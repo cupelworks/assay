@@ -63,8 +63,13 @@ def test_the_gate_suggests_the_floor_one_spare_and_one_miss(db):
         (29, "floor", True), (30, "absorbs_not_ran", False), (46, "allows_one_miss", False)]
     assert estimate["times"] == 29
     assert estimate["rule"] == {"times": 29, "pass_at_least": 29, "fail_at_most": 22}
-    assert "0.9^29 = 0.0471" in estimate["floor_explanation"]
-    assert "at least 90%" in estimate["floor_explanation"]
+    assert estimate["floor_explanation"] == (
+        "A few in a row can be luck. A check that really passed only 9 times in 10 would pass "
+        "29 times in a row less than 1 time in 20, so 29 out of 29 is enough to be 95% sure. "
+        "With fewer, even a perfect record could be luck.")
+    assert [s["label"] for s in estimate["suggestions"]] == [
+        "29 times · no failure allowed", "30 times · one spare, in case a run can't run",
+        "46 times · one failure allowed"]
 
 
 def test_the_gates_rule_follows_the_times_asked(db):
@@ -149,7 +154,8 @@ def test_a_t_test_applies_only_to_scored_checks(db):
     assert checks["ROUGE"]["applies"] is True
     assert checks["Contains"] == {"label": "Contains", "test_type": "Contains",
                                   "applies": False,
-                                  "reason": "Pass/fail only: a t-test needs a score on a scale"}
+                                  "reason": "It only passes or fails: an average needs a "
+                                            "check that gives a score"}
     assert estimate["checks_applicable"] == 1
     assert "checks_not_applicable" in [w["code"] for w in estimate["warnings"]]
 
@@ -229,8 +235,8 @@ def test_times_below_the_floor_is_a_422_naming_the_floor(db):
 
     assert response.status_code == 422
     assert _messages(response) == [(("body", "times"),
-                                    "At least 29 times for the Binomial gate with these "
-                                    "parameters: below that no result could conclude anything")]
+                                    "Passes reliably needs at least 29 times with these "
+                                    "settings: with fewer, no result could give an answer")]
 
 
 def test_parameters_out_of_range_and_unknown_are_listed_together(db):
@@ -283,7 +289,7 @@ def test_a_t_test_needs_a_scored_check(db):
     response = _estimate(db, test_id=test["id"], statistical_test="one_sample_t")
 
     assert response.status_code == 422
-    assert "a t-test needs ROUGE" in _messages(response)[0][1]
+    assert "an average needs ROUGE" in _messages(response)[0][1]
 
 
 def test_the_estimate_creates_nothing(db):
@@ -306,10 +312,10 @@ def test_judge_stability_applies_to_judge_checks_of_recorded_answers_only(db):
     checks = {(e["name"], c["label"]): (c["applies"], c["reason"])
               for e in estimate["entries"] for c in e["checks"]}
     assert checks == {
-        ("asks", "Toxicity"): (False, "The answer varies between runs: a changed verdict "
-                                      "can't be pinned on the judge"),
-        ("recorded", "Contains"): (False, "Not an LLM judge: judge stability tests the "
-                                          "judge's own consistency"),
+        ("asks", "Toxicity"): (False, "The answer changes from run to run, so a changed "
+                                      "verdict could be the answer's doing, not the judge's"),
+        ("recorded", "Contains"): (False, "Not an LLM judge: this test checks whether the "
+                                          "judge is consistent"),
         ("recorded", "Toxicity"): (True, None),
     }
     assert estimate["floor"] == 29
@@ -321,7 +327,7 @@ def test_judge_stability_needs_a_judge_check_on_a_recorded_answer(db):
     response = _estimate(db, test_id=test["id"], statistical_test="judge_stability")
 
     assert response.status_code == 422
-    assert "judge stability needs one" in _messages(response)[0][1]
+    assert "this test needs one" in _messages(response)[0][1]
 
 
 # --- review fixes: a default the API would refuse ---
@@ -337,8 +343,8 @@ def test_a_t_test_gap_too_small_for_one_batch_defaults_to_the_most_a_batch_can_r
     estimate = response.json()
     default = next(s for s in estimate["suggestions"] if s["default"])
     assert default["times"] == estimate["times"] == MAX_TIMES
-    assert default["label"].startswith(f"{MAX_TIMES} · the most a batch can run")
-    assert "at 1000 it sees that gap less than 80% of the time" in estimate["floor_explanation"]
+    assert default["label"].startswith(f"{MAX_TIMES} times · the most a batch can run")
+    assert "1000 times will often miss a gap that small" in estimate["floor_explanation"]
 
 
 def test_a_default_bigger_than_the_scope_can_run_is_capped_with_a_warning(db):

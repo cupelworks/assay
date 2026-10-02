@@ -45,7 +45,8 @@ def test_newcombes_small_example_is_worse_with_fishers_p_value():
     assert check.verdict == "worse"
     assert (check.difference.lower, check.difference.upper) == (-0.809, -0.1705)
     assert check.p_value_method == "fisher_exact"
-    assert check.reason.startswith("B passes less often than A: 30% against 90%")
+    assert check.reason == ("B is worse: it passed 30% of the time against A's 90%. That's a "
+                            "real drop, not chance (95% sure).")
 
 
 def test_no_real_difference_says_how_big_two_new_batches_would_need_to_be():
@@ -54,7 +55,9 @@ def test_no_real_difference_says_how_big_two_new_batches_would_need_to_be():
     assert check.verdict == "no_difference"
     assert check.times_to_decide == 647
     assert check.times_to_decide_message == (
-        "Two new batches of about 647 times each would likely tell 93.1% from 96.55%.")
+        "Two new batches of about 647 times each would likely tell them apart.")
+    assert check.reason == ("No clear difference: 93% for A, 97% for B. With this many runs, "
+                            "a gap that small could be chance.")
 
 
 def test_equal_rates_can_never_be_told_apart():
@@ -62,7 +65,8 @@ def test_equal_rates_can_never_be_told_apart():
 
     assert check.verdict == "no_difference"
     assert check.times_to_decide is None
-    assert "no batch size would show a difference" in check.times_to_decide_message
+    assert "no number of runs would show a difference" in check.times_to_decide_message
+    assert check.reason == "No difference: both passed every time."
 
 
 def test_errored_runs_are_left_out_of_both_samples():
@@ -75,7 +79,7 @@ def test_a_side_with_nothing_evaluated_has_no_verdict():
     check = _check(_entry(0, errored=29), _entry(29))
 
     assert check.verdict is None and check.difference is None
-    assert check.reason == "Batch A has no evaluated run of this check: nothing to compare."
+    assert check.reason == "Batch A has no result for this check: nothing to compare."
 
 
 def test_entries_and_checks_in_one_batch_only_are_listed_not_compared():
@@ -92,8 +96,8 @@ def test_entries_and_checks_in_one_batch_only_are_listed_not_compared():
     assert [(u.name, u.label, u.only_in) for u in result.unmatched] == [
         ("shared", "Old", "a"), ("shared", "New", "b"), ("removed", None, "a"),
         ("added", None, "b")]
-    assert result.summary == ("No real difference on any of the 1 check at this size. 4 "
-                              "entries or checks are in one batch only.")
+    assert result.summary == ("No clear difference on the check. 4 entries or checks are in "
+                              "one batch only.")
 
 
 def test_the_summary_leads_with_what_got_worse():
@@ -174,7 +178,7 @@ def test_comparing_scores_of_a_pass_fail_check_has_no_verdict():
                                   "Contains", CONTAINS, _entry(20), _entry(28))
 
     assert check.verdict is None
-    assert check.reason.startswith("Pass/fail only")
+    assert check.reason.startswith("It only passes or fails")
 
 
 def test_no_worse_proves_a_margin_with_one_sided_bounds():
@@ -191,7 +195,7 @@ def test_no_worse_proves_a_margin_with_one_sided_bounds():
     assert (undecided.difference.lower, undecided.difference.upper) == (-0.2127, 0.0718)
     assert undecided.times_to_decide is not None
     assert compare.summary({"no_worse": 1, "inconclusive": 1}, []) == (
-        "B is no worse on 1 of 2 checks; 1 not proven either way.")
+        "B is still as good on 1 of 2 checks; 1 can't be told yet.")
 
 
 def test_paired_entries_judges_every_pair_together():
@@ -209,7 +213,7 @@ def test_paired_entries_judges_every_pair_together():
     assert result.verdicts["better"] == 1 and sum(result.verdicts.values()) == 1
     check = result.entries[0].checks[0]
     assert check.verdict is None and check.difference is not None
-    assert result.summary.startswith("Entry by entry, B passes more often than A")
+    assert result.summary.startswith("Entry by entry, B is better: on average it passes")
 
 
 def test_paired_entries_needs_six_pairs():
@@ -218,4 +222,5 @@ def test_paired_entries_needs_six_pairs():
 
     assert result.paired.verdict is None
     assert result.paired.reason == (
-        "1 pair both batches evaluated: at least 6 are needed to compare entry by entry.")
+        "Only 1 check across the entries ran in both batches; comparing entry by entry needs "
+        "at least 6.")

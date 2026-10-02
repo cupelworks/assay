@@ -76,14 +76,17 @@ _ESTIMATE_GATE = {
     "engine": "binomial_gate",
     "parameters": {"target": 0.9, "confidence": 0.95},
     "floor": 29,
-    "floor_explanation": "At 29 times only a perfect record proves \"at least 90%\" with "
-                         "95% confidence: 0.9^29 = 0.0471 is at most 0.05. With fewer, no "
-                         "result could prove it.",
+    "floor_explanation": "A few in a row can be luck. A check that really passed only 9 times "
+                         "in 10 would pass 29 times in a row less than 1 time in 20, so 29 "
+                         "out of 29 is enough to be 95% sure. With fewer, even a perfect "
+                         "record could be luck.",
     "suggestions": [
-        {"times": 29, "kind": "floor", "label": "29 · no miss allowed", "default": True},
-        {"times": 30, "kind": "absorbs_not_ran", "label": "30 · absorbs one Not Ran",
+        {"times": 29, "kind": "floor", "label": "29 times · no failure allowed",
+         "default": True},
+        {"times": 30, "kind": "absorbs_not_ran",
+         "label": "30 times · one spare, in case a run can't run",
          "default": False},
-        {"times": 46, "kind": "allows_one_miss", "label": "46 · allows one miss",
+        {"times": 46, "kind": "allows_one_miss", "label": "46 times · one failure allowed",
          "default": False},
     ],
     "times": 29,
@@ -123,15 +126,17 @@ _ESTIMATE_T = {
     "engine": "one_sample_t",
     "parameters": {"confidence": 0.95, "difference": 0.05, "spread": 0.1},
     "floor": 10,
-    "floor_explanation": "Below 10 scores the spread is too poorly known for a t-test; 27 "
-                         "times would see a mean 0.05 of the range from the threshold 80% of "
-                         "the time, with scores spreading 0.1 of the range.",
+    "floor_explanation": "An average of fewer than 10 scores is too unreliable to judge. To "
+                         "spot an average 5% of the score range away from the threshold, when "
+                         "scores usually vary by about 10% of the range, takes about 27 times.",
     "suggestions": [
-        {"times": 10, "kind": "floor", "label": "10 · the least that means anything",
+        {"times": 10, "kind": "floor", "label": "10 times · the minimum",
          "default": False},
-        {"times": 27, "kind": "detects_difference", "label": "27 · sees a gap of 0.05",
+        {"times": 27, "kind": "detects_difference",
+         "label": "27 times · spots a gap of 5% of the range",
          "default": True},
-        {"times": 30, "kind": "recommended", "label": "30 · comfortable", "default": False},
+        {"times": 30, "kind": "recommended", "label": "30 times · comfortable",
+         "default": False},
     ],
     "times": 27,
     "rule": None,
@@ -148,7 +153,8 @@ _ESTIMATE_T = {
         "checks": [
             {"label": "ROUGE", "test_type": "ROUGE", "applies": True, "reason": None},
             {"label": "Word Count Limit", "test_type": "Word Count Limit", "applies": False,
-             "reason": "Pass/fail only: a t-test needs a score on a scale"},
+             "reason": "It only passes or fails: an average needs a check that gives a "
+                       "score"},
         ],
     }],
     "warnings": [
@@ -157,10 +163,10 @@ _ESTIMATE_T = {
                     "runs."},
         {"code": "nothing_can_vary",
          "message": "1 recorded entry has no judge check: every run of it gives the same "
-                    "result, so its statistics only repeat one run's outcome."},
+                    "result, so running it many times only repeats that one result."},
         {"code": "checks_not_applicable",
-         "message": "1 check is not covered by this statistical test: its pass rate is "
-                    "shown without a verdict."},
+         "message": ("1 check isn't something this test can judge: you'll see how often it passed, "
+                    "without an answer.")},
     ],
 }
 
@@ -264,29 +270,28 @@ async def list_statistical_tests(
             "content": {"application/json": {"examples": {
                 "below_floor": {"summary": "Fewer times than the floor", "value":
                     _validation_error((["body", "times"],
-                                       "At least 29 times for the Binomial gate with these "
-                                       "parameters: below that no result could conclude "
-                                       "anything"))},
+                                       "Passes reliably needs at least 29 times with these "
+                                       "settings: with fewer, no result could give an "
+                                       "answer"))},
                 "parameter": {"summary": "A parameter out of range", "value":
                     _validation_error((["body", "parameters", "target"],
                                        "Must be between 0.5 and 0.999"))},
                 "floor_too_high": {"summary": "A target too high for one batch", "value":
                     _validation_error((["body", "parameters"],
-                                       "These parameters need at least 2995 times, more "
-                                       "than the 1000 a batch can run: lower the target or "
-                                       "the confidence"))},
+                                       "These settings need at least 2995 times, more than "
+                                       "the 1000 a batch can run: lower the target or how "
+                                       "sure you want to be"))},
                 "no_scored_check": {"summary": "A t-test with nothing scored", "value":
                     _validation_error((["body", "statistical_test"],
-                                       "None of this scope's checks is scored on a scale: a "
-                                       "t-test needs ROUGE, BLEU, METEOR, BERTScore or "
-                                       "Cosine Similarity"))},
+                                       "None of these checks gives a score: an average "
+                                       "needs ROUGE, BLEU, METEOR, BERTScore or Cosine "
+                                       "Similarity"))},
                 "no_judge_check": {"summary": "Judge stability with no judge to test", "value":
                     _validation_error((["body", "statistical_test"],
-                                       "None of this scope's checks is an LLM judge on a "
-                                       "recorded answer: judge stability needs one "
-                                       "(Correctness, Relevance, Bias, Toxicity or "
-                                       "Hallucination, on an entry with a recorded "
-                                       "answer)"))},
+                                       "None of these checks is an LLM judge on a recorded "
+                                       "answer: this test needs one (Correctness, Relevance, "
+                                       "Bias, Toxicity or Hallucination, on a test with a "
+                                       "recorded answer)"))},
                 "scope": {"summary": "Not exactly one scope", "value":
                     _validation_error((["body"], "Value error, Give exactly one of test_id, "
                                                  "test_set_id or test_plan_id"))},
@@ -432,7 +437,7 @@ _GATE_PASS_CHECK = {
     "scores": None,
     "statistic": {
         "verdict": "pass",
-        "reason": "95% confident it passes at least 90% of the time (30 of 30).",
+        "reason": "Passed 30 of 30 runs: it passes at least 9 times in 10 (95% sure).",
         "n": 30,
         "interval": {"lower": 0.905, "point": 1.0, "upper": 1.0, "method": "exact",
                      "level": 0.95, "sides": "one"},
@@ -453,8 +458,8 @@ _GATE_UNDECIDED_CHECK = {
     "scores": None,
     "statistic": {
         "verdict": "inconclusive",
-        "reason": "Not proven either way at 30 runs: 28 of 30 passed, against a target of "
-                  "90%.",
+        "reason": ("Can't tell yet: it passed 28 of 30 runs. That's close to 9 times in 10, and 30 "
+                   "runs aren't enough to know which side it's on."),
         "n": 30,
         "interval": {"lower": 0.8047, "point": 0.9333, "upper": 0.988, "method": "exact",
                      "level": 0.95, "sides": "one"},
@@ -462,8 +467,8 @@ _GATE_UNDECIDED_CHECK = {
         "rule": {"times": 30, "pass_at_least": 30, "fail_at_most": 23},
         "t": None, "df": None, "standard_error": None,
         "times_to_decide": 215,
-        "times_to_decide_message": "A new batch of about 215 times would likely prove it at "
-                                   "least 90%.",
+        "times_to_decide_message": "A new batch of about 215 times would likely show that it "
+                                   "passes at least 9 times in 10.",
     },
     "series": [_point(1, True, "Amber"), _point(2, False, "Amber"), _point(3, True)],
 }
@@ -478,8 +483,8 @@ _BATCH_FINISHED = {
                   "judge": {"planned": 30, "finished": 30, "in_flight": 0}},
         "entries": None,
     },
-    "summary": "Inconclusive: 1 proven, 1 undecided of 2 checks; a bigger batch would decide "
-               "the rest.",
+    "summary": ("Inconclusive: of the 2 checks, 1 met the goal and 1 can't be told yet. A bigger "
+                "batch would settle it."),
     "verdicts": {"pass": 1, "fail": 0, "inconclusive": 1, "none": 0},
     "completed_at": "2026-10-01T09:52:41+02:00",
     "result": {
@@ -487,8 +492,8 @@ _BATCH_FINISHED = {
         "checks_total": 2,
         "checks_applicable": 2,
         "verdicts": {"pass": 1, "fail": 0, "inconclusive": 1, "none": 0},
-        "summary": "Inconclusive: 1 proven, 1 undecided of 2 checks; a bigger batch would "
-                   "decide the rest.",
+        "summary": ("Inconclusive: of the 2 checks, 1 met the goal and 1 can't be told yet. A "
+                    "bigger batch would settle it."),
         "entries": [{
             "entry_id": _ENTRY_ID, "test_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             "test_set_id": _SET_ID, "test_set_name": "Support answers",
@@ -512,8 +517,7 @@ _T_CHECK = {
                "p25": 0.5825, "median": 0.605, "p75": 0.6275, "p90": 0.642},
     "statistic": {
         "verdict": "pass",
-        "reason": "95% confident the mean score is at least the threshold 0.5 (mean 0.605 "
-                  "over 10 runs).",
+        "reason": "Average score 0.605 over 10 runs: safely above the 0.5 needed (95% sure).",
         "n": 10,
         "interval": {"lower": 0.5854, "point": 0.605, "upper": 0.6246, "method": "t",
                      "level": 0.95, "sides": "one"},
@@ -662,9 +666,9 @@ _CREATE_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
             "content": {"application/json": {"examples": {
                 "below_floor": {"summary": "Fewer times than the floor", "value":
                     _validation_error((["body", "times"],
-                                       "At least 29 times for the Binomial gate with these "
-                                       "parameters: below that no result could conclude "
-                                       "anything"))},
+                                       "Passes reliably needs at least 29 times with these "
+                                       "settings: with fewer, no result could give an "
+                                       "answer"))},
                 "too_many_runs": {"summary": "More runs than a batch can create", "value":
                     _validation_error((["body", "times"],
                                        "1000 times × 11 runs each is 11000 runs, more than "
@@ -750,12 +754,12 @@ _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
                                      "parameters": {"confidence": 0.95, "difference": 0.05,
                                                     "spread": 0.1},
                                      "status": "Passed",
-                                     "summary": "Passed: the check is proven.",
+                                     "summary": "Passed: the check met the goal.",
                                      "verdicts": _ONE_PROVEN,
                                      "result": {**_BATCH_FINISHED["result"],
                                                 "checks_total": 1, "checks_applicable": 1,
                                                 "verdicts": _ONE_PROVEN,
-                                                "summary": "Passed: the check is proven.",
+                                                "summary": "Passed: the check met the goal.",
                                                 "entries": [{
                                                     **_BATCH_FINISHED["result"]["entries"][0],
                                                     "checks": [_T_CHECK]}]}}},
@@ -763,12 +767,12 @@ _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
                     "summary": "Judge stability: the judge agreed with itself 29 times of 29",
                     "value": {**_BATCH_FINISHED, "statistical_test": "judge_stability",
                               "engine": "judge_stability",
-                              "status": "Passed", "summary": "Passed: the check is proven.",
+                              "status": "Passed", "summary": "Passed: the check met the goal.",
                               "verdicts": _ONE_PROVEN,
                               "result": {**_BATCH_FINISHED["result"], "checks_total": 1,
                                          "checks_applicable": 1,
                                          "verdicts": _ONE_PROVEN,
-                                         "summary": "Passed: the check is proven.",
+                                         "summary": "Passed: the check met the goal.",
                                          "entries": [{
                                              **_BATCH_FINISHED["result"]["entries"][0],
                                              "recorded_answer": True,
@@ -886,8 +890,8 @@ _CHECK_BETTER = {
     "difference": {"lower": 0.0815, "point": 0.2759, "upper": 0.46, "method": "newcombe",
                    "level": 0.95, "sides": "two"},
     "verdict": "better",
-    "reason": "B passes more often than A: 96.55% against 68.97%, 95% confident the "
-              "difference is between +8.2 points and +46.0 points.",
+    "reason": ("B is better: it passed 97% of the time against A's 69%. That's a real improvement, "
+               "not chance (95% sure)."),
     "p_value": 0.0054, "p_value_method": "chi_square",
     "times_to_decide": None, "times_to_decide_message": None,
 }
@@ -898,12 +902,12 @@ _CHECK_SAME = {
     "difference": {"lower": -0.1116, "point": 0.0345, "upper": 0.1878, "method": "newcombe",
                    "level": 0.95, "sides": "two"},
     "verdict": "no_difference",
-    "reason": "No real difference at this size: 93.1% for A, 96.55% for B; the difference "
-              "could be anywhere between -11.2 points and +18.8 points.",
+    "reason": ("No clear difference: 93% for A, 97% for B. With this many runs, a gap that small "
+               "could be chance."),
     "p_value": 1.0, "p_value_method": "fisher_exact",
     "times_to_decide": 647,
     "times_to_decide_message": "Two new batches of about 647 times each would likely tell "
-                               "93.1% from 96.55%.",
+                               "them apart.",
 }
 
 
@@ -960,17 +964,17 @@ _COMPARISON_EXAMPLES = {
                  "value": _comparison_with(
                      "no_worse", {"confidence": 0.95, "margin": 0.1},
                      [computed.no_worse_comparison()], {"inconclusive": 1},
-                     "B is no worse on 0 of 1 check; 1 not proven either way.")},
+                     "Can't tell yet whether B is still as good on the check.")},
     "mean_scores": {"summary": "Mean scores (Welch): ROUGE higher under B",
                     "value": _comparison_with(
                         "mean_scores", {"confidence": 0.95},
                         [computed.score_comparison(StatisticalEngine.mean_scores)],
-                        {"better": 1}, "B is better on 1 of 1 check, worse on none.")},
+                        {"better": 1}, "B is better on the check.")},
     "score_ranks": {"summary": "Score ranks (Mann–Whitney): ROUGE higher under B",
                     "value": _comparison_with(
                         "score_ranks", {"confidence": 0.95},
                         [computed.score_comparison(StatisticalEngine.score_ranks)],
-                        {"better": 1}, "B is better on 1 of 1 check, worse on none.")},
+                        {"better": 1}, "B is better on the check.")},
     "paired_entries": {"summary": "Paired by entry: seven entries, one verdict (entries and "
                                   "pairs cut)",
                        "value": {**_COMPARISON, "statistical_test": "paired_entries",
@@ -1139,7 +1143,7 @@ _CREATE_COMPARISON_DOC = inspect.cleandoc("""
                 "batch_test": {"summary": "A batch test instead of a comparison test",
                                "value": _validation_error((
                                    ["body", "statistical_test"],
-                                   "Binomial gate isn't a comparison test; see GET "
+                                   "Passes reliably isn't a comparison test; see GET "
                                    "/statistics/tests"))},
             }}},
         },

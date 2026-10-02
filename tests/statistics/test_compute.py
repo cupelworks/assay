@@ -84,7 +84,7 @@ def test_a_perfect_record_at_the_floor_passes_with_the_exact_bound():
 
     statistic = check.statistic
     assert statistic.verdict == "pass"
-    assert statistic.reason == "95% confident it passes at least 90% of the time (29 of 29)."
+    assert statistic.reason == "Passed 29 of 29 runs: it passes at least 9 times in 10 (95% sure)."
     assert statistic.interval.model_dump() == {"lower": 0.9019, "point": 1.0, "upper": 1.0,
                                                "method": "exact", "level": 0.95,
                                                "sides": "one"}
@@ -102,7 +102,8 @@ def test_an_undecided_gate_says_how_big_a_new_batch_would_decide_it():
     assert statistic.verdict == "inconclusive"
     assert statistic.times_to_decide == 239
     assert statistic.times_to_decide_message == (
-        "A new batch of about 239 times would likely prove it at least 90%.")
+        "A new batch of about 239 times would likely show that it passes at least 9 times "
+        "in 10.")
 
 
 def test_a_check_under_the_target_reads_would_prove_it_below():
@@ -111,7 +112,8 @@ def test_a_check_under_the_target_reads_would_prove_it_below():
     statistic = _check(runs=runs).statistic
 
     assert statistic.verdict == "inconclusive"
-    assert "would likely prove it below 90%" in statistic.times_to_decide_message
+    assert "would likely show that it passes less than 9 times in 10" in (
+        statistic.times_to_decide_message)
 
 
 def test_a_proven_failure():
@@ -120,7 +122,8 @@ def test_a_proven_failure():
     statistic = _check(runs=runs).statistic
 
     assert statistic.verdict == "fail"
-    assert statistic.reason.startswith("95% confident it passes less than 90%")
+    assert statistic.reason == ("Passed only 14 of 29 runs: it passes less than 9 times in 10 "
+                                "(95% sure).")
     assert statistic.times_to_decide is None
 
 
@@ -129,8 +132,16 @@ def test_a_stopped_batch_below_the_floor_gets_no_verdict_but_keeps_its_rate():
                    stopped=True)
 
     assert check.statistic.verdict is None
-    assert "below the 29 this test needs" in check.statistic.reason
+    assert "fewer than the 29 this test needs" in check.statistic.reason
     assert check.pass_rate.point == 1.0
+
+
+def test_a_check_that_never_passed_says_so():
+    runs = [_run(i, results=_passed("Contains", passed=False)) for i in range(1, 30)]
+
+    statistic = _check(runs=runs).statistic
+
+    assert statistic.reason == "Failed all 29 runs: it passes less than 9 times in 10 (95% sure)."
 
 
 def test_no_evaluated_run_no_verdict():
@@ -173,14 +184,14 @@ def test_an_undecided_mean_says_how_big_a_new_batch_would_decide_it():
 
     assert statistic.verdict == "inconclusive"
     assert statistic.times_to_decide is not None
-    assert "at least the threshold 0.6" in statistic.times_to_decide_message
+    assert "the average is above the 0.6 needed" in statistic.times_to_decide_message
 
 
 def test_identical_scores_are_decided_by_the_threshold_alone():
     statistic = _scored([0.7] * 10).statistic
 
     assert statistic.verdict == "pass"
-    assert statistic.reason.endswith("every score was 0.7, so there's no spread.")
+    assert statistic.reason.endswith("— every run scored exactly 0.7.")
 
 
 def test_a_pass_fail_check_under_a_t_test_has_no_statistic():
@@ -188,7 +199,7 @@ def test_a_pass_fail_check_under_a_t_test_has_no_statistic():
                    parameters=T_PARAMETERS, floor=10)
 
     assert (check.applies, check.statistic) == (False, None)
-    assert check.reason == "Pass/fail only: a t-test needs a score on a scale"
+    assert check.reason == "It only passes or fails: an average needs a check that gives a score"
     assert check.pass_rate.point == 1.0
 
 
@@ -222,12 +233,16 @@ def _batch(passes_per_check, stopped=False, status=TestStatus.green):
 
 
 @pytest.mark.parametrize("passes,status,sentence", [
-    ([29, 29], BatchStatus.passed, "Passed: every one of the 2 checks is proven."),
-    ([29], BatchStatus.passed, "Passed: the check is proven."),
-    ([29, 10], BatchStatus.failed, "Failed: 1 of 2 checks proven to fail."),
+    ([29, 29], BatchStatus.passed, "Passed: both checks met the goal."),
+    ([29, 29, 29], BatchStatus.passed, "Passed: all 3 checks met the goal."),
+    ([29], BatchStatus.passed, "Passed: the check met the goal."),
+    ([29, 10], BatchStatus.failed, "Failed: 1 of the 2 checks fell short of the goal."),
+    ([10], BatchStatus.failed, "Failed: the check fell short of the goal."),
     ([29, 27], BatchStatus.inconclusive,
-     "Inconclusive: 1 proven, 1 undecided of 2 checks; a bigger batch would decide the "
-     "undecided."),
+     "Inconclusive: of the 2 checks, 1 met the goal and 1 can't be told yet. A bigger batch "
+     "would settle it."),
+    ([27], BatchStatus.inconclusive,
+     "Inconclusive: the check can't be told yet. A bigger batch would settle it."),
 ])
 def test_the_roll_up_and_its_sentence(passes, status, sentence):
     result, runs = _batch(passes)
@@ -258,7 +273,7 @@ def test_nothing_evaluated_is_not_ran_with_the_first_reason():
 
     assert status == BatchStatus.not_ran
     assert compute.summary(status, result, 29, 29, runs) == (
-        "Not Ran: no run could be evaluated — No application URL is set")
+        "Not Ran: no run could be carried out — No application URL is set")
     assert result.verdicts == {"pass": 0, "fail": 0, "inconclusive": 0, "none": 1}
 
 
@@ -290,8 +305,7 @@ def test_failures_concentrated_in_one_entry_are_located():
 
     assert diagnostic.verdict == "concentrated"
     assert [e.name for e in diagnostic.entries] == ["flaky", "fine", "steady"]
-    assert diagnostic.reason.startswith("Failures concentrate in some entries (p = ")
-    assert "most in flaky, fine" in diagnostic.reason
+    assert diagnostic.reason == "Most failures come from a few entries: flaky, fine."
     assert diagnostic.df == 2
 
 
@@ -311,7 +325,7 @@ def test_errored_and_not_ran_runs_are_left_out_and_nothing_failing_has_no_verdic
     diagnostic = compute.failures_by_entry(entries, 0.95)
 
     assert diagnostic.verdict is None
-    assert diagnostic.reason == "No run failed: there are no failures to locate."
+    assert diagnostic.reason == "No run failed: there are no failures to look into."
     assert [(e.passed, e.failed) for e in diagnostic.entries] == [(1, 0), (2, 0)]
 
 
@@ -326,7 +340,7 @@ def test_a_t_test_below_its_floor_has_no_verdict_even_when_not_stopped():
     statistic = _scored(SCORES[:3]).statistic
 
     assert statistic.verdict is None
-    assert statistic.reason.startswith("Only 3 scores were evaluated, below the 10")
+    assert statistic.reason.startswith("Only 3 scores came back, fewer than the 10 needed")
 
 
 def test_times_to_decide_is_never_below_the_floor():
@@ -339,7 +353,8 @@ def test_times_to_decide_is_never_below_the_floor():
     assert statistic.verdict == "inconclusive"
     assert statistic.times_to_decide == 29
     assert statistic.times_to_decide_message == (
-        "A new batch of about 29 times would likely prove it below 90%.")
+        "A new batch of about 29 times would likely show that it passes less than 9 times "
+        "in 10.")
 
 
 def test_a_check_too_close_to_its_target_says_no_batch_can_decide_it():
@@ -351,8 +366,8 @@ def test_a_check_too_close_to_its_target_says_no_batch_can_decide_it():
     assert statistic.verdict == "inconclusive"
     assert statistic.times_to_decide is None
     assert statistic.times_to_decide_message == (
-        "A new batch would need more than 1000 times to likely prove it below 90%: more than "
-        "one batch can run.")
+        "Showing that it passes less than 9 times in 10 would take more than 1000 times, more "
+        "than one batch can run.")
 
 
 def test_every_check_errored_in_every_run_is_not_ran_not_inconclusive():
@@ -370,5 +385,5 @@ def test_every_check_errored_in_every_run_is_not_ran_not_inconclusive():
 
     assert status == BatchStatus.not_ran
     assert compute.summary(status, result, 29, 29, runs) == (
-        "Not Ran: no check could be decided — every one errored in every run (No judge "
-        "configured). Fix that before running again: a bigger batch wouldn't help.")
+        "Not Ran: no check gave a result — each one errored in every run (No judge "
+        "configured). Fix that first: running more times won't help.")

@@ -45,12 +45,12 @@ def applies(engine: StatisticalEngine, scope: ResolvedScope, entry: compute.Batc
 
 _NOTHING_APPLIES = {
     StatisticalEngine.one_sample_t:
-        "None of this scope's checks is scored on a scale: a t-test needs ROUGE, BLEU, "
-        "METEOR, BERTScore or Cosine Similarity",
+        "None of these checks gives a score: an average needs ROUGE, BLEU, METEOR, BERTScore "
+        "or Cosine Similarity",
     StatisticalEngine.judge_stability:
-        "None of this scope's checks is an LLM judge on a recorded answer: judge stability "
-        "needs one (Correctness, Relevance, Bias, Toxicity or Hallucination, on an entry "
-        "with a recorded answer)",
+        "None of these checks is an LLM judge on a recorded answer: this test needs one "
+        "(Correctness, Relevance, Bias, Toxicity or Hallucination, on a test with a recorded "
+        "answer)",
 }
 
 
@@ -164,8 +164,7 @@ async def _warnings(scope: ResolvedScope, not_applicable: int, session: AsyncSes
                 code="nothing_can_vary",
                 message=f"{len(static)} recorded {'entry has' if one else 'entries have'} no "
                         f"judge check: every run of {'it' if one else 'them'} gives the same "
-                        f"result, so {'its' if one else 'their'} statistics only repeat one "
-                        "run's outcome.",
+                        "result, so running it many times only repeats that one result.",
             ))
     if any(scope.is_judge(a) for e in scope.entries for a in e.assignments):
         try:
@@ -204,9 +203,9 @@ async def _warnings(scope: ResolvedScope, not_applicable: int, session: AsyncSes
     if not_applicable:
         warnings.append(Warning_(
             code="checks_not_applicable",
-            message=f"{not_applicable} {'check is' if not_applicable == 1 else 'checks are'} "
-                    "not covered by this statistical test: "
-                    f"{'its' if not_applicable == 1 else 'their'} pass rate is shown "
-                    "without a verdict.",
+            message=f"{not_applicable} {'check' if not_applicable == 1 else 'checks'} "
+                    f"{'isn' if not_applicable == 1 else 'aren'}'t something this test can "
+                    "judge: you'll see how often "
+                    f"{'it' if not_applicable == 1 else 'they'} passed, without an answer.",
         ))
     return warnings

@@ -138,7 +138,7 @@ def test_a_finished_batch_is_computed_once_and_stored(db):
     second = _get(db, batch["id"])
 
     assert first["status"] == "Passed"
-    assert first["summary"] == "Passed: the check is proven."
+    assert first["summary"] == "Passed: the check met the goal."
     assert first["verdicts"] == {"pass": 1, "fail": 0, "inconclusive": 0, "none": 0}
     assert first["verdicts"] == first["result"]["verdicts"]
     assert first["completed_at"] is not None
@@ -184,7 +184,7 @@ def test_nothing_evaluated_is_not_ran(db):
     read = _get(db, batch["id"])
 
     assert read["status"] == "NotRan"
-    assert read["summary"].startswith("Not Ran: no run could be evaluated")
+    assert read["summary"].startswith("Not Ran: no run could be carried out")
 
 
 def test_a_set_batchs_entries_and_their_executions(db):
@@ -223,7 +223,7 @@ def test_the_list_filters_by_scope_and_status_and_refreshes_first(db):
     assert [b["id"] for b in everything["items"]] == [waiting["id"], done["id"]]
     assert "result" not in everything["items"][0]
     assert [b["id"] for b in passed["items"]] == [done["id"]]
-    assert passed["items"][0]["summary"] == "Passed: the check is proven."
+    assert passed["items"][0]["summary"] == "Passed: the check met the goal."
     assert passed["items"][0]["verdicts"] == {"pass": 1, "fail": 0, "inconclusive": 0,
                                               "none": 0}
     assert everything["items"][0]["verdicts"] is None

@@ -31,8 +31,8 @@ def test_a_judge_that_changes_its_mind_fails_judge_stability(db):
     check = read["result"]["entries"][0]["checks"][0]
     assert check["statistic"]["verdict"] == "fail"
     assert check["statistic"]["reason"].startswith(
-        "95% confident the judge agrees with itself less than 90% of the time (20 of 29 runs "
-        "said pass)")
+        "The judge is inconsistent: 20 of 29 runs said pass. It agrees with itself less than "
+        "9 times in 10 (95% sure).")
     assert check["agreement"]["point"] == 0.6897
     assert check["target"] == 0.9
 
@@ -52,7 +52,7 @@ def test_a_set_batch_says_where_failures_concentrate(db):
     assert diagnostic["verdict"] == "concentrated"
     assert [(e["name"], e["passed"], e["failed"]) for e in diagnostic["entries"]] == [
         ("flaky", 15, 14), ("steady", 29, 0)]
-    assert "most in flaky" in diagnostic["reason"]
+    assert diagnostic["reason"].startswith("Most failures come from a few entries: flaky")
 
 
 def _scored_batch(db, test, scores) -> dict:
@@ -91,7 +91,7 @@ def test_no_worse_takes_its_margin(db):
     comparison = response.json()
     assert comparison["parameters"] == {"margin": 0.15, "confidence": 0.95}
     assert comparison["result"]["entries"][0]["checks"][0]["verdict"] == "no_worse"
-    assert comparison["summary"] == "B is no worse than A on every one of the 1 check."
+    assert comparison["summary"] == "B is still as good as A on the check."
 
 
 def test_paired_entries_on_a_set(db):

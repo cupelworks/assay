@@ -32,7 +32,7 @@ from assay.schemas.statistics import (
     Unmatched,
     UnmatchedSide,
 )
-from assay.services.statistics.catalogue import MAX_TIMES, POWER, percent
+from assay.services.statistics.catalogue import MAX_TIMES, POWER, sure
 from assay.services.statistics.compute import BatchEntry, fold, make_interval, r4
 
 # the fewest scores per batch Mann–Whitney can conclude with at 95%, and the
@@ -67,22 +67,32 @@ def _side(entry: BatchEntry, label: str, confidence: float,
     return side, scores
 
 
+def _whole(rate: float) -> str:
+    """A pass rate as people read it: 0.9655 → "97%"."""
+    return f"{rate * 100:.0f}%"
+
+
 def _points(value: float) -> str:
-    """A difference of rates in percentage points: 0.123 → "+12.3 points"."""
-    return f"{value * 100:+.1f} points"
+    """A gap between pass rates in whole points: 0.123 → "12 points"."""
+    points = abs(value) * 100
+    return f"{points:.0f} {'point' if round(points) == 1 else 'points'}"
+
+
+def _change(verdict: ComparisonVerdictName) -> str:
+    return "improvement" if verdict == ComparisonVerdictName.better else "drop"
 
 
 def _rate(side: ComparisonSide) -> float:
     return side.counts.passed / side.counts.evaluated
 
 
-def _decide_message(times: int | None, what: str) -> str | None:
+def _decide_message(times: int | None) -> str | None:
     if times is None:
         return None
-    message = f"Two new batches of about {times} times each would likely {what}"
     if times > MAX_TIMES:
-        message += f", more than one batch can run ({MAX_TIMES})"
-    return message + "."
+        return (f"Telling them apart would take two new batches of about {times} times each, "
+                f"more than one batch can run ({MAX_TIMES}).")
+    return f"Two new batches of about {times} times each would likely tell them apart."
 
 
 def _no_verdict(common: dict, reason: str) -> CheckComparison:
@@ -99,25 +109,26 @@ def _pass_rates(common: dict, a: ComparisonSide, b: ComparisonSide,
     test = stats_math.compare_proportions(a.counts.passed, a.counts.evaluated,
                                           b.counts.passed, b.counts.evaluated, confidence)
     rate_a, rate_b = _rate(a), _rate(b)
-    sure = percent(confidence)
-    between = f"between {_points(test.lower)} and {_points(test.upper)}"
+    rates = f"it passed {_whole(rate_b)} of the time against A's {_whole(rate_a)}"
     times_to_decide = message = None
     if test.verdict == stats_math.ComparisonVerdict.better:
-        reason = (f"B passes more often than A: {percent(r4(rate_b))} against "
-                  f"{percent(r4(rate_a))}, {sure} confident the difference is {between}.")
+        reason = (f"B is better: {rates}. That's a real improvement, not chance "
+                  f"({sure(confidence)}).")
     elif test.verdict == stats_math.ComparisonVerdict.worse:
-        reason = (f"B passes less often than A: {percent(r4(rate_b))} against "
-                  f"{percent(r4(rate_a))}, {sure} confident the difference is {between}.")
+        reason = f"B is worse: {rates}. That's a real drop, not chance ({sure(confidence)})."
     else:
-        reason = (f"No real difference at this size: {percent(r4(rate_a))} for A, "
-                  f"{percent(r4(rate_b))} for B; the difference could be anywhere "
-                  f"{between}.")
+        if rate_a == rate_b:
+            reason = ("No difference: both failed every time." if rate_a == 0 else
+                      "No difference: both passed every time." if rate_a == 1 else
+                      f"No difference: both passed {_whole(rate_a)} of the time.")
+        else:
+            reason = (f"No clear difference: {_whole(rate_a)} for A, {_whole(rate_b)} for B. "
+                      f"With this many runs, a gap that small could be chance.")
         times_to_decide = stats_math.runs_needed_for_proportions(rate_a, rate_b, confidence,
                                                                  POWER)
-        message = _decide_message(
-            times_to_decide, f"tell {percent(r4(rate_a))} from {percent(r4(rate_b))}")
+        message = _decide_message(times_to_decide)
         if times_to_decide is None:
-            message = ("Both passed equally often: no batch size would show a difference "
+            message = ("Both passed equally often: no number of runs would show a difference "
                        "that isn't there.")
     return CheckComparison(
         **common,
@@ -134,26 +145,26 @@ def _no_worse(common: dict, a: ComparisonSide, b: ComparisonSide, confidence: fl
     test = stats_math.non_inferiority(a.counts.passed, a.counts.evaluated, b.counts.passed,
                                       b.counts.evaluated, margin, confidence)
     rate_a, rate_b = _rate(a), _rate(b)
-    sure, allowed = percent(confidence), _points(-margin)
-    rates = f"{percent(r4(rate_b))} against {percent(r4(rate_a))}"
+    allowed = _points(margin)
+    rates = f"B passed {_whole(rate_b)} of the time against A's {_whole(rate_a)}"
     times_to_decide = message = None
     if test.verdict == "no_worse":
-        reason = (f"{sure} confident B is no worse than A by more than "
-                  f"{margin * 100:g} points ({rates}; B − A is at least "
-                  f"{_points(test.lower)}).")
+        reason = (f"B is still as good: at most {allowed} below A ({rates}, "
+                  f"{sure(confidence)}).")
     elif test.verdict == "worse":
-        reason = (f"{sure} confident B is worse than A by more than {margin * 100:g} points "
-                  f"({rates}; B − A is at most {_points(test.upper)}).")
+        reason = f"B is worse: more than {allowed} below A ({rates}, {sure(confidence)})."
     else:
-        reason = (f"Not proven either way: {rates}; B − A could be as low as "
-                  f"{_points(test.lower)}, below the allowed {allowed}.")
+        reason = (f"Can't tell yet: {rates}. With this many runs, B could still be more than "
+                  f"{allowed} worse.")
         times_to_decide = stats_math.runs_needed_for_non_inferiority(
             rate_a, rate_b, margin, confidence, POWER)
-        message = _decide_message(times_to_decide,
-                                  f"show B no worse by more than {margin * 100:g} points")
-        if times_to_decide is None:
-            message = ("B's observed rate is already below what the margin allows: no batch "
-                       "size would likely show it no worse.")
+        if times_to_decide is not None:
+            message = (f"Two new batches of about {times_to_decide} times each would likely "
+                       f"settle it" + (f", more than one batch can run ({MAX_TIMES})"
+                                        if times_to_decide > MAX_TIMES else "") + ".")
+        else:
+            message = (f"B already passes more than {allowed} less often than A: more runs "
+                       "wouldn't show it's still as good.")
     return CheckComparison(
         **common,
         difference=make_interval(test.lower, test.difference, test.upper,
@@ -173,31 +184,31 @@ def _direction(difference_sign: int, higher_is_better: bool) -> ComparisonVerdic
 def _mean_scores(common: dict, scores_a: list[float], scores_b: list[float],
                  confidence: float, higher_is_better: bool) -> CheckComparison:
     if len(scores_a) < 2 or len(scores_b) < 2:
-        return _no_verdict(common, "Welch's t-test needs at least two scores in each batch.")
+        return _no_verdict(common, "Comparing averages needs at least two scores in each "
+                                   "batch.")
     test = stats_math.welch(scores_a, scores_b, confidence)
-    sure = percent(confidence)
-    means = f"mean {test.mean_b:.4g} for B, {test.mean_a:.4g} for A"
+    averages = f"an average of {test.mean_b:.3g} against A's {test.mean_a:.3g}"
     times_to_decide = message = None
     if test.lower > 0 or test.upper < 0:
         verdict = _direction(1 if test.lower > 0 else -1, higher_is_better)
         word = "higher" if test.lower > 0 else "lower"
-        reason = (f"B scores {word} than A ({means}), {sure} confident the difference is "
-                  f"between {test.lower:+.4g} and {test.upper:+.4g}.")
+        reason = (f"B scores {word}: {averages}. That's a real {_change(verdict)}, not "
+                  f"chance ({sure(confidence)}).")
         if not higher_is_better:
             reason += " Lower is better for this check."
     else:
         verdict = _SAME
-        reason = (f"No real difference at this size ({means}); the difference could be "
-                  f"anywhere between {test.lower:+.4g} and {test.upper:+.4g}.")
+        reason = (f"No clear difference: an average of {test.mean_b:.3g} for B, "
+                  f"{test.mean_a:.3g} for A. With this many runs, a gap that small could be "
+                  f"chance.")
         spread = max(stats_math.summarize_scores(scores_a).sd or 0.0,
                      stats_math.summarize_scores(scores_b).sd or 0.0)
         times_to_decide = stats_math.runs_needed_for_means(spread, test.difference,
                                                            confidence, POWER)
-        message = _decide_message(times_to_decide,
-                                  f"tell a difference of {abs(test.difference):.4g}")
+        message = _decide_message(times_to_decide)
         if times_to_decide is None:
-            message = ("The means are equal: no batch size would show a difference that "
-                       "isn't there.")
+            message = ("The averages are equal: no number of runs would show a difference "
+                       "that isn't there.")
     return CheckComparison(
         **common,
         difference=make_interval(test.lower, test.difference, test.upper, IntervalMethod.t,
@@ -210,17 +221,20 @@ def _mean_scores(common: dict, scores_a: list[float], scores_b: list[float],
 def _score_ranks(common: dict, scores_a: list[float], scores_b: list[float],
                  confidence: float, higher_is_better: bool) -> CheckComparison:
     if min(len(scores_a), len(scores_b)) < MANN_WHITNEY_FLOOR:
-        return _no_verdict(common, f"Mann–Whitney needs at least {MANN_WHITNEY_FLOOR} scores "
-                                   "in each batch to conclude anything.")
+        return _no_verdict(common, f"Comparing scores needs at least {MANN_WHITNEY_FLOOR} "
+                                   "scores in each batch.")
     test = stats_math.mann_whitney(scores_a, scores_b)
-    beats = f"a score of B beats one of A {percent(r4(test.effect))} of the time"
+    beats = (f"picking one run of each, B scores higher {_whole(test.effect)} of the time")
     if test.p_value <= 1 - confidence and test.effect != 0.5:
         verdict = _direction(1 if test.effect > 0.5 else -1, higher_is_better)
         word = "higher" if test.effect > 0.5 else "lower"
-        reason = f"B's scores are {word} than A's: {beats} (p = {test.p_value:.4g})."
+        reason = (f"B tends to score {word}: {beats}. That's a real {_change(verdict)}, not "
+                  f"chance ({sure(confidence)}).")
+        if not higher_is_better:
+            reason += " Lower is better for this check."
     else:
         verdict = _SAME
-        reason = f"No real difference at this size: {beats} (p = {test.p_value:.4g})."
+        reason = f"No clear difference: {beats}. With this many runs, that could be chance."
     return CheckComparison(
         **common, difference=None, effect=r4(test.effect), verdict=verdict, reason=reason,
         p_value=r4(test.p_value), p_value_method=f"mann_whitney_{test.method}",
@@ -238,12 +252,12 @@ def compare_check(name: StatisticalEngine, parameters: dict[str, float], label: 
     common = {"label": label, "test_type": test_type, "a": a, "b": b}
     missing = [side for side, data in (("A", a), ("B", b)) if not data.counts.evaluated]
     if missing:
-        return _no_verdict(common, f"Batch {' and '.join(missing)} has no evaluated run of "
-                                   "this check: nothing to compare.")
+        return _no_verdict(common, f"Batch {' and '.join(missing)} has no result for this "
+                                   "check: nothing to compare.")
     if name in (StatisticalEngine.mean_scores, StatisticalEngine.score_ranks):
         if not scored:
-            return _no_verdict(common, "Pass/fail only: comparing scores needs a check "
-                                       "scored on a scale.")
+            return _no_verdict(common, "It only passes or fails: comparing scores needs a "
+                                       "check that gives a score.")
         higher_is_better = row.comparison.value == "gte"
         compare_scores = (_mean_scores if name == StatisticalEngine.mean_scores
                           else _score_ranks)
@@ -253,7 +267,7 @@ def compare_check(name: StatisticalEngine, parameters: dict[str, float], label: 
     checked = _pass_rates(common, a, b, confidence)
     if name == StatisticalEngine.paired_entries:
         checked.verdict = None
-        checked.reason = "Judged together with every other pair: see `paired`."
+        checked.reason = "Judged together with the other entries: see the overall answer."
         checked.times_to_decide = checked.times_to_decide_message = None
     return checked
 
@@ -281,29 +295,32 @@ def paired(entries: list[EntryComparison], confidence: float) -> PairedCompariso
         return PairedComparison(
             **common, difference=None, verdict=None, p_value=None, p_value_wilcoxon=None,
             wilcoxon_method=None,
-            reason=f"{len(pairs)} {'pair' if len(pairs) == 1 else 'pairs'} both batches "
-                   f"evaluated: at least {PAIRED_FLOOR} are needed to compare entry by entry.")
+            reason=f"Only {len(pairs)} {'check' if len(pairs) == 1 else 'checks'} across the "
+                   f"entries ran in both batches; comparing entry by entry needs at least "
+                   f"{PAIRED_FLOOR}.")
     differences = [p.rate_b - p.rate_a for p in pairs]
     test = stats_math.paired_t(differences, confidence)
     signed = stats_math.wilcoxon_signed_rank(differences)
-    sure = percent(confidence)
-    between = f"between {_points(test.lower)} and {_points(test.upper)}"
+    gap = _points(test.difference)
     if test.lower > 0:
         verdict = _BETTER
-        reason = (f"Entry by entry, B passes more often than A: on average "
-                  f"{_points(test.difference)}, {sure} confident it's {between}.")
+        reason = (f"Entry by entry, B is better: on average it passes {gap} more often than "
+                  f"A. That's a real improvement, not chance ({sure(confidence)}).")
     elif test.upper < 0:
         verdict = _WORSE
-        reason = (f"Entry by entry, B passes less often than A: on average "
-                  f"{_points(test.difference)}, {sure} confident it's {between}.")
+        reason = (f"Entry by entry, B is worse: on average it passes {gap} less often than "
+                  f"A. That's a real drop, not chance ({sure(confidence)}).")
     else:
         verdict = _SAME
-        reason = (f"Entry by entry, no real difference at this size: on average "
-                  f"{_points(test.difference)}, anywhere {between}.")
+        if round(abs(test.difference) * 100) == 0:
+            reason = "Entry by entry, no clear difference: on average B passes as often as A."
+        else:
+            more = "more" if test.difference > 0 else "less"
+            reason = (f"Entry by entry, no clear difference: on average B passes {gap} "
+                      f"{more} often than A, which could be chance.")
     agrees = (signed.p_value <= 1 - confidence) == (verdict != _SAME)
     if not agrees:
-        reason += (f" Wilcoxon's test disagrees (p = {signed.p_value:.4g}): the differences "
-                   "may not be bell-shaped — read it with care.")
+        reason += " A second way of checking disagrees, so take it with care."
     return PairedComparison(
         **common,
         difference=make_interval(test.lower, test.difference, test.upper, IntervalMethod.t,
@@ -377,23 +394,31 @@ def summary(verdicts: dict[str, int], unmatched: list[Unmatched]) -> str:
     checks = f"{total} {'check' if total == 1 else 'checks'}"
     if total == 0:
         sentence = "Nothing to compare: the two batches share no check."
+    elif total == 1:
+        sentence = {
+            "better": "B is better on the check.", "worse": "B is worse on the check.",
+            "no_worse": "B is still as good as A on the check.",
+            "inconclusive": "Can't tell yet whether B is still as good on the check.",
+            "no_difference": "No clear difference on the check.",
+            "none": "The check couldn't be compared: one batch has no result for it.",
+        }[next(key for key, count in verdicts.items() if count)]
     elif verdicts["worse"]:
         others = [f"better on {verdicts['better']}" if verdicts["better"] else "",
-                  f"no worse on {verdicts['no_worse']}" if verdicts["no_worse"] else ""]
+                  f"still as good on {verdicts['no_worse']}" if verdicts["no_worse"] else ""]
         extra = " and ".join(o for o in others if o)
         sentence = f"B is worse on {verdicts['worse']} of {checks}" + (
             f" and {extra}" if extra else "") + "."
     elif verdicts["better"]:
         sentence = f"B is better on {verdicts['better']} of {checks}, worse on none."
     elif verdicts["no_worse"] and verdicts["no_worse"] == total:
-        sentence = f"B is no worse than A on every one of the {checks}."
+        sentence = f"B is still as good as A on all {checks}."
     elif verdicts["no_worse"] or verdicts["inconclusive"]:
-        sentence = (f"B is no worse on {verdicts['no_worse']} of {checks}; "
-                    f"{verdicts['inconclusive']} not proven either way.")
+        sentence = (f"B is still as good on {verdicts['no_worse']} of {checks}; "
+                    f"{verdicts['inconclusive']} can't be told yet.")
     elif verdicts["no_difference"]:
-        sentence = f"No real difference on any of the {checks} at this size."
+        sentence = f"No clear difference on any of the {checks}."
     else:
-        sentence = "No check could be compared: one batch evaluated none of them."
+        sentence = "No check could be compared: one batch has no result for any of them."
     if unmatched:
         what = "entry or check is" if len(unmatched) == 1 else "entries or checks are"
         sentence += f" {len(unmatched)} {what} in one batch only."

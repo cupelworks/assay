@@ -253,6 +253,31 @@ def percent(rate: float) -> str:
     return f"{round(rate * 100, 3):g}%"
 
 
+def sure(confidence: float) -> str:
+    """0.95 → "95% sure": how every user-facing sentence states its confidence."""
+    return f"{percent(confidence)} sure"
+
+
+def often(rate: float) -> str:
+    """A rate the way people say it: 0.9 → "9 times in 10", 0.95 → "19 times
+    in 20", 0.999 → "999 times in 1000"; "87% of the time" when no small
+    count fits."""
+    for out_of in (10, 20, 100, 1000):
+        count = rate * out_of
+        if abs(count - round(count)) < 1e-9 and 0 < round(count) <= out_of:
+            return f"{round(count)} times in {out_of}"
+    return f"{percent(rate)} of the time"
+
+
+def one_in(chance: float) -> str:
+    """A small chance the way people say it: 0.05 → "1 time in 20"; "0.4% of
+    the time" when it isn't one in a whole number."""
+    whole = 1 / chance
+    if abs(whole - round(whole)) < 1e-6:
+        return f"1 time in {round(whole)}"
+    return f"{percent(chance)} of the time"
+
+
 def _invalid(problems: list[tuple[tuple[str, ...], str]]) -> RequestValidationError:
     """A 422 in FastAPI's own list shape, one item per problem — the shape a
     body validation error has, so the FE handles it the same way."""
@@ -301,50 +326,52 @@ def sizing(entry: CatalogueEntry, parameters: dict[str, float]) -> Sizing:
         target = parameters["target"]
         floor = stats_math.binomial_floor(target, confidence)
         one_miss = stats_math.binomial_runs_allowing(1, target, confidence)
-        perfect = ("a perfect record" if engine == StatisticalEngine.binomial_gate
-                   else "every run agreeing")
-        claim = ("at least" if engine == StatisticalEngine.binomial_gate
-                 else "agrees at least")
+        if engine == StatisticalEngine.binomial_gate:
+            did, doing, miss = "passed", "pass", "failure"
+        else:
+            did, doing, miss = "agreed with itself", "agree", "disagreement"
         explanation = (
-            f"At {floor} times only {perfect} proves \"{claim} {percent(target)}\" "
-            f"with {percent(confidence)} confidence: {target:g}^{floor} = "
-            f"{target ** floor:.4f} is at most {1 - confidence:.4g}. With fewer, no result "
-            f"could prove it."
+            f"A few in a row can be luck. A check that really {did} only {often(target)} "
+            f"would {doing} {floor} times in a row less than {one_in(1 - confidence)}, so "
+            f"{floor} out of {floor} is enough to be {sure(confidence)}. With fewer, even a "
+            f"perfect record could be luck."
         )
         return Sizing(floor, explanation, [
             Suggestion(times=floor, kind=SuggestionKind.floor,
-                       label=f"{floor} · no miss allowed", default=True),
+                       label=f"{floor} times · no {miss} allowed", default=True),
             Suggestion(times=floor + 1, kind=SuggestionKind.absorbs_not_ran,
-                       label=f"{floor + 1} · absorbs one Not Ran", default=False),
+                       label=f"{floor + 1} times · one spare, in case a run can't run",
+                       default=False),
             Suggestion(times=one_miss, kind=SuggestionKind.allows_one_miss,
-                       label=f"{one_miss} · allows one miss", default=False),
+                       label=f"{one_miss} times · one {miss} allowed", default=False),
         ])
     if engine == StatisticalEngine.one_sample_t:
         floor, recommended = entry.settings["floor"], entry.settings["recommended_times"]
         needed = max(stats_math.runs_needed_for_mean(
             parameters["spread"], parameters["difference"], confidence, POWER), floor)
         detect = min(needed, MAX_TIMES)
+        gap = percent(parameters["difference"])
         explanation = (
-            f"Below {floor} scores the spread is too poorly known for a t-test; "
-            f"{needed} times would see a mean {parameters['difference']:g} of the range from "
-            f"the threshold 80% of the time, with scores spreading "
-            f"{parameters['spread']:g} of the range."
+            f"An average of fewer than {floor} scores is too unreliable to judge. To spot an "
+            f"average {gap} of the score range away from the threshold, when scores usually "
+            f"vary by about {percent(parameters['spread'])} of the range, takes about "
+            f"{needed} times."
         )
-        label = f"{detect} · sees a gap of {parameters['difference']:g}"
+        label = f"{detect} times · spots a gap of {gap} of the range"
         if needed > MAX_TIMES:
             # a default nobody can run would make the estimate refuse a field the
             # user never sent: offer the most a batch can run, and say what it costs
-            explanation += (f" That's more than the {MAX_TIMES} one batch can run: at "
-                            f"{MAX_TIMES} it sees that gap less than 80% of the time.")
-            label = (f"{MAX_TIMES} · the most a batch can run (a gap of "
-                     f"{parameters['difference']:g} needs about {needed})")
+            explanation += (f" That's more than the {MAX_TIMES} one batch can run: "
+                            f"{MAX_TIMES} times will often miss a gap that small.")
+            label = (f"{MAX_TIMES} times · the most a batch can run (spotting a gap of "
+                     f"{gap} takes about {needed})")
         candidates = [
             Suggestion(times=floor, kind=SuggestionKind.floor,
-                       label=f"{floor} · the least that means anything", default=False),
+                       label=f"{floor} times · the minimum", default=False),
             Suggestion(times=detect, kind=SuggestionKind.detects_difference, label=label,
                        default=True),
             Suggestion(times=recommended, kind=SuggestionKind.recommended,
-                       label=f"{recommended} · comfortable", default=False),
+                       label=f"{recommended} times · comfortable", default=False),
         ]
         # one suggestion per size, the default kept when sizes coincide
         by_times: dict[int, Suggestion] = {}
@@ -362,12 +389,13 @@ def check_times(times: int, runs_per_time: int, floor: int, entry: CatalogueEntr
     problems = []
     if floor > MAX_TIMES:
         problems.append((("parameters",),
-                         f"These parameters need at least {floor} times, more than the "
-                         f"{MAX_TIMES} a batch can run: lower the target or the confidence"))
+                         f"These settings need at least {floor} times, more than the "
+                         f"{MAX_TIMES} a batch can run: lower the target or how sure you "
+                         f"want to be"))
     elif times < floor:
         problems.append((("times",),
-                         f"At least {floor} times for the {entry.name} with these parameters: "
-                         f"below that no result could conclude anything"))
+                         f"{entry.name} needs at least {floor} times with these settings: "
+                         f"with fewer, no result could give an answer"))
     elif times > MAX_TIMES:
         problems.append((("times",), f"At most {MAX_TIMES} times per batch"))
     elif times * runs_per_time > MAX_RUNS:
