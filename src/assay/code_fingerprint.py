@@ -7,10 +7,10 @@ has whose code has since changed, which a list of task names can't show.
 
 The fingerprint is a short hash of every `.py` file in the `assay` package
 except the code only the API runs (the routes, the API's services, the app
-and its middleware, its async database engine), so a change there doesn't
-mark the workers out of date. It's computed once, on import — at start-up in
-every process — so it describes the code loaded then, not what's on disk
-later. Two images built from the same commit share it.
+and its middleware, its async database engine, the statistics'
+arithmetic), so a change there doesn't mark the workers out of date. It's
+computed once, on import — at start-up in every process — so it describes the
+code loaded then, not what's on disk later. Two images built from the same commit share it.
 
 Leaving the API-only code out is only right while nothing the fingerprint
 covers imports it: a worker running a function from `services/` would run
@@ -29,7 +29,7 @@ _PACKAGE = Path(__file__).resolve().parent
 # Code only the API process runs, and the fingerprint leaves out: top-level
 # directories and files of the package. Nothing outside it may import it.
 API_ONLY = frozenset({"api", "services", "main.py", "middleware.py", "exception_handlers.py",
-                      "db.py"})
+                      "db.py", "stats_math.py"})
 
 
 def compute_fingerprint(package: Path = _PACKAGE) -> str:
