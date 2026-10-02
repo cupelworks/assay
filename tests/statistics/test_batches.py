@@ -346,3 +346,6 @@ def test_a_tests_run_listing_filters_by_batch_too(db):
     listed = db.client.get(runs, params={"batch": batch["id"], "limit": 1}).json()
     assert (listed["total"], listed["items"][0]["batch_id"]) == (29, batch["id"])
     assert db.client.get("/runs", params={"batch": batch["id"]}).json()["total"] == 29
+    detail = db.client.get(f"{runs}/{listed['items'][0]['id']}").json()
+    assert (detail["batch_id"], detail["batch_index"]) == (batch["id"],
+                                                           listed["items"][0]["batch_index"])

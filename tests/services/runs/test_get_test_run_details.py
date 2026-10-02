@@ -96,6 +96,8 @@ def _standalone_row(**overrides):
         output_source=None,
         application_reply=None,
         executed_at=datetime.now().astimezone(),
+        batch_id=None,
+        batch_index=None,
         name="greets the user by name",
         input="Say hello to Alice.",
         expected_output="Hello, Alice!",
@@ -853,3 +855,15 @@ def test_plan_run_details_carry_the_batch():
         test_plan_id, execution_id, run_id, session))
 
     assert (response.batch_id, response.batch_index) == (batch_id, 3)
+
+
+def test_standalone_run_details_carry_the_batch():
+    test_id, run_id, batch_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    session = AsyncMock()
+    session.scalar.side_effect = [test_id, run_id, run_id]
+    session.execute.return_value = MagicMock(
+        one=MagicMock(return_value=_standalone_row(batch_id=batch_id, batch_index=12)))
+
+    response = asyncio.run(get_run_details_by_test_and_run_id(test_id, run_id, session))
+
+    assert (response.batch_id, response.batch_index) == (batch_id, 12)

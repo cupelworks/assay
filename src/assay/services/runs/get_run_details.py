@@ -52,7 +52,8 @@ async def get_run_details_by_test_and_run_id(
         session: Active async database session.
 
     Returns:
-        The run's id, status, created_at, and test_case_id, plus results,
+        The run's id, status, created_at, batch_id and batch_index (null
+        outside a statistical batch), and test_case_id, plus results,
         error, and executed_at — the latter three are null until the run
         reaches a terminal status (`Green`, `Amber`, `Red`, or `NotRan`) —
         plus the frozen copy of the test the run was created from (its
@@ -73,6 +74,8 @@ async def get_run_details_by_test_and_run_id(
         select(
             TestRunModel.status,
             TestRunModel.created_at,
+            TestRunModel.batch_id,
+            TestRunModel.batch_index,
             TestRunModel.results,
             TestRunModel.error,
             TestRunModel.executed_at,
@@ -95,6 +98,8 @@ async def get_run_details_by_test_and_run_id(
         id=test_run_id,
         status=test_run.status,
         created_at=test_run.created_at,
+        batch_id=test_run.batch_id,
+        batch_index=test_run.batch_index,
         test_case_id=TestCaseID(id=test_id),
         results=test_run.results,
         error=test_run.error,
