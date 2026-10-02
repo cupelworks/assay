@@ -6,9 +6,27 @@ response then looks absent in Swagger, and a client built from the examples
 learns the wrong shape. After FastAPI generates the document, each route's
 response examples are put back as the route declares them.
 """
+from collections.abc import Iterator
+
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from fastapi.routing import APIRoute
+
+
+def _api_routes(routes, prefix: str = "") -> Iterator[tuple[APIRoute, str]]:
+    """Every API route with the prefix it is served under. An included router
+    is either flattened into its parent's routes (FastAPI up to 0.136) or kept
+    as one nested entry carrying the router and its include prefix (0.137 on);
+    both layouts are walked.
+    """
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route, prefix
+            continue
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            context = getattr(route, "include_context", None)
+            yield from _api_routes(included.routes, prefix + getattr(context, "prefix", ""))
 
 
 def keep_example_nulls(app: FastAPI) -> None:
@@ -18,10 +36,8 @@ def keep_example_nulls(app: FastAPI) -> None:
         if app.openapi_schema:
             return app.openapi_schema
         schema = generate()
-        for route in app.routes:
-            if not isinstance(route, APIRoute):
-                continue
-            operations = schema["paths"].get(route.path_format, {})
+        for route, prefix in _api_routes(app.routes):
+            operations = schema["paths"].get(prefix + route.path_format, {})
             for method in route.methods:
                 operation = operations.get(method.lower())
                 if operation is None:
