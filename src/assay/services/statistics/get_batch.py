@@ -11,5 +11,5 @@ from assay.services.statistics._batches import describe, find_batch_or_404, refr
 async def get_batch(batch_id: uuid.UUID, series: bool, session: AsyncSession) -> BatchDetails:
     """Raises: HTTPException 404 for an unknown batch."""
     batch = await find_batch_or_404(batch_id, session)
-    loaded = await refresh(batch, session)
-    return await describe(batch, session, series=series, loaded=loaded)
+    await refresh(batch, session)
+    return await describe(batch, session, series=series)

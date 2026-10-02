@@ -13,6 +13,7 @@ from assay.assignment_labels import labelled
 from assay.judge_settings import resolve_judge_settings
 from assay.messages import sentence
 from assay.models import (
+    JUDGE_ENGINE,
     OutputSource,
     SettingsModel,
     SettingsSection,
@@ -27,7 +28,6 @@ from assay.worker import evaluators, target
 
 logger = logging.getLogger(__name__)
 
-JUDGE_ENGINE = "llm_judge"
 
 
 def execute_run(run_id: uuid.UUID, session: Session) -> None:

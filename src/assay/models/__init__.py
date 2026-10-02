@@ -17,6 +17,7 @@ from assay.models.statistics import (
     StatisticalTestModel,
 )
 from assay.models.test import (
+    JUDGE_ENGINE,
     TERMINAL_STATUSES,
     Comparison,
     ConfigFieldKind,
@@ -38,6 +39,7 @@ from assay.models.test import (
 )
 
 __all__ = [
+    "JUDGE_ENGINE",
     "IN_PROGRESS_BATCH_STATUSES",
     "TERMINAL_STATUSES",
     "BatchStatus",

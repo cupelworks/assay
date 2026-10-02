@@ -321,20 +321,27 @@ def sizing(entry: CatalogueEntry, parameters: dict[str, float]) -> Sizing:
         ])
     if engine == StatisticalEngine.one_sample_t:
         floor, recommended = entry.settings["floor"], entry.settings["recommended_times"]
-        detect = stats_math.runs_needed_for_mean(
-            parameters["spread"], parameters["difference"], confidence, POWER)
-        detect = max(detect, floor)
+        needed = max(stats_math.runs_needed_for_mean(
+            parameters["spread"], parameters["difference"], confidence, POWER), floor)
+        detect = min(needed, MAX_TIMES)
         explanation = (
             f"Below {floor} scores the spread is too poorly known for a t-test; "
-            f"{detect} times would see a mean {parameters['difference']:g} of the range from "
+            f"{needed} times would see a mean {parameters['difference']:g} of the range from "
             f"the threshold 80% of the time, with scores spreading "
             f"{parameters['spread']:g} of the range."
         )
+        label = f"{detect} · sees a gap of {parameters['difference']:g}"
+        if needed > MAX_TIMES:
+            # a default nobody can run would make the estimate refuse a field the
+            # user never sent: offer the most a batch can run, and say what it costs
+            explanation += (f" That's more than the {MAX_TIMES} one batch can run: at "
+                            f"{MAX_TIMES} it sees that gap less than 80% of the time.")
+            label = (f"{MAX_TIMES} · the most a batch can run (a gap of "
+                     f"{parameters['difference']:g} needs about {needed})")
         candidates = [
             Suggestion(times=floor, kind=SuggestionKind.floor,
                        label=f"{floor} · the least that means anything", default=False),
-            Suggestion(times=detect, kind=SuggestionKind.detects_difference,
-                       label=f"{detect} · sees a gap of {parameters['difference']:g}",
+            Suggestion(times=detect, kind=SuggestionKind.detects_difference, label=label,
                        default=True),
             Suggestion(times=recommended, kind=SuggestionKind.recommended,
                        label=f"{recommended} · comfortable", default=False),

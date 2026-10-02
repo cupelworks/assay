@@ -23,7 +23,8 @@ class BatchStatus(StrEnum):
     failed = "Failed"              # at least one applicable check's verdict is fail
     inconclusive = "Inconclusive"  # finished; neither proven at this size
     incomplete = "Incomplete"      # stopped by the user before every run ran
-    not_ran = "NotRan"             # finished; no run could be evaluated at all
+    not_ran = "NotRan"             # finished; nothing could be decided: every run Not Ran,
+                                   # or every applicable check errored in every run
 
 
 IN_PROGRESS_BATCH_STATUSES = frozenset({BatchStatus.pending, BatchStatus.running})

@@ -9,12 +9,12 @@ from collections import defaultdict
 from datetime import datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import and_, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.assignment_labels import in_label_order, labelled
 from assay.models import (
     IN_PROGRESS_BATCH_STATUSES,
+    JUDGE_ENGINE,
     TERMINAL_STATUSES,
     BatchStatus,
     StandaloneRunModel,
@@ -27,7 +27,6 @@ from assay.models import (
     TestStatus,
     TestTypesModel,
 )
-from assay.schemas import TestTypeAssignment
 from assay.schemas.statistics import (
     BatchCallCount,
     BatchCalls,
@@ -37,12 +36,13 @@ from assay.schemas.statistics import (
     BatchStatusName,
     BatchSummary,
     EntryProgress,
+    RunCounts,
     Scope,
     ScopeKind,
     StatisticalEngine,
 )
 from assay.services.statistics import compute
-from assay.services.statistics._scope import JUDGE_ENGINE
+from assay.services.statistics.compute import entry_order
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +60,20 @@ async def find_batch_or_404(batch_id: uuid.UUID, session: AsyncSession) -> Stati
 # ── loading ──────────────────────────────────────────────────────────────────
 
 
-async def load_entries(batch: StatisticalBatchModel,
-                       session: AsyncSession) -> list[compute.BatchEntry]:
+async def load_entries(batch: StatisticalBatchModel, session: AsyncSession, *,
+                       with_results: bool = True) -> list[compute.BatchEntry]:
     """The batch's entries with their runs in time order: the frozen content
     each run scored (a set entry, or a standalone run's copy of the test) —
-    the same for every run of an entry, since a batch creates them together."""
+    the same for every run of an entry, since a batch creates them together.
+    `with_results=False` leaves the runs' results out (the heavy column): the
+    runs matrix while a batch runs needs only each run's status."""
+    columns = [TestRunModel.id, TestRunModel.batch_index, TestRunModel.status,
+               TestRunModel.error, TestRunModel.test_set_entry_id,
+               TestRunModel.test_set_execution_id, TestRunModel.test_plan_execution_id]
+    if with_results:
+        columns.append(TestRunModel.results)
     rows = (await session.execute(
-        select(TestRunModel.id, TestRunModel.batch_index, TestRunModel.status,
-               TestRunModel.results, TestRunModel.error, TestRunModel.test_set_entry_id,
-               TestRunModel.test_set_execution_id, TestRunModel.test_plan_execution_id)
-        .where(TestRunModel.batch_id == batch.id)
+        select(*columns).where(TestRunModel.batch_id == batch.id)
         .order_by(TestRunModel.batch_index)
     )).all()
     by_entry: dict[uuid.UUID | None, list[compute.BatchRun]] = defaultdict(list)
@@ -77,40 +81,37 @@ async def load_entries(batch: StatisticalBatchModel,
         by_entry[row.test_set_entry_id].append(compute.BatchRun(
             id=row.id, index=row.batch_index,
             execution_id=row.test_set_execution_id or row.test_plan_execution_id,
-            status=row.status, results=row.results, error=row.error,
+            status=row.status, results=row.results if with_results else None, error=row.error,
         ))
+    entries = await frozen_entries(batch, list(by_entry), session)
+    for entry in entries:
+        entry.runs = by_entry[entry.entry_id]
+    return entries
 
+
+async def frozen_entries(batch: StatisticalBatchModel, entry_ids: list[uuid.UUID | None],
+                         session: AsyncSession) -> list[compute.BatchEntry]:
+    """The batch's entries without their runs: what each one is, its checks,
+    whether its answer is recorded — in the one entry order statistics use."""
     if batch.test_id is not None:
-        runs = by_entry[None]
-        copy = await session.get(StandaloneRunModel, runs[0].id) if runs else None
+        copy = await session.scalar(
+            select(StandaloneRunModel)
+            .join(TestRunModel, TestRunModel.id == StandaloneRunModel.id)
+            .where(TestRunModel.batch_id == batch.id).limit(1))
         if copy is None:
             return []
         return [compute.BatchEntry(
             entry_id=None, test_id=batch.test_id, test_set_id=None, test_set_name=None,
             name=copy.name, recorded_answer=copy.model_output is not None,
-            assignments=_assignments(copy.test_type_assignments), runs=runs,
+            assignments=compute.frozen_assignments(copy.test_type_assignments),
         )]
-
     found = (await session.execute(
         select(TestSetEntryModel, TestSetModel.name)
         .outerjoin(TestSetModel, TestSetModel.id == TestSetEntryModel.test_set_id)
-        .where(TestSetEntryModel.id.in_([key for key in by_entry if key is not None]))
+        .where(TestSetEntryModel.id.in_([key for key in entry_ids if key is not None]))
     )).all()
-    entries = [
-        compute.BatchEntry(
-            entry_id=entry.id, test_id=entry.test_id, test_set_id=entry.test_set_id,
-            test_set_name=set_name, name=entry.name,
-            recorded_answer=entry.model_output is not None,
-            assignments=_assignments(entry.test_type_assignments), runs=by_entry[entry.id],
-        )
-        for entry, set_name in found
-    ]
-    return sorted(entries, key=lambda e: ((e.test_set_name or "").casefold(),
-                                          e.name.casefold(), str(e.entry_id)))
-
-
-def _assignments(frozen: list[dict]) -> list[TestTypeAssignment]:
-    return in_label_order(labelled([TestTypeAssignment(**item) for item in frozen or []]))
+    return sorted((compute.set_entry(entry, set_name) for entry, set_name in found),
+                  key=entry_order)
 
 
 async def load_types(entries: list[compute.BatchEntry],
@@ -124,44 +125,68 @@ async def load_types(entries: list[compute.BatchEntry],
 # ── progress ─────────────────────────────────────────────────────────────────
 
 
-def _cancelled(run: compute.BatchRun) -> bool:
-    return run.status == TestStatus.not_ran and run.error == STOP_REASON
+async def load_progress(batch: StatisticalBatchModel, session: AsyncSession,
+                        entries: list[compute.BatchEntry] | None = None,
+                        types: dict[str, TestTypesModel] | None = None) -> BatchProgress:
+    """How far the batch has got, from counts the database computes — no run
+    and no result is loaded, so polling a 10,000-run batch costs a few small
+    queries. `entries` and `types` are reused when the caller has them."""
+    cancelled = and_(TestRunModel.status == TestStatus.not_ran,
+                     TestRunModel.error == STOP_REASON)
+    by_entry = (await session.execute(
+        select(TestRunModel.test_set_entry_id, TestRunModel.status,
+               func.count().label("runs"),
+               func.sum(case((cancelled, 1), else_=0)).label("cancelled"))
+        .where(TestRunModel.batch_id == batch.id)
+        .group_by(TestRunModel.test_set_entry_id, TestRunModel.status)
+    )).all()
+    by_time = (await session.execute(
+        select(func.sum(case((TestRunModel.status.in_(_IN_FLIGHT), 1), else_=0)).label("open"),
+               func.sum(case((cancelled, 1), else_=0)).label("cancelled"),
+               func.count().label("runs"))
+        .where(TestRunModel.batch_id == batch.id)
+        .group_by(TestRunModel.batch_index)
+    )).all()
+    if entries is None:
+        entries = await frozen_entries(batch, list({row.test_set_entry_id for row in by_entry}),
+                                       session)
+    if types is None:
+        types = await load_types(entries, session)
+    judge_checks = {
+        entry.entry_id: sum(types.get(a.name) is not None and types[a.name].engine == JUDGE_ENGINE
+                            for a in entry.assignments)
+        for entry in entries
+    }
+    asks_application = {entry.entry_id: not entry.recorded_answer for entry in entries}
 
-
-def progress(batch: StatisticalBatchModel, entries: list[compute.BatchEntry],
-             types: dict[str, TestTypesModel]) -> BatchProgress:
-    runs = [run for entry in entries for run in entry.runs]
-    by_time: dict[int, list[compute.BatchRun]] = defaultdict(list)
-    for run in runs:
-        by_time[run.index].append(run)
-    times_done = sum(all(run.status in TERMINAL_STATUSES for run in time)
-                     for time in by_time.values())
-    times_cancelled = sum(all(_cancelled(run) for run in time) for time in by_time.values())
-
-    per_time = batch.plan["calls_per_time"]
+    counts = RunCounts()
     application = {"finished": 0, "in_flight": 0}
     judge = {"finished": 0, "in_flight": 0}
-    for entry in entries:
-        judge_checks = sum(
-            types.get(a.name) is not None and types[a.name].engine == JUDGE_ENGINE
-            for a in entry.assignments)
-        for run in entry.runs:
-            if run.status == TestStatus.running:
-                application["in_flight"] += not entry.recorded_answer
-                judge["in_flight"] += judge_checks
-            elif run.status in TERMINAL_STATUSES and not _cancelled(run):
-                application["finished"] += not entry.recorded_answer
-                judge["finished"] += sum(
-                    result.get("engine") == JUDGE_ENGINE
-                    for result in (run.results or {}).values())
+    runs_cancelled = 0
+    for row in by_entry:
+        setattr(counts, row.status.value, getattr(counts, row.status.value) + row.runs)
+        runs_cancelled += row.cancelled or 0
+        asks, judges = asks_application.get(row.test_set_entry_id, False), judge_checks.get(
+            row.test_set_entry_id, 0)
+        if row.status == TestStatus.running:
+            application["in_flight"] += asks * row.runs
+            judge["in_flight"] += judges * row.runs
+        elif row.status in TERMINAL_STATUSES:
+            # an attempt counts, a failed one too; a run a stop cancelled made none,
+            # and a Not Ran run never reached its checks
+            attempted = row.runs - (row.cancelled or 0)
+            application["finished"] += asks * attempted
+            if row.status != TestStatus.not_ran:
+                judge["finished"] += judges * row.runs
 
+    per_time = batch.plan["calls_per_time"]
     return BatchProgress(
-        times_requested=batch.times_requested, times_done=times_done,
-        runs_total=len(runs),
-        runs_done=sum(run.status in TERMINAL_STATUSES for run in runs),
-        runs=compute.run_counts(runs),
-        runs_cancelled=sum(_cancelled(run) for run in runs),
-        times_cancelled=times_cancelled,
+        times_requested=batch.times_requested,
+        times_done=sum(not row.open for row in by_time),
+        runs_total=sum(row.runs for row in by_entry),
+        runs_done=sum(row.runs for row in by_entry if row.status in TERMINAL_STATUSES),
+        runs=counts, runs_cancelled=runs_cancelled,
+        times_cancelled=sum(row.cancelled == row.runs for row in by_time),
         calls=BatchCalls(
             application=BatchCallCount(
                 planned=per_time["application"] * batch.times_requested, **application),
@@ -185,47 +210,61 @@ def live_entries(entries: list[compute.BatchEntry]) -> list[EntryProgress]:
 # ── keeping a batch up to date ───────────────────────────────────────────────
 
 
-def _live_status(runs: list[compute.BatchRun]) -> BatchStatus | None:
-    """Pending or Running while any run is; None once every run has finished."""
-    if not any(run.status not in TERMINAL_STATUSES for run in runs):
+_IN_FLIGHT = (TestStatus.pending, TestStatus.running)
+
+
+async def _live_status(batch: StatisticalBatchModel, session: AsyncSession) -> BatchStatus | None:
+    """Pending while no run has started, Running while any is pending or
+    running; None once every run has finished. One small grouped count."""
+    statuses = dict((await session.execute(
+        select(TestRunModel.status, func.count())
+        .where(TestRunModel.batch_id == batch.id).group_by(TestRunModel.status)
+    )).all())
+    if not any(status in _IN_FLIGHT for status in statuses):
         return None
-    if all(run.status == TestStatus.pending for run in runs):
+    if set(statuses) == {TestStatus.pending}:
         return BatchStatus.pending
     return BatchStatus.running
 
 
-async def refresh(batch: StatisticalBatchModel, session: AsyncSession
-                  ) -> tuple[list[compute.BatchEntry], dict[str, TestTypesModel]] | None:
+async def refresh(batch: StatisticalBatchModel, session: AsyncSession) -> None:
     """Bring an in-progress batch up to date: its status follows its runs, and
     the first refresh that finds every run finished computes the result and
     stores it. The write is conditional (only while no result is stored), so
-    two reads racing store one result. Returns the loaded entries and types,
-    or None for a batch already completed (its stored result is the answer).
+    two reads racing store one result. While the batch runs this costs one
+    grouped count; the runs are loaded, results included, only to compute the
+    result — once.
     """
     if batch.status not in IN_PROGRESS_BATCH_STATUSES:
-        return None
-    entries = await load_entries(batch, session)
-    types = await load_types(entries, session)
-    runs = [run for entry in entries for run in entry.runs]
-    live = _live_status(runs)
+        return
+    live = await _live_status(batch, session)
     if live is not None:
         if live != batch.status:
-            await session.execute(
+            previous = batch.status
+            changed = await session.execute(
                 update(StatisticalBatchModel)
                 .where(StatisticalBatchModel.id == batch.id,
                        StatisticalBatchModel.status.in_(IN_PROGRESS_BATCH_STATUSES))
                 .values(status=live))
             await session.commit()
             await session.refresh(batch)
-        return entries, types
+            if changed.rowcount:
+                logger.info("Batch %s is now %s (was %s)", batch.id, live.value,
+                            previous.value,
+                            extra={"batch_id": batch.id, "status": live.value,
+                                   "previous_status": previous.value})
+        return
 
+    entries = await load_entries(batch, session)
+    types = await load_types(entries, session)
+    runs = [run for entry in entries for run in entry.runs]
     stopped = batch.stopped_at is not None
     now = datetime.now().astimezone()
     engine = StatisticalEngine(batch.engine)
     result = compute.compute(engine, batch.parameters, batch.plan["floor"], stopped, entries,
                              types, now)
     final = compute.roll_up(result, stopped, runs)
-    done = progress(batch, entries, types)
+    done = await load_progress(batch, session, entries, types)
     result.summary = compute.summary(final, result,
                                      batch.times_requested - done.times_cancelled,
                                      batch.times_requested, runs)
@@ -245,7 +284,6 @@ async def refresh(batch: StatisticalBatchModel, session: AsyncSession
             extra={"batch_id": batch.id, "status": final.value,
                    "verdicts": result.verdicts},
         )
-    return entries, types
 
 
 # ── the response ─────────────────────────────────────────────────────────────
@@ -274,12 +312,12 @@ async def scope_names(batches: list[StatisticalBatchModel],
 
 async def describe(batch: StatisticalBatchModel, session: AsyncSession, *, series: bool = True,
                    with_result: bool = True, names: dict[uuid.UUID, str] | None = None,
-                   loaded=None) -> BatchSummary | BatchDetails:
-    """The batch as the API returns it. `loaded` is what refresh() returned, to
-    spare loading the runs twice. While the batch runs, the single-batch read
-    (`with_result`, with `series`) carries the runs matrix so far in
-    `progress.entries`; lists don't, and a stored result has it in its own
-    entries."""
+                   ) -> BatchSummary | BatchDetails:
+    """The batch as the API returns it. While the batch runs, its progress comes
+    from counts (load_progress), and the single-batch read (`with_result`, with
+    `series`) adds the runs matrix so far in `progress.entries` — each run's
+    status, never its results; lists don't, and a stored result has the matrix
+    in its own entries. A finished batch reads its stored progress."""
     if names is None:
         names = await scope_names([batch], session)
     kind, scope_id = scope_kind(batch)
@@ -287,13 +325,9 @@ async def describe(batch: StatisticalBatchModel, session: AsyncSession, *, serie
     if stored is not None:
         done = BatchProgress.model_validate(stored["progress"])
     else:
-        entries, types = loaded or (None, None)
-        if entries is None:
-            entries = await load_entries(batch, session)
-            types = await load_types(entries, session)
-        done = progress(batch, entries, types)
+        done = await load_progress(batch, session)
         if with_result and series:
-            done.entries = live_entries(entries)
+            done.entries = live_entries(await load_entries(batch, session, with_results=False))
     fields = dict(
         id=batch.id,
         scope=Scope(kind=kind, id=scope_id, name=names.get(scope_id, "")),

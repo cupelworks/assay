@@ -22,8 +22,9 @@ from assay.schemas.statistics import (
     Warning_,
 )
 from assay.services.statistics import compute
-from assay.services.statistics._scope import ResolvedScope, ScopeEntry, resolve_scope
+from assay.services.statistics._scope import ResolvedScope, resolve_scope
 from assay.services.statistics.catalogue import (
+    MAX_RUNS,
     CatalogueEntry,
     _invalid,
     check_times,
@@ -34,7 +35,7 @@ from assay.services.statistics.catalogue import (
 from assay.target_settings import resolve_target_settings
 
 
-def applies(engine: StatisticalEngine, scope: ResolvedScope, entry: ScopeEntry,
+def applies(engine: StatisticalEngine, scope: ResolvedScope, entry: compute.BatchEntry,
             assignment: TestTypeAssignment) -> tuple[bool, str | None]:
     """Whether a batch test gives this check a verdict, and why not: the
     result's own rule (compute.applies), so the estimate never promises a
@@ -75,7 +76,22 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
                          session: AsyncSession) -> Estimate:
     engine = chosen.engine.id
     size = sizing(chosen, parameters)
-    times = times or size.default
+    capped_from = None
+    if times is None:
+        times = size.default
+        most = MAX_RUNS // scope.runs_per_time
+        if times > most:
+            # a default the scope can't run: the most it can, if that still
+            # reaches the floor (said in a warning), else the scope is too big
+            if most < size.floor:
+                field = {"test": "test_id", "test_set": "test_set_id",
+                         "test_plan": "test_plan_id"}[scope.scope.kind.value]
+                raise _invalid([((field,),
+                                 f"This scope runs {scope.runs_per_time} entries each time: "
+                                 f"the {size.floor} times this test needs would be "
+                                 f"{size.floor * scope.runs_per_time} runs, more than the "
+                                 f"{MAX_RUNS} a batch can create. Run it on a smaller set")])
+            capped_from, times = times, most
 
     entries, total, applicable = [], 0, 0
     for entry in scope.entries:
@@ -98,7 +114,7 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
     application_per_time = sum(not entry.recorded_answer for entry in scope.entries)
     judge_per_time = sum(scope.is_judge(a) for entry in scope.entries for a in entry.assignments)
     rule = None
-    if engine == StatisticalEngine.binomial_gate:
+    if engine in (StatisticalEngine.binomial_gate, StatisticalEngine.judge_stability):
         gate_rule = stats_math.binomial_gate_rule(
             times, parameters["target"], parameters["confidence"])
         rule = GateRuleSchema(times=times, pass_at_least=gate_rule.pass_at_least,
@@ -115,13 +131,21 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
             judge=CallCount(per_time=judge_per_time, total=judge_per_time * times),
         ),
         checks_total=total, checks_applicable=applicable, entries=entries,
-        warnings=await _warnings(scope, total - applicable, session),
+        warnings=await _warnings(scope, total - applicable, session, times, capped_from),
     )
 
 
-async def _warnings(scope: ResolvedScope, not_applicable: int,
-                    session: AsyncSession) -> list[Warning_]:
+async def _warnings(scope: ResolvedScope, not_applicable: int, session: AsyncSession,
+                    times: int, capped_from: int | None) -> list[Warning_]:
     warnings = []
+    if capped_from is not None:
+        warnings.append(Warning_(
+            code="times_capped",
+            message=f"The suggested {capped_from} times would create "
+                    f"{capped_from * scope.runs_per_time} runs, more than the {MAX_RUNS} a "
+                    f"batch can create: this estimate is for {times} times, the most for "
+                    "this scope.",
+        ))
     recorded = [e for e in scope.entries if e.recorded_answer]
     if recorded:
         static = [e for e in recorded if not any(scope.is_judge(a) for a in e.assignments)]

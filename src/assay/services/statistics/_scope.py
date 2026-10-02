@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.assignment_labels import in_label_order, labelled
-from assay.models import TestSetEntryModel, TestSetModel, TestTypesModel
+from assay.assignment_labels import in_label_order
+from assay.models import JUDGE_ENGINE, TestSetEntryModel, TestSetModel, TestTypesModel
 from assay.schemas import TestTypeAssignment
 from assay.schemas.statistics import Scope, ScopeKind, ScopeRequest
 from assay.services.runs._common import (
@@ -19,6 +19,7 @@ from assay.services.runs._common import (
     _find_test_set_entries_ids_or_409,
     _find_test_sets_entries_ids_or_409,
 )
+from assay.services.statistics.compute import BatchEntry, entry_order, set_entry
 from assay.services.test_plans._common import _find_test_plan_by_id_or_404
 from assay.services.test_sets._common import _find_test_set_or_404
 from assay.services.tests._common import (
@@ -26,26 +27,11 @@ from assay.services.tests._common import (
     _find_all_tests_with_details_or_404,
 )
 
-JUDGE_ENGINE = "llm_judge"
-
-
-@dataclass(frozen=True)
-class ScopeEntry:
-    """One thing a time runs once: a test set entry, or the test itself for
-    a standalone batch."""
-    entry_id: uuid.UUID | None
-    test_id: uuid.UUID
-    test_set_id: uuid.UUID | None
-    test_set_name: str | None
-    name: str
-    recorded_answer: bool
-    assignments: list[TestTypeAssignment]
-
 
 @dataclass(frozen=True)
 class ResolvedScope:
     scope: Scope
-    entries: list[ScopeEntry]
+    entries: list[BatchEntry]
     # the catalogue row of every type the entries assign, by name
     types: dict[str, TestTypesModel] = field(default_factory=dict)
 
@@ -74,7 +60,7 @@ async def resolve_scope(request: ScopeRequest, session: AsyncSession) -> Resolve
         (test,) = await _find_all_tests_with_details_or_404([request.test_id], session)
         _check_tests_have_test_types_or_409([test])
         assignments = in_label_order([_assignment_schema(a) for a in test.test_type_assignments])
-        entries = [ScopeEntry(
+        entries = [BatchEntry(
             entry_id=None, test_id=test.id, test_set_id=None, test_set_name=None,
             name=test.name, recorded_answer=test.model_output is not None,
             assignments=assignments,
@@ -100,21 +86,10 @@ async def resolve_scope(request: ScopeRequest, session: AsyncSession) -> Resolve
     return ResolvedScope(scope=scope, entries=entries, types=types)
 
 
-async def _entries(entry_ids: list[uuid.UUID], session: AsyncSession) -> list[ScopeEntry]:
+async def _entries(entry_ids: list[uuid.UUID], session: AsyncSession) -> list[BatchEntry]:
     rows = (await session.execute(
         select(TestSetEntryModel, TestSetModel.name)
         .join(TestSetModel, TestSetModel.id == TestSetEntryModel.test_set_id)
         .where(TestSetEntryModel.id.in_(set(entry_ids)))
     )).all()
-    entries = [
-        ScopeEntry(
-            entry_id=entry.id, test_id=entry.test_id, test_set_id=entry.test_set_id,
-            test_set_name=set_name, name=entry.name,
-            recorded_answer=entry.model_output is not None,
-            assignments=in_label_order(labelled(
-                [TestTypeAssignment(**item) for item in entry.test_type_assignments])),
-        )
-        for entry, set_name in rows
-    ]
-    return sorted(entries, key=lambda e: (e.test_set_name.casefold(), e.name.casefold(),
-                                          str(e.entry_id)))
+    return sorted((set_entry(entry, set_name) for entry, set_name in rows), key=entry_order)

@@ -15,7 +15,8 @@ import math
 from dataclasses import dataclass, field
 
 from assay import stats_math
-from assay.models import BatchStatus, TestStatus, TestTypesModel
+from assay.assignment_labels import in_label_order, labelled
+from assay.models import JUDGE_ENGINE, BatchStatus, TestStatus, TestTypesModel
 from assay.schemas import TestTypeAssignment
 from assay.schemas.statistics import (
     BatchResult,
@@ -66,6 +67,30 @@ class BatchEntry:
     runs: list[BatchRun] = field(default_factory=list)
 
 
+def frozen_assignments(frozen: list[dict] | None) -> list[TestTypeAssignment]:
+    """A frozen copy's checks (a set entry's, a standalone run's), labelled and
+    in label order."""
+    return in_label_order(labelled([TestTypeAssignment(**item) for item in frozen or []]))
+
+
+def set_entry(entry, set_name: str | None) -> BatchEntry:
+    """A test set entry (TestSetEntryModel) as statistics read it, without its
+    runs: the estimate and the batch build their entries here, alike."""
+    return BatchEntry(
+        entry_id=entry.id, test_id=entry.test_id, test_set_id=entry.test_set_id,
+        test_set_name=set_name, name=entry.name,
+        recorded_answer=entry.model_output is not None,
+        assignments=frozen_assignments(entry.test_type_assignments),
+    )
+
+
+def entry_order(entry: BatchEntry) -> tuple[str, str, str]:
+    """The one order entries are shown in everywhere in statistics: by set
+    name, then entry name (letter case aside), then id."""
+    return ((entry.test_set_name or "").casefold(), entry.name.casefold(),
+            str(entry.entry_id))
+
+
 def r4(value: float | None) -> float | None:
     """Four decimals, the precision every statistics number is returned at."""
     if value is None or math.isnan(value):
@@ -96,8 +121,6 @@ def threshold_of(assignment: TestTypeAssignment) -> float | None:
         return None
     return value if math.isfinite(value) else None
 
-
-JUDGE_ENGINE = "llm_judge"
 
 
 def applies(name: StatisticalEngine, row: TestTypesModel | None,
@@ -150,16 +173,19 @@ def make_interval(lower, point, upper, method: IntervalMethod, level: float,
                     level=level, sides=sides)
 
 
-def _decide_message(times: int | None, side: str) -> str | None:
+def _decide(times: int | None, floor: int, side: str) -> tuple[int | None, str]:
+    """The size of a new batch that would likely decide a check, and the
+    sentence to show. Never below the floor — a smaller batch would be refused
+    at creation — and None past the most a batch can run, which the sentence
+    says instead of a number nobody can run."""
     if times is None:
-        return None
-    message = f"A new batch of about {times} times would likely prove it {side}"
-    if times > MAX_TIMES:
-        message += f", more than one batch can run ({MAX_TIMES})"
-    return message + "."
+        return None, (f"A new batch would need more than {MAX_TIMES} times to likely prove it "
+                      f"{side}: more than one batch can run.")
+    times = max(times, floor)
+    return times, f"A new batch of about {times} times would likely prove it {side}."
 
 
-def _gate(passed: int, n: int, target: float, confidence: float) -> Statistic:
+def _gate(passed: int, n: int, target: float, confidence: float, floor: int) -> Statistic:
     gate = stats_math.binomial_gate(passed, n, target, confidence)
     rule = GateRuleSchema(times=n, pass_at_least=gate.rule.pass_at_least,
                           fail_at_most=gate.rule.fail_at_most)
@@ -174,13 +200,14 @@ def _gate(passed: int, n: int, target: float, confidence: float) -> Statistic:
     else:
         reason = (f"Not proven either way at {n} runs: {passed} of {n} passed, against a "
                   f"target of {goal}.")
-        times_to_decide = stats_math.binomial_gate_runs_to_decide(passed, n, target, confidence)
         rate = passed / n
-        side = f"at least {goal}" if rate > target else f"below {goal}"
-        message = _decide_message(times_to_decide, side)
-        if times_to_decide is None:
+        if rate == target:
             message = (f"It passed exactly {goal} of the time: no batch size would likely "
                        "decide it.")
+        else:
+            side = f"at least {goal}" if rate > target else f"below {goal}"
+            times_to_decide, message = _decide(stats_math.binomial_gate_runs_to_decide(
+                passed, n, target, confidence, limit=MAX_TIMES), floor, side)
     return Statistic(
         verdict=CheckVerdict(gate.verdict.value), reason=reason, n=n, interval=interval,
         p_value_pass=r4(gate.p_value_pass), p_value_fail=r4(gate.p_value_fail), rule=rule,
@@ -189,7 +216,7 @@ def _gate(passed: int, n: int, target: float, confidence: float) -> Statistic:
 
 
 def _t_test(scores: list[float], threshold: float, higher_is_better: bool,
-            confidence: float) -> Statistic:
+            confidence: float, floor: int) -> Statistic:
     test = stats_math.one_sample_t(scores, threshold, higher_is_better, confidence)
     n, sure = test.n, percent(confidence)
     passing, failing = ("at least", "below") if higher_is_better else ("at most", "above")
@@ -208,15 +235,16 @@ def _t_test(scores: list[float], threshold: float, higher_is_better: bool,
     else:
         reason = (f"Not proven either way at {n} runs: mean {test.mean:.4g} against the "
                   f"threshold {threshold:g}.")
-        times_to_decide = stats_math.one_sample_t_runs_to_decide(
-            test.mean, test.sd or 0.0, threshold, confidence, POWER)
-        on_passing_side = test.mean >= threshold if higher_is_better else (
-            test.mean <= threshold)
-        side = (f"{passing if on_passing_side else failing} the threshold {threshold:g}")
-        message = _decide_message(times_to_decide, side)
-        if times_to_decide is None:
+        if test.mean == threshold:
             message = ("The mean is exactly the threshold: no batch size would likely "
                        "decide it.")
+        else:
+            on_passing_side = test.mean >= threshold if higher_is_better else (
+                test.mean <= threshold)
+            side = f"{passing if on_passing_side else failing} the threshold {threshold:g}"
+            times_to_decide, message = _decide(stats_math.one_sample_t_runs_to_decide(
+                test.mean, test.sd or 0.0, threshold, confidence, POWER, limit=MAX_TIMES),
+                floor, side)
     if test.sd == 0 and n > 1:
         reason = reason[:-1] + f" — every score was {test.mean:g}, so there's no spread."
     return Statistic(
@@ -227,7 +255,7 @@ def _t_test(scores: list[float], threshold: float, higher_is_better: bool,
     )
 
 
-def _agreement(passed: int, n: int, target: float, confidence: float) -> Statistic:
+def _agreement(passed: int, n: int, target: float, confidence: float, floor: int) -> Statistic:
     """Judge stability: the gate on the runs that gave the judge's usual
     verdict (its majority: pass or fail)."""
     agreeing = max(passed, n - passed)
@@ -248,10 +276,13 @@ def _agreement(passed: int, n: int, target: float, confidence: float) -> Statist
                   f"time ({told}).")
     else:
         reason = f"Not proven either way at {n} runs: {told}, against a target of {goal}."
-        times_to_decide = stats_math.binomial_gate_runs_to_decide(agreeing, n, target,
-                                                                  confidence)
-        side = f"at least {goal}" if agreeing / n > target else f"below {goal}"
-        message = _decide_message(times_to_decide, side)
+        if agreeing / n == target:
+            message = (f"It agreed exactly {goal} of the time: no batch size would likely "
+                       "decide it.")
+        else:
+            side = f"at least {goal}" if agreeing / n > target else f"below {goal}"
+            times_to_decide, message = _decide(stats_math.binomial_gate_runs_to_decide(
+                agreeing, n, target, confidence, limit=MAX_TIMES), floor, side)
     return Statistic(
         verdict=CheckVerdict(gate.verdict.value), reason=reason, n=n, interval=interval,
         p_value_pass=r4(gate.p_value_pass), p_value_fail=r4(gate.p_value_fail), rule=rule,
@@ -311,17 +342,27 @@ def check_result(name: StatisticalEngine, parameters: dict[str, float], floor: i
                 f"The batch was stopped with {n} evaluated "
                 f"{'run' if n == 1 else 'runs'}, below the {floor} this test needs: no "
                 "verdict. The rate and range above describe what ran.", n)
-        elif is_gate:
-            statistic = _gate(passed, n, target, confidence)
-        elif is_stability:
-            statistic = _agreement(passed, n, target, confidence)
-            agreement = statistic.interval
-        elif threshold is None:
+        elif name == StatisticalEngine.one_sample_t and threshold is None:
             statistic = _no_verdict(
                 "The check's threshold isn't a number: there's nothing to test the mean "
                 "against.", n)
+        elif name == StatisticalEngine.one_sample_t and n < floor:
+            # the t-test's floor is a rule of thumb about how well the spread is
+            # known, true of any sample however it got small; the gate's floor
+            # is only the least that can *pass*, and a proven failure below it
+            # is still proven
+            statistic = _no_verdict(
+                f"Only {n} {'score was' if n == 1 else 'scores were'} evaluated, below the "
+                f"{floor} a t-test needs to know the spread: no verdict. The other runs "
+                "were Not Ran or errored; the scores above describe what ran.", n)
+        elif is_gate:
+            statistic = _gate(passed, n, target, confidence, floor)
+        elif is_stability:
+            statistic = _agreement(passed, n, target, confidence, floor)
+            agreement = statistic.interval
         else:
-            statistic = _t_test(scores, threshold, row.comparison.value == "gte", confidence)
+            statistic = _t_test(scores, threshold, row.comparison.value == "gte", confidence,
+                                floor)
 
     return CheckResult(
         label=assignment.label, test_type=assignment.name, applies=does_apply,
@@ -427,12 +468,16 @@ def compute(name: StatisticalEngine, parameters: dict[str, float], floor: int,
 
 
 def roll_up(result: BatchResult, stopped: bool, runs: list[BatchRun]) -> BatchStatus:
-    """The batch's outcome (note 17): stopped → Incomplete; nothing evaluated →
-    NotRan; one proven failure fails it; every applicable check proven passes
-    it; otherwise Inconclusive."""
+    """The batch's outcome (note 17): stopped → Incomplete; nothing evaluated —
+    every run Not Ran, or every applicable check errored in every run (no
+    judge chosen, an engine not installed), so not one verdict could be drawn
+    → NotRan, since no batch size would change it; one proven failure fails
+    it; every applicable check proven passes it; otherwise Inconclusive."""
     if stopped:
         return BatchStatus.incomplete
     if all(run.status == TestStatus.not_ran for run in runs):
+        return BatchStatus.not_ran
+    if result.checks_applicable and result.verdicts["none"] == result.checks_applicable:
         return BatchStatus.not_ran
     if result.verdicts["fail"]:
         return BatchStatus.failed
@@ -453,8 +498,14 @@ def summary(status: BatchStatus, result: BatchResult, times_ran: int, times_requ
     if status == BatchStatus.failed:
         return f"Failed: {verdicts['fail']} of {checks} proven to fail."
     if status == BatchStatus.not_ran:
-        first = next((run.error for run in runs if run.error), None)
-        return "Not Ran: no run could be evaluated" + (f" — {first}" if first else ".")
+        if all(run.status == TestStatus.not_ran for run in runs):
+            first = next((run.error for run in runs if run.error), None)
+            return "Not Ran: no run could be evaluated" + (f" — {first}" if first else ".")
+        first = next((r.get("detail") for run in runs for r in (run.results or {}).values()
+                      if r.get("errored") and r.get("detail")), None)
+        return ("Not Ran: no check could be decided — every one errored in every run"
+                + (f" ({first})" if first else "") + ". Fix that before running again: a "
+                "bigger batch wouldn't help.")
     parts = [f"{verdicts['pass']} proven", f"{verdicts['inconclusive']} undecided"]
     if verdicts["none"]:
         parts.append(f"{verdicts['none']} without a verdict")
@@ -464,4 +515,9 @@ def summary(status: BatchStatus, result: BatchResult, times_ran: int, times_requ
             return "Incomplete: stopped before any run ran."
         return (f"Incomplete: stopped after {times_ran} of {times_requested} times ran; "
                 f"{tally}.")
-    return f"Inconclusive: {tally}; a bigger batch would decide the rest."
+    advice = []
+    if verdicts["inconclusive"]:
+        advice.append("a bigger batch would decide the undecided")
+    if verdicts["none"]:
+        advice.append("each check without a verdict says why in its reason")
+    return f"Inconclusive: {tally}; {' — '.join(advice)}."

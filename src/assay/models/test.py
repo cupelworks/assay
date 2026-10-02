@@ -216,6 +216,13 @@ class ConfigFieldKind(StrEnum):
     json_schema = "json_schema"
 
 
+# The engine of every LLM-judge type (a catalogue row's `engine`). Named once,
+# here, because the worker (to read the judge settings once per run) and the
+# API's statistics (judge calls, judge stability) both test for it, and models
+# are the one package both may import.
+JUDGE_ENGINE = "llm_judge"
+
+
 class TestTypesModel(Base):
     """
     A catalogue entry describing a supported evaluation method.

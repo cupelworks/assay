@@ -1,6 +1,8 @@
 """Batches end to end on a real database: creation across the three scopes, the
 runs executed in-process by the worker's own service, the result computed on
 read and stored, the listing, and the stop."""
+import uuid
+
 from assay.models import TestStatus
 
 CONTAINS = {"name": "Contains", "config": {"substring": "answer"}}
@@ -349,3 +351,55 @@ def test_a_tests_run_listing_filters_by_batch_too(db):
     detail = db.client.get(f"{runs}/{listed['items'][0]['id']}").json()
     assert (detail["batch_id"], detail["batch_index"]) == (batch["id"],
                                                            listed["items"][0]["batch_index"])
+
+
+# --- review fixes: reads stay cheap, status changes are logged ---
+
+
+def _stored_status(db, batch_id):
+    from sqlalchemy import select
+
+    from assay.models import StatisticalBatchModel
+    with db.worker_session() as session:
+        return session.scalar(select(StatisticalBatchModel.status).where(
+            StatisticalBatchModel.id == uuid.UUID(batch_id)))
+
+
+def test_the_list_refreshes_only_the_scope_it_was_asked_for(db):
+    mine, other = db.test(name="mine"), db.test(name="other")
+    _create(db, test_id=mine["id"])
+    elsewhere = _create(db, test_id=other["id"]).json()
+    _run_all(db, elsewhere["id"])
+
+    db.client.get("/statistics/batches", params={"test_id": mine["id"]})
+
+    assert _stored_status(db, elsewhere["id"]).value == "Pending"  # not touched
+    db.client.get("/statistics/batches")
+    assert _stored_status(db, elsewhere["id"]).value == "Passed"
+
+
+def test_a_batch_starting_to_run_is_logged_once(db, caplog):
+    test = db.test()
+    batch = _create(db, test_id=test["id"]).json()
+    db.execute([db.runs_of(batch["id"])[0].id])
+
+    with caplog.at_level("INFO", logger="assay.services.statistics._batches"):
+        _get(db, batch["id"])
+        _get(db, batch["id"])
+
+    lines = [r.getMessage() for r in caplog.records if "is now" in r.getMessage()]
+    assert lines == [f"Batch {batch['id']} is now Running (was Pending)"]
+
+
+def test_progress_counts_calls_without_reading_results(db):
+    db.client.patch("/settings/target", json={"url": "http://127.0.0.1:9/never"})
+    asks = db.test(name="asks", model_output=None)
+    batch = _create(db, test_id=asks["id"]).json()
+    runs = db.runs_of(batch["id"])
+    db.execute([runs[0].id])  # the call fails: Not Ran, but it was attempted
+    db.set_status(runs[1].id, TestStatus.running)
+
+    progress = _get(db, batch["id"])["progress"]
+
+    assert progress["calls"]["application"] == {"planned": 29, "finished": 1, "in_flight": 1}
+    assert progress["runs"]["NotRan"] == 1 and progress["runs_cancelled"] == 0

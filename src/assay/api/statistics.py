@@ -76,7 +76,7 @@ _ESTIMATE_GATE = {
     "engine": "binomial_gate",
     "parameters": {"target": 0.9, "confidence": 0.95},
     "floor": 29,
-    "floor_explanation": "At 29 times only a perfect record proves \"at least 90.0%\" with "
+    "floor_explanation": "At 29 times only a perfect record proves \"at least 90%\" with "
                          "95% confidence: 0.9^29 = 0.0471 is at most 0.05. With fewer, no "
                          "result could prove it.",
     "suggestions": [
@@ -94,7 +94,14 @@ _ESTIMATE_GATE = {
               "judge": {"per_time": 1, "total": 29}},
     "checks_total": 3,
     "checks_applicable": 3,
+    # entries in the one order statistics use: set name, then entry name
     "entries": [
+        {"entry_id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12",
+         "test_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901", "test_set_id": _SET_ID,
+         "test_set_name": "Support answers", "name": "Opening hours",
+         "recorded_answer": False,
+         "checks": [{"label": "Contains", "test_type": "Contains", "applies": True,
+                     "reason": None}]},
         {"entry_id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
          "test_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890", "test_set_id": _SET_ID,
          "test_set_name": "Support answers", "name": "Reset a password",
@@ -104,12 +111,6 @@ _ESTIMATE_GATE = {
              {"label": "Relevance", "test_type": "Relevance", "applies": True,
               "reason": None},
          ]},
-        {"entry_id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12",
-         "test_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901", "test_set_id": _SET_ID,
-         "test_set_name": "Support answers", "name": "Opening hours",
-         "recorded_answer": False,
-         "checks": [{"label": "Contains", "test_type": "Contains", "applies": True,
-                     "reason": None}]},
     ],
     "warnings": [],
 }
@@ -152,8 +153,8 @@ _ESTIMATE_T = {
     }],
     "warnings": [
         {"code": "recorded_answers",
-         "message": "1 of 1 entry has a recorded answer: only their judge checks can vary "
-                    "between runs."},
+         "message": "The test has a recorded answer: only its judge checks can vary between "
+                    "runs."},
         {"code": "nothing_can_vary",
          "message": "1 recorded entry has no judge check: every run of it gives the same "
                     "result, so its statistics only repeat one run's outcome."},
@@ -219,9 +220,11 @@ async def list_statistical_tests(
     spread is too poorly known) or *none* (Fisher's exact test works at any size, though
     small batches only see big differences). `floor.kind` says which.
 
-    Verdicts are three-way: `pass`, `fail`, or `inconclusive` — not enough runs to say
-    either way, which is a different thing from failing. Comparisons answer `better`,
-    `worse` or `no_difference`.
+    Verdicts are three-way: a batch test answers `pass`, `fail`, or `inconclusive` — not
+    enough runs to say either way, which is a different thing from failing. The comparisons
+    answer `better`, `worse` or `no_difference` (no real difference *at this size*), except
+    `no_worse`, which answers `no_worse`, `worse` or `inconclusive`. Each item's `verdicts`
+    lists its own.
 
     `max_times` and `max_runs` bound one batch (times, and times × entries).
     """
@@ -304,11 +307,15 @@ async def estimate(request: EstimateRequest, session: SessionDep) -> Estimate:  
     - **`suggestions`** — sizes worth offering. For the binomial gate: the floor (no miss
       allowed), one more (absorbs one run that can't be evaluated, e.g. an application
       timeout, without costing the verdict), and the size that allows one miss. For the
-      t-test: its floor, the size that sees your `difference` 80% of the time, and 30.
-      The one marked `default` is used when `times` is left out.
-    - **`rule`** — for the binomial gate, what decides at `times`: at least
-      `pass_at_least` passes (per check) pass, at most `fail_at_most` fail, anything
-      between is inconclusive. Computed here so the UI never recomputes the binomial.
+      t-test: its floor, the size that sees your `difference` 80% of the time (at most
+      the 1,000 a batch can run — the label says when it's capped), and 30. The one marked
+      `default` is used when `times` is left out; if it would create more runs than a
+      batch may for this scope, the estimate is for the most it can run instead, with a
+      `times_capped` warning.
+    - **`rule`** — for the binomial gate (and judge stability, on agreement), what decides
+      at `times`: at least `pass_at_least` passes (per check) pass, at most `fail_at_most`
+      fail, anything between is inconclusive. Computed here so the UI never recomputes the
+      binomial. Null for the t-test.
     - **`calls`** — what it pays for, per time and in total: one application call per
       run of an entry with no recorded answer, one judge call per LLM-judge check per
       run. Retries aren't counted.
@@ -522,6 +529,7 @@ _T_CHECK = {
     ],
 }
 
+_STOPPED_RESULT = computed.stopped_result()
 _BATCH_STOPPED = {
     **_BATCH_COMMON,
     "status": "Incomplete",
@@ -534,10 +542,12 @@ _BATCH_STOPPED = {
                   "judge": {"planned": 30, "finished": 12, "in_flight": 0}},
         "entries": None,
     },
-    "summary": "Incomplete: stopped after 12 of 30 times ran; 0 proven, 0 undecided, 3 "
-               "without a verdict of 3 checks.",
-    "verdicts": {"pass": 0, "fail": 0, "inconclusive": 0, "none": 3},
+    "summary": _STOPPED_RESULT["summary"],
+    "verdicts": _STOPPED_RESULT["verdicts"],
     "completed_at": "2026-10-01T09:41:09+02:00",
+    # a stopped batch keeps what ran: rates, ranges and series, here without a
+    # verdict since 12 evaluated runs are below the floor of 29
+    "result": _STOPPED_RESULT,
 }
 
 _ONE_PROVEN = {"pass": 1, "fail": 0, "inconclusive": 0, "none": 0}
@@ -554,8 +564,10 @@ _BATCH_ANATOMY = """
 - **`status`** — `Pending` (no run started yet) → `Running` → one outcome: `Passed` (every
   applicable check proven), `Failed` (at least one check proven to fail — one proven failure
   fails the batch), `Inconclusive` (finished, but not every check could be decided at this
-  size), `Incomplete` (stopped before every run ran) or `NotRan` (no run could be evaluated,
-  e.g. no application configured). `Passed` and `Failed` are a batch's words, never a run's:
+  size — a bigger batch would decide the undecided), `Incomplete` (stopped before every run
+  ran) or `NotRan` (nothing could be decided: every run Not Ran — e.g. no application
+  configured — or every check errored in every run — e.g. no judge chosen; fix that first,
+  a bigger batch wouldn't help). `Passed` and `Failed` are a batch's words, never a run's:
   a run stays `Green`/`Amber`/`Red`.
 - **`progress`** — `times_done` of `times_requested` (a time is done when all its runs are),
   `runs_done` of `runs_total`, runs by status, and `calls`: application and judge calls
@@ -767,8 +779,9 @@ _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
                     "value": {**_BATCH_FINISHED, "result": {
                         **_BATCH_FINISHED["result"],
                         "failures_by_entry": computed.failures_by_entry()}}},
-                "stopped": {"summary": "Stopped early, below the floor: no verdicts",
-                            "value": {**_BATCH_STOPPED, "result": None}},
+                "stopped": {"summary": "Stopped after 12 of 30 times: the rates of what "
+                                       "ran, no verdict below the floor",
+                            "value": _BATCH_STOPPED},
                 "no_series": {"summary": "With ?series=false",
                               "value": {**_BATCH_FINISHED, "result": {
                                   **_BATCH_FINISHED["result"],
@@ -805,17 +818,28 @@ async def get_statistical_batch(
                 "comes back unchanged."
             ),
             "content": {"application/json": {"examples": {
-                "stopped": {"summary": "Stopped with nothing running: Incomplete at once",
-                            "value": {**_BATCH_STOPPED, "result": None}},
-                "finishing": {"summary": "Stopped while two runs were executing",
+                "stopped": {"summary": "Stopped with nothing running: Incomplete at once, "
+                                       "with the partial result",
+                            "value": _BATCH_STOPPED},
+                "finishing": {"summary": "Stopped while two runs were executing: Running "
+                                         "until they finish, no result yet",
                               "value": {**_BATCH_RUNNING,
                                         "stopped_at": "2026-10-01T09:41:07+02:00",
-                                        "progress": {**_BATCH_RUNNING["progress"],
-                                                     "runs": _counts(Running=2, Green=22,
-                                                                     Amber=2, NotRan=34),
-                                                     "runs_cancelled": 33,
-                                                     "times_cancelled": 16,
-                                                     "runs_done": 58}}},
+                                        "progress": {
+                                            **_BATCH_RUNNING["progress"],
+                                            "times_done": 28, "runs_done": 58,
+                                            "runs": _counts(Running=2, Green=22, Amber=2,
+                                                            NotRan=34),
+                                            "runs_cancelled": 33, "times_cancelled": 16,
+                                            "entries": [
+                                                _live_entry(_ENTRY_ID, "Reset a password",
+                                                            _RUN_IDS,
+                                                            ["Green", "Running", "NotRan"]),
+                                                _live_entry(_ENTRY_B_ID,
+                                                            "Unknown order number",
+                                                            _RUN_B_IDS,
+                                                            ["Green", "Green", "NotRan"]),
+                                            ]}}},
             }}},
         },
         404: _BATCH_404,
@@ -906,12 +930,14 @@ _COMPARISON_SUMMARY = {
 _COMPARISON = {
     **_COMPARISON_SUMMARY,
     "result": {
-        "verdicts": {"better": 1, "worse": 0, "no_difference": 1, "none": 0},
+        "verdicts": {"better": 1, "worse": 0, "no_difference": 1, "no_worse": 0,
+                     "inconclusive": 0, "none": 0},
         "summary": "B is better on 1 of 2 checks, worse on none.",
         "entries": [{"entry_id": _ENTRY_ID, "test_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                      "test_set_name": "Support answers", "name": "Reset a password",
                      "checks": [_CHECK_BETTER, _CHECK_SAME]}],
         "unmatched": [],
+        "paired": None,
     },
 }
 
@@ -948,6 +974,7 @@ _COMPARISON_EXAMPLES = {
     "paired_entries": {"summary": "Paired by entry: seven entries, one verdict (entries and "
                                   "pairs cut)",
                        "value": {**_COMPARISON, "statistical_test": "paired_entries",
+                                 "engine": "paired_entries",
                                  "summary": _PAIRED["summary"], "result": _PAIRED}},
 }
 
@@ -957,34 +984,105 @@ _COMPARISON_404 = {
         "detail": f"Statistical comparison with ID {_COMPARISON_ID} not found"}}},
 }
 
-_COMPARISON_ANATOMY = """
-**Reading a comparison.** A is the baseline, B the change: every difference is **B − A**.
+_COMPARISON_TABLE = "\n".join("| " + " | ".join(cells) + " |" for cells in (
+    (
+        'Test (`engine`)',
+        'Checks it reads',
+        '`verdict`',
+        '`difference`',
+        '`p_value_method`',
+    ),
+    (
+        '---',
+        '---',
+        '---',
+        '---',
+        '---',
+    ),
+    (
+        '`pass_rates`',
+        'every check',
+        '`better` / `worse` / `no_difference`',
+        "B's pass rate − A's, Newcombe's two-sided interval — it decides",
+        '`chi_square`, or `fisher_exact` when an expected count is under 5',
+    ),
+    (
+        '`no_worse`',
+        'every check',
+        '`no_worse` / `worse` / `inconclusive`',
+        ('the same, with **one-sided** bounds (`sides: one`): `no_worse` when the lower bound '
+         'is above −`margin`'),
+        'null: the interval is the whole test',
+    ),
+    (
+        '`mean_scores`',
+        'scored checks',
+        '`better` / `worse` / `no_difference`',
+        "B's mean score − A's, Welch's t interval — it decides",
+        '`welch`',
+    ),
+    (
+        '`score_ranks`',
+        'scored checks',
+        '`better` / `worse` / `no_difference`',
+        ('**null**: ranks have no difference to draw — `effect`, the probability a score of B '
+         'beats one of A (0.5 = none), and the p-value decide'),
+        '`mann_whitney_exact` or `mann_whitney_normal`',
+    ),
+    (
+        '`paired_entries`',
+        'every check',
+        '**null on every check**: the one verdict is `result.paired.verdict`',
+        'per check, as `pass_rates` (descriptive)',
+        'per check, as `pass_rates`',
+    ),
+))
+
+_COMPARISON_ANATOMY_TEXT = """
+**Reading a comparison.** A is the baseline, B the change: every difference is **B − A**, so
+`better` always means B did better. Five comparison tests share one shape; what changes
+between them is how the per-check fields are filled:
+
+{table}
+
+For a scored type where lower is better (`comparison: lte`), a higher B is `worse`.
 
 - `batch_a` / `batch_b` — each batch's id, `note` (what it was: "prompt v2", "prompt v3"),
   status, test and size, so the page can say what was compared without another call.
-- `result.verdicts` counts the checks by verdict, `result.summary` says it in a sentence.
+- `result.verdicts` counts the checks by verdict — always all six keys: `better`, `worse`,
+  `no_difference`, `no_worse`, `inconclusive`, and `none` (no verdict). For
+  `paired_entries` it counts the one paired verdict. `result.summary` says it in a sentence.
 - `result.entries` — each entry both batches ran (matched by entry id; a standalone test is
   one entry), each check both have (matched by label), with:
   - `a` and `b` — each side's `counts` (errored and Not Ran counted apart, as in a batch),
-    its `pass_rate` with Wilson's two-sided interval, and its `series`, to draw the two
-    strips or distributions over each other;
-  - `difference` — B's rate minus A's with **Newcombe's score interval**: the one bar with
-    whiskers, and what decides the `verdict`: `better` when it lies above 0, `worse` below,
-    `no_difference` when it straddles 0 — *no real difference at this size*, not proof that
-    there is none;
-  - `p_value` with `p_value_method` — chi-square when every expected count is at least 5,
-    Fisher's exact otherwise: shown beside the verdict, never deciding it (name the method
-    in the caption);
-  - with `no_difference`, `times_to_decide`: about how many times each of two **new**
-    batches would need to tell the two rates apart (80% of the time).
+    `pass_rate` with Wilson's two-sided interval, `scores` (a box plot's numbers) for a
+    scored check, and `series` to draw the two strips or distributions over each other;
+  - `difference`, `effect`, `verdict` and `p_value` as in the table. `no_difference` means
+    *no real difference at this size*, not proof that there is none — `no_worse` is the
+    test that proves "at most this much worse". The p-value is shown beside the verdict
+    and never decides it except under `score_ranks`; name its method in the caption;
+  - `verdict: null` with `reason` when there's nothing to compare: a side with no evaluated
+    run, a pass/fail check under a score test, fewer than 2 scores a side (Welch) or 4
+    (Mann–Whitney);
+  - when undecided, `times_to_decide`: about how many times each of two **new** batches
+    would need to decide it, 80% of the time (null when no size would, or more than a batch
+    can run — `times_to_decide_message` says which).
+- `result.paired` (`paired_entries` only) — every (entry, check) pair both batches evaluated
+  (`pairs`, each `rate_a` → `rate_b`: a dot plot), the mean difference with the paired t
+  interval that decides the `verdict` (6 pairs at least), and Wilcoxon's signed-rank p-value
+  beside it as a check that doesn't assume bell-shaped differences; null for other tests.
 - `result.unmatched` — entries or checks only one batch has (an entry added to the set
   between the batches, a check relabelled): not compared, listed so nothing goes missing.
 """
+_COMPARISON_ANATOMY = _COMPARISON_ANATOMY_TEXT.format(table=_COMPARISON_TABLE)
 
 
 _CREATE_COMPARISON_DOC = inspect.cleandoc("""
-    **Did my change help?** Compare two finished batches of the same scope, check by check:
-    does B pass more often than A, less often, or is there no real difference at this size?
+    **Did my change help?** Compare two finished batches of the same scope, check by check,
+    with one of the comparison tests (`kind: comparison` in `GET /statistics/tests`): did B
+    pass more or less often than A (`pass_rates`), is B no worse than A by more than a margin
+    (`no_worse`), did a scored check's scores move (`mean_scores`, `score_ranks`), or — for a
+    set — did B do better entry by entry (`paired_entries`)?
 
     The usual flow: run a batch (A), change something outside Assay — the application's
     prompt, its model, the judge — run another batch of the same scope (B), then compare.

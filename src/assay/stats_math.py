@@ -30,6 +30,7 @@ _STANDARD_NORMAL = NormalDist()
 # decimals anything is reported with.
 _TOLERANCE = 1e-12
 _MAX_ITERATIONS = 300
+_BETA_ITERATIONS = 20_000
 
 
 class Verdict(StrEnum):
@@ -77,21 +78,33 @@ def binomial_pmf(k: int, n: int, p: float) -> float:
 
 
 def binomial_sf(k: int, n: int, p: float) -> float:
-    """P(X >= k) for X ~ Binomial(n, p): the chance of at least k passes."""
+    """P(X >= k) for X ~ Binomial(n, p): the chance of at least k passes.
+    Through the incomplete beta function, P(X >= k) = I_p(k, n − k + 1): a
+    continued fraction of about √n steps instead of a sum of n terms, so a
+    1,000-time batch costs the same order as a 30-time one."""
     if k <= 0:
         return 1.0
     if k > n:
         return 0.0
-    return min(1.0, math.fsum(binomial_pmf(i, n, p) for i in range(k, n + 1)))
+    if p <= 0.0:
+        return 0.0
+    if p >= 1.0:
+        return 1.0
+    return min(1.0, max(0.0, regularized_incomplete_beta(k, n - k + 1, p)))
 
 
 def binomial_cdf(k: int, n: int, p: float) -> float:
-    """P(X <= k) for X ~ Binomial(n, p): the chance of at most k passes."""
+    """P(X <= k) for X ~ Binomial(n, p): the chance of at most k passes,
+    I_{1−p}(n − k, k + 1)."""
     if k < 0:
         return 0.0
     if k >= n:
         return 1.0
-    return min(1.0, math.fsum(binomial_pmf(i, n, p) for i in range(0, k + 1)))
+    if p <= 0.0:
+        return 1.0
+    if p >= 1.0:
+        return 0.0
+    return min(1.0, max(0.0, regularized_incomplete_beta(n - k, k + 1, 1 - p)))
 
 
 def _bisect(function, low: float, high: float, target: float, increasing: bool) -> float:
@@ -202,14 +215,34 @@ class GateRule:
 
 
 def binomial_gate_rule(n: int, target: float, confidence: float) -> GateRule:
+    """Binary searches over the count: P(X >= k) falls as k grows and
+    P(X <= k) rises, so each threshold takes about log₂ n tail evaluations."""
     _check_target(target)
     if n <= 0:
         return GateRule(n=n, pass_at_least=None, fail_at_most=None)
     alpha = 1 - confidence
-    pass_at_least = next(
-        (k for k in range(0, n + 1) if binomial_sf(k, n, target) <= alpha), None)
-    fail_at_most = next(
-        (k for k in range(n, -1, -1) if binomial_cdf(k, n, target) <= alpha), None)
+    pass_at_least = None
+    if binomial_sf(n, n, target) <= alpha:
+        # P(X >= 0) = 1 > alpha: the smallest k with P(X >= k) <= alpha is in (0, n]
+        low, high = 0, n
+        while high - low > 1:
+            middle = (low + high) // 2
+            if binomial_sf(middle, n, target) <= alpha:
+                high = middle
+            else:
+                low = middle
+        pass_at_least = high
+    fail_at_most = None
+    if binomial_cdf(0, n, target) <= alpha:
+        # P(X <= n) = 1 > alpha: the largest k with P(X <= k) <= alpha is in [0, n)
+        low, high = 0, n
+        while high - low > 1:
+            middle = (low + high) // 2
+            if binomial_cdf(middle, n, target) <= alpha:
+                low = middle
+            else:
+                high = middle
+        fail_at_most = low
     return GateRule(n=n, pass_at_least=pass_at_least, fail_at_most=fail_at_most)
 
 
@@ -261,7 +294,7 @@ def binomial_gate(passes: int, n: int, target: float, confidence: float) -> Gate
 
 
 def binomial_gate_runs_to_decide(passes: int, n: int, target: float,
-                                 confidence: float, limit: int = 100_000) -> int | None:
+                                 confidence: float, limit: int = 1000) -> int | None:
     """After an inconclusive gate: how big a *new* batch would likely decide
     it, if the check keeps passing at the rate this one observed.
 
@@ -271,7 +304,10 @@ def binomial_gate_runs_to_decide(passes: int, n: int, target: float,
     28 of 29 → 61. A new batch, never an extension: pooling batches until one
     passes would make the stated confidence untrue (note 18). None when the
     observed rate is exactly the target (no batch size would decide it), or
-    nothing was observed, or it would take more than `limit` runs.
+    nothing was observed, or it would take more than `limit` runs — the
+    caller passes the most a batch may run: a bigger answer can't be acted
+    on, and a rate close to the target needs a very large one (26 of 29
+    against 90% needs tens of thousands).
     """
     _check_target(target)
     if n <= 0:
@@ -312,7 +348,9 @@ def _beta_continued_fraction(a: float, b: float, x: float) -> float:
     d = tiny if abs(d) < tiny else d
     d = 1 / d
     h = d
-    for m in range(1, _MAX_ITERATIONS + 1):
+    # about √max(a, b) steps to converge: a binomial tail at n = 10,000 needs
+    # some hundreds, so the bound sits well clear of that
+    for m in range(1, _BETA_ITERATIONS + 1):
         m2 = 2 * m
         aa = m * (b - m) * x / ((qam + m2) * (a + m2))
         d = 1 + aa * d
@@ -857,18 +895,23 @@ class RankComparison:
 
 
 def _mann_whitney_exact_sf(u: int, n_a: int, n_b: int) -> float:
-    """P(U >= u) for B's U with no ties, from the exact distribution: N(i, j, s),
-    the arrangements of i scores of A and j of B with U = s, built up by where
-    the largest score is — B's (it beats all i of A's) or A's (U unchanged)."""
-    top = n_a * n_b
-    counts = [[1] + [0] * top for _ in range(n_b + 1)]  # i = 0: U is 0
-    for i in range(1, n_a + 1):
-        new = [[1] + [0] * top] + [[0] * (top + 1) for _ in range(n_b)]
-        for j in range(1, n_b + 1):
-            for s in range(top + 1):
-                new[j][s] = (new[j - 1][s - i] if s >= i else 0) + counts[j][s]
-        counts = new
-    return sum(counts[n_b][u:]) / math.comb(n_a + n_b, n_a)
+    """P(U >= u) with no ties, from the exact distribution of U. The number
+    of arrangements of m scores of one side and n of the other with U = s is
+    the coefficient of q^s in the Gaussian binomial [m + n choose m]_q =
+    ∏_{i=1..m} (1 − q^(n+i)) / (1 − q^i); built factor by factor, each step an
+    exact polynomial, it costs about m² · n operations with m the smaller side:
+    7 scores against 1,000 is some 50,000 steps."""
+    m, n = min(n_a, n_b), max(n_a, n_b)
+    counts = [1]
+    for i in range(1, m + 1):
+        degree = i * n
+        grown = counts + [0] * (degree + 1 - len(counts))
+        for s in range(degree, n + i - 1, -1):  # × (1 − q^(n+i))
+            grown[s] -= grown[s - n - i]
+        for s in range(i, degree + 1):  # ÷ (1 − q^i): a running sum with stride i
+            grown[s] += grown[s - i]
+        counts = grown
+    return sum(counts[max(u, 0):]) / math.comb(n_a + n_b, n_a)
 
 
 def mann_whitney(values_a: list[float], values_b: list[float]) -> RankComparison:

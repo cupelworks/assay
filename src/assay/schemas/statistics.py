@@ -138,7 +138,9 @@ class Warning_(BaseModel):
                     "`judge_settings_invalid` / `target_settings_invalid` (the saved "
                     "settings no longer validate), `checks_not_applicable` (some checks "
                     "aren't covered by this statistical test, e.g. pass/fail checks under "
-                    "a t-test).",
+                    "a t-test), `times_capped` (`times` was left out and the suggested size "
+                    "would create more runs than a batch may: the estimate is for the most "
+                    "this scope can run instead).",
     )
     message: str = Field(description="One sentence to show as it is.")
 
@@ -210,7 +212,8 @@ class StatisticalTestDescriptor(BaseModel):
     )
     verdicts: list[str] = Field(
         description="The verdicts it can give: `pass`/`fail`/`inconclusive` for a batch "
-                    "test, `better`/`worse`/`no_difference` for a comparison.",
+                    "test; `better`/`worse`/`no_difference` for a comparison, except "
+                    "`no_worse`/`worse`/`inconclusive` for the no-worse test.",
     )
     parameters: list[ParameterDescriptor] = Field(
         description="What can be set, each with its default and range. Send them under "
@@ -735,7 +738,9 @@ class BatchSummary(BaseModel):
         description="`Pending` (no run started), `Running`, then `Passed` (every applicable "
                     "check proven), `Failed` (at least one check proven to fail), "
                     "`Inconclusive` (finished, neither proven at this size), `Incomplete` "
-                    "(stopped before every run ran) or `NotRan` (no run could be evaluated).",
+                    "(stopped before every run ran) or `NotRan` (nothing could be decided: "
+                    "every run Not Ran, or every check errored in every run — fix the cause, "
+                    "a bigger batch wouldn't help).",
     )
     floor: int = Field(description="The fewest times the test can conclude at.")
     progress: BatchProgress
@@ -850,15 +855,23 @@ class CheckComparison(BaseModel):
                     "(ties count half). 0.5 is no difference; 1 is B always higher.",
     )
     verdict: ComparisonVerdictName | None = Field(
-        description="`better`: the interval lies above 0 — B passes more often. `worse`: "
-                    "below 0. `no_difference`: it straddles 0, so no real difference can be "
-                    "told at this size (not proof that there is none). Null when either side "
-                    "has no evaluated run.",
+        description="`better`: B did better — the difference's interval lies above 0 "
+                    "(pass rates, mean scores), or B's scores rank significantly higher "
+                    "(score ranks). `worse`: the other way. `no_difference`: neither can be "
+                    "told at this size (not proof that there is none). For `no_worse`: "
+                    "`no_worse` (proven at most `margin` worse), `worse` (proven more than "
+                    "`margin` worse) or `inconclusive`. A lower-is-better score type turns "
+                    "a rise into `worse`. Null when there's nothing to compare (`reason` "
+                    "says why), and on every check under `paired_entries`, whose one "
+                    "verdict is `result.paired.verdict`.",
     )
     reason: str = Field(description="The verdict in one sentence, as the UI shows it.")
     p_value: float | None = Field(
-        description="Shown beside the verdict, never deciding it: chi-square's when every "
-                    "expected count is at least 5, Fisher's exact otherwise.",
+        description="Shown beside the verdict: chi-square's when every expected count is "
+                    "at least 5, Fisher's exact otherwise (pass rates); Welch's (mean "
+                    "scores); Mann–Whitney's (score ranks, where it does decide, with "
+                    "`effect`). Null for `no_worse`, whose interval is the whole test. "
+                    "`p_value_method` names it.",
     )
     p_value_method: str | None = Field(
         description="How `p_value` was computed — name it in the caption: `chi_square` or "

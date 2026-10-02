@@ -46,5 +46,5 @@ async def stop_batch(batch_id: uuid.UUID, session: AsyncSession) -> BatchDetails
     if cancelled:
         logger.info("Stopped batch %s: %d pending runs cancelled", batch.id, cancelled,
                     extra={"batch_id": batch.id, "run_count": cancelled})
-    loaded = await refresh(batch, session)
-    return await describe(batch, session, loaded=loaded)
+    await refresh(batch, session)
+    return await describe(batch, session)

@@ -322,3 +322,43 @@ def test_judge_stability_needs_a_judge_check_on_a_recorded_answer(db):
 
     assert response.status_code == 422
     assert "judge stability needs one" in _messages(response)[0][1]
+
+
+# --- review fixes: a default the API would refuse ---
+
+
+def test_a_t_test_gap_too_small_for_one_batch_defaults_to_the_most_a_batch_can_run(db):
+    test = db.test(checks=[ROUGE])
+
+    response = _estimate(db, test_id=test["id"], statistical_test="one_sample_t",
+                         parameters={"difference": 0.005})
+
+    assert response.status_code == 200, response.text
+    estimate = response.json()
+    default = next(s for s in estimate["suggestions"] if s["default"])
+    assert default["times"] == estimate["times"] == MAX_TIMES
+    assert default["label"].startswith(f"{MAX_TIMES} · the most a batch can run")
+    assert "at 1000 it sees that gap less than 80% of the time" in estimate["floor_explanation"]
+
+
+def test_a_default_bigger_than_the_scope_can_run_is_capped_with_a_warning(db):
+    scored = db.test_set("scored", [db.test(name=f"s{i}", checks=[ROUGE]) for i in range(11)])
+
+    response = _estimate(db, test_set_id=scored["id"], statistical_test="one_sample_t",
+                         parameters={"difference": 0.005})
+
+    assert response.status_code == 200, response.text
+    estimate = response.json()
+    assert estimate["times"] == MAX_RUNS // 11
+    capped = next(w for w in estimate["warnings"] if w["code"] == "times_capped")
+    assert capped["message"] == (
+        "The suggested 1000 times would create 11000 runs, more than the 10000 a batch can "
+        "create: this estimate is for 909 times, the most for this scope.")
+
+
+def test_judge_stability_shows_its_rule_too(db):
+    test = db.test(checks=[TOXICITY])
+
+    estimate = _estimate(db, test_id=test["id"], statistical_test="judge_stability").json()
+
+    assert estimate["rule"] == {"times": 29, "pass_at_least": 29, "fail_at_most": 22}

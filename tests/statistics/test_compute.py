@@ -227,7 +227,7 @@ def _batch(passes_per_check, stopped=False, status=TestStatus.green):
     ([29, 10], BatchStatus.failed, "Failed: 1 of 2 checks proven to fail."),
     ([29, 27], BatchStatus.inconclusive,
      "Inconclusive: 1 proven, 1 undecided of 2 checks; a bigger batch would decide the "
-     "rest."),
+     "undecided."),
 ])
 def test_the_roll_up_and_its_sentence(passes, status, sentence):
     result, runs = _batch(passes)
@@ -317,3 +317,58 @@ def test_errored_and_not_ran_runs_are_left_out_and_nothing_failing_has_no_verdic
 
 def test_a_single_entry_has_no_diagnostic():
     assert compute.failures_by_entry([_entry_runs("a", [False])], 0.95) is None
+
+
+# --- review fixes: floors, "times to decide", nothing decidable ---
+
+
+def test_a_t_test_below_its_floor_has_no_verdict_even_when_not_stopped():
+    statistic = _scored(SCORES[:3]).statistic
+
+    assert statistic.verdict is None
+    assert statistic.reason.startswith("Only 3 scores were evaluated, below the 10")
+
+
+def test_times_to_decide_is_never_below_the_floor():
+    # 4 of 6 against 90% is inconclusive; a new batch of about 9 would likely
+    # prove it below, but one under the floor of 29 would be refused
+    runs = [_run(i, results=_passed("Contains", passed=i <= 4)) for i in range(1, 7)]
+
+    statistic = _check(runs=runs).statistic
+
+    assert statistic.verdict == "inconclusive"
+    assert statistic.times_to_decide == 29
+    assert statistic.times_to_decide_message == (
+        "A new batch of about 29 times would likely prove it below 90%.")
+
+
+def test_a_check_too_close_to_its_target_says_no_batch_can_decide_it():
+    # 26 of 29 against 90%: it would take tens of thousands of times
+    runs = [_run(i, results=_passed("Contains", passed=i <= 26)) for i in range(1, 30)]
+
+    statistic = _check(runs=runs).statistic
+
+    assert statistic.verdict == "inconclusive"
+    assert statistic.times_to_decide is None
+    assert statistic.times_to_decide_message == (
+        "A new batch would need more than 1000 times to likely prove it below 90%: more than "
+        "one batch can run.")
+
+
+def test_every_check_errored_in_every_run_is_not_ran_not_inconclusive():
+    errored = {"Check 0": {"passed": False, "score": None, "detail": "No judge configured",
+                           "errored": True}}
+    runs = [_run(i, status=TestStatus.red, results=errored) for i in range(1, 30)]
+    entry = BatchEntry(entry_id=None, test_id=None, test_set_id=None, test_set_name=None,
+                       name="t", recorded_answer=True,
+                       assignments=[TestTypeAssignment(name="Contains", label="Check 0")],
+                       runs=runs)
+    result = compute.compute(GATE, GATE_PARAMETERS, 29, False, [entry], TYPES,
+                             datetime.now().astimezone())
+
+    status = compute.roll_up(result, False, runs)
+
+    assert status == BatchStatus.not_ran
+    assert compute.summary(status, result, 29, 29, runs) == (
+        "Not Ran: no check could be decided — every one errored in every run (No judge "
+        "configured). Fix that before running again: a bigger batch wouldn't help.")

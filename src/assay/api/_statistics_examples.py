@@ -114,3 +114,53 @@ def paired_comparison() -> dict:
     data = result.model_dump(mode="json")
     data["entries"] = data["entries"][:1]
     return _cut(data)
+
+
+def stopped_result() -> dict:
+    """A gate batch of 30 times over two entries, stopped after 12: the result
+    a stopped batch really returns — the rates and series of what ran, and no
+    verdict, since 12 evaluated runs are below the floor of 29."""
+    stop = "Stopped before it ran: the batch was stopped"
+    relevance = TestTypesModel(name="Relevance", engine="llm_judge", comparison=None,
+                               config_fields=[])
+
+    def runs(offset: int, outcomes: list[dict]) -> list[BatchRun]:
+        made = []
+        for index in range(1, 31):
+            if index <= len(outcomes):
+                results = outcomes[index - 1]
+                status = (TestStatus.green if all(r["passed"] for r in results.values())
+                          else TestStatus.amber)
+                made.append(BatchRun(id=_id(offset + index), index=index,
+                                     execution_id=_id(500 + index), status=status,
+                                     results=results, error=None))
+            else:
+                made.append(BatchRun(id=_id(offset + index), index=index,
+                                     execution_id=_id(500 + index), status=TestStatus.not_ran,
+                                     results=None, error=stop))
+        return made
+
+    def decided(passed: bool) -> dict:
+        return {"passed": passed, "score": None, "detail": None, "errored": False}
+
+    reset = BatchEntry(
+        entry_id=_id(1001), test_id=None, test_set_id=None, test_set_name="Support answers",
+        name="Reset a password", recorded_answer=False,
+        assignments=[TestTypeAssignment(name="Contains", label="Mentions the reset link"),
+                     TestTypeAssignment(name="Relevance", label="Relevance")],
+        runs=runs(0, [{"Mentions the reset link": decided(True),
+                       "Relevance": decided(i not in (4, 9))} for i in range(12)]))
+    order = BatchEntry(
+        entry_id=_id(1002), test_id=None, test_set_id=None, test_set_name="Support answers",
+        name="Unknown order number", recorded_answer=False,
+        assignments=[TestTypeAssignment(name="Contains", label="Asks for the order number")],
+        runs=runs(100, [{"Asks for the order number": decided(True)} for _ in range(12)]))
+    entries = [reset, order]
+    result = compute.compute(StatisticalEngine.binomial_gate,
+                             {"target": 0.9, "confidence": 0.95}, 29, True, entries,
+                             {"Contains": _CONTAINS, "Relevance": relevance},
+                             "2026-10-01T09:41:09+02:00")
+    all_runs = [run for entry in entries for run in entry.runs]
+    status = compute.roll_up(result, True, all_runs)
+    result.summary = compute.summary(status, result, 12, 30, all_runs)
+    return _dump(result)
