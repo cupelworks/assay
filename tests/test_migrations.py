@@ -1554,3 +1554,50 @@ def test_downgrade_drops_the_tests_table_and_the_engine_columns(scratch):
     assert "engine" not in _table_columns(db_path, "statistical_batches")
     assert "engine" not in _table_columns(db_path, "statistical_comparisons")
     assert kept == ("binomial_gate",)
+
+
+# --- 9c4d2e7f0a1b: parameter hints worded without a unit ---
+
+
+def _hints(db_path: Path) -> dict[tuple[str, str], str]:
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute("SELECT id, parameters FROM statistical_tests").fetchall()
+    return {(row_id, p["key"]): p["hint"] for row_id, parameters in rows
+            for p in json.loads(parameters)}
+
+
+def test_upgrade_rewords_the_hints_and_leaves_an_edited_one_alone(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "7a3c5e9f1b2d")
+    with sqlite3.connect(db_path) as connection:
+        parameters = json.loads(connection.execute(
+            "SELECT parameters FROM statistical_tests WHERE id = 'pass_rates'").fetchone()[0])
+        parameters[0]["hint"] = "Our own wording"
+        connection.execute("UPDATE statistical_tests SET parameters = ? WHERE id = 'pass_rates'",
+                           (json.dumps(parameters),))
+
+    command.upgrade(config, "9c4d2e7f0a1b")
+
+    hints = _hints(db_path)
+    assert hints[("binomial_gate", "target")] == (
+        "The share of runs each check must pass — \"at least 90% of the time\", say. Higher "
+        "targets need many more runs.")
+    assert hints[("binomial_gate", "confidence")].startswith(
+        "How sure a verdict must be: at 95% a proven claim")
+    assert hints[("no_worse", "confidence")] == hints[("binomial_gate", "confidence")]
+    assert "5% of the range is 0.05 on ROUGE" in hints[("one_sample_t", "difference")]
+    assert hints[("pass_rates", "confidence")] == "Our own wording"
+    assert not any("0.9 means" in hint or "at 0.95" in hint for hint in hints.values())
+
+
+def test_downgrade_restores_the_seeded_hints(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "9c4d2e7f0a1b")
+
+    command.downgrade(config, "7a3c5e9f1b2d")
+
+    hints = _hints(db_path)
+    assert hints[("binomial_gate", "target")].startswith(
+        "The share of runs each check must pass: 0.9 means")
+    assert hints[("judge_stability", "confidence")].startswith(
+        "How sure a verdict must be: at 0.95")
