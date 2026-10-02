@@ -36,6 +36,7 @@ from assay.schemas.statistics import (
     BatchResult,
     BatchStatusName,
     BatchSummary,
+    EntryProgress,
     Scope,
     ScopeKind,
     StatisticalTestName,
@@ -169,6 +170,18 @@ def progress(batch: StatisticalBatchModel, entries: list[compute.BatchEntry],
     )
 
 
+def live_entries(entries: list[compute.BatchEntry]) -> list[EntryProgress]:
+    """The runs matrix as it fills in — each entry's runs by time, Pending and
+    Running included — for the batch page while the batch runs."""
+    return [
+        EntryProgress(entry_id=entry.entry_id, test_id=entry.test_id,
+                      test_set_id=entry.test_set_id, test_set_name=entry.test_set_name,
+                      name=entry.name, runs=compute.run_counts(entry.runs),
+                      strip=compute.strip(entry.runs))
+        for entry in entries
+    ]
+
+
 # ── keeping a batch up to date ───────────────────────────────────────────────
 
 
@@ -263,7 +276,10 @@ async def describe(batch: StatisticalBatchModel, session: AsyncSession, *, serie
                    with_result: bool = True, names: dict[uuid.UUID, str] | None = None,
                    loaded=None) -> BatchSummary | BatchDetails:
     """The batch as the API returns it. `loaded` is what refresh() returned, to
-    spare loading the runs twice."""
+    spare loading the runs twice. While the batch runs, the single-batch read
+    (`with_result`, with `series`) carries the runs matrix so far in
+    `progress.entries`; lists don't, and a stored result has it in its own
+    entries."""
     if names is None:
         names = await scope_names([batch], session)
     kind, scope_id = scope_kind(batch)
@@ -276,6 +292,8 @@ async def describe(batch: StatisticalBatchModel, session: AsyncSession, *, serie
             entries = await load_entries(batch, session)
             types = await load_types(entries, session)
         done = progress(batch, entries, types)
+        if with_result and series:
+            done.entries = live_entries(entries)
     fields = dict(
         id=batch.id,
         scope=Scope(kind=kind, id=scope_id, name=names.get(scope_id, "")),

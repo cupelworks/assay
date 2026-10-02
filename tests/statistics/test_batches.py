@@ -96,6 +96,35 @@ def test_a_running_batch_shows_progress_and_no_result(db):
     assert (progress["times_done"], progress["runs_done"]) == (2, 2)
     assert progress["runs"] == {"Pending": 26, "Running": 1, "Green": 2, "Amber": 0, "Red": 0,
                                 "NotRan": 0}
+    # the runs matrix so far: statuses by time, no verdicts
+    [entry] = progress["entries"]
+    assert (entry["entry_id"], entry["test_id"], entry["name"]) == (None, test["id"], "t")
+    assert entry["runs"] == progress["runs"]
+    assert [p["status"] for p in entry["strip"]][:4] == ["Green", "Green", "Running", "Pending"]
+    assert [p["index"] for p in entry["strip"]] == list(range(1, 30))
+    assert entry["strip"][0]["run_id"] == str(runs[0].id)
+    assert entry["strip"][0]["execution_id"] is None
+
+
+def test_the_live_matrix_is_left_out_of_lists_series_false_and_results(db):
+    test_set = db.test_set("support", [db.test(name="b"), db.test(name="a")])
+    batch = _create(db, test_set_id=test_set["id"]).json()
+
+    read = _get(db, batch["id"])
+    listed = db.client.get("/statistics/batches").json()["items"][0]
+    slim = _get(db, batch["id"], series="false")
+
+    assert [(e["test_set_name"], e["name"]) for e in read["progress"]["entries"]] == [
+        ("support", "a"), ("support", "b")]
+    assert read["progress"]["entries"][0]["strip"][0]["execution_id"] is not None
+    assert listed["progress"]["entries"] is None
+    assert slim["progress"]["entries"] is None
+
+    _run_all(db, batch["id"])
+    finished = _get(db, batch["id"])
+
+    assert finished["progress"]["entries"] is None
+    assert len(finished["result"]["entries"][0]["strip"]) == 29
 
 
 def test_a_finished_batch_is_computed_once_and_stored(db):

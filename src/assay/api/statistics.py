@@ -338,6 +338,26 @@ _BATCH_COMMON = {
     "stopped_at": None,
 }
 
+_ENTRY_B_ID = "e5f6a7b8-c9d0-1234-ef56-7890abcdef13"
+_RUN_B_IDS = ["9b2f7c1e-0f4a-4d3b-8a51-2c7e5d9f1b01", "9b2f7c1e-0f4a-4d3b-8a51-2c7e5d9f1b02",
+              "9b2f7c1e-0f4a-4d3b-8a51-2c7e5d9f1b03"]
+
+
+def _live_entry(entry_id: str, name: str, run_ids: list[str], statuses: list[str]) -> dict:
+    """A row of the runs matrix while the batch runs (statuses by time, cut to
+    three points like the series)."""
+    counts: dict[str, int] = {}
+    for status_ in statuses:
+        counts[status_] = counts.get(status_, 0) + 1
+    return {
+        "entry_id": entry_id, "test_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "test_set_id": _SET_ID, "test_set_name": "Support answers", "name": name,
+        "runs": _counts(**counts),
+        "strip": [{"index": i, "run_id": run_ids[i - 1], "execution_id": _EXECUTION_IDS[i - 1],
+                   "status": statuses[i - 1]} for i in (1, 2, 3)],
+    }
+
+
 _BATCH_PENDING = {
     **_BATCH_COMMON,
     "status": "Pending",
@@ -346,6 +366,10 @@ _BATCH_PENDING = {
         "runs": _counts(Pending=60), "runs_cancelled": 0, "times_cancelled": 0,
         "calls": {"application": {"planned": 60, "finished": 0, "in_flight": 0},
                   "judge": {"planned": 30, "finished": 0, "in_flight": 0}},
+        "entries": [
+            _live_entry(_ENTRY_ID, "Reset a password", _RUN_IDS, ["Pending"] * 3),
+            _live_entry(_ENTRY_B_ID, "Unknown order number", _RUN_B_IDS, ["Pending"] * 3),
+        ],
     },
     "summary": None,
     "verdicts": None,
@@ -362,6 +386,12 @@ _BATCH_RUNNING = {
         "runs_cancelled": 0, "times_cancelled": 0,
         "calls": {"application": {"planned": 60, "finished": 25, "in_flight": 2},
                   "judge": {"planned": 30, "finished": 12, "in_flight": 1}},
+        "entries": [
+            _live_entry(_ENTRY_ID, "Reset a password", _RUN_IDS,
+                        ["Green", "Amber", "Running"]),
+            _live_entry(_ENTRY_B_ID, "Unknown order number", _RUN_B_IDS,
+                        ["Green", "Green", "Pending"]),
+        ],
     },
 }
 
@@ -426,6 +456,7 @@ _BATCH_FINISHED = {
         "runs": _counts(Green=28, Amber=2), "runs_cancelled": 0, "times_cancelled": 0,
         "calls": {"application": {"planned": 30, "finished": 30, "in_flight": 0},
                   "judge": {"planned": 30, "finished": 30, "in_flight": 0}},
+        "entries": None,
     },
     "summary": "Inconclusive: 1 proven, 1 undecided of 2 checks; a bigger batch would decide "
                "the rest.",
@@ -488,6 +519,7 @@ _BATCH_STOPPED = {
         "times_cancelled": 18,
         "calls": {"application": {"planned": 60, "finished": 24, "in_flight": 0},
                   "judge": {"planned": 30, "finished": 12, "in_flight": 0}},
+        "entries": None,
     },
     "summary": "Incomplete: stopped after 12 of 30 times ran; 0 proven, 0 undecided, 3 "
                "without a verdict of 3 checks.",
@@ -514,7 +546,10 @@ _BATCH_ANATOMY = """
   a run stays `Green`/`Amber`/`Red`.
 - **`progress`** — `times_done` of `times_requested` (a time is done when all its runs are),
   `runs_done` of `runs_total`, runs by status, and `calls`: application and judge calls
-  `planned`, `finished` and `in_flight` — what's been spent, for the Stop decision.
+  `planned`, `finished` and `in_flight` — what's been spent, for the Stop decision. While
+  the batch runs, this read also carries `progress.entries`: the runs matrix as it fills
+  in (one row per entry, each run's `status` by time, with `run_id` to open it) — statuses
+  only, no verdicts. It's null in lists, with `series=false`, and once there is a result.
 - **`result`** — null until every run has finished: there are **no verdicts mid-batch**
   (an interim verdict invites stopping on a lucky streak). The first read that finds every
   run finished computes it and stores it; later reads return exactly the same.
@@ -625,12 +660,13 @@ async def create_statistical_batch(
     responses={200: {
         "description": (
             "Batches, newest first, without their per-check results (open one for those). "
-            "Each has its status, progress and, once finished, its one-sentence `summary` "
-            "and its `verdicts` counts."
+            "Each has its status, progress (without the runs matrix) and, once finished, "
+            "its one-sentence `summary` and its `verdicts` counts."
         ),
         "content": {"application/json": {"example": {
             "items": [{k: v for k, v in _BATCH_FINISHED.items() if k != "result"},
-                      {k: v for k, v in _BATCH_RUNNING.items() if k != "result"}],
+                      {**{k: v for k, v in _BATCH_RUNNING.items() if k != "result"},
+                       "progress": {**_BATCH_RUNNING["progress"], "entries": None}}],
             "total": 2, "offset": 0, "limit": 100,
         }}},
     }},
@@ -734,8 +770,9 @@ _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
 async def get_statistical_batch(
         batch_id: uuid.UUID, session: SessionDep,
         series: Annotated[bool, Query(
-            description="`false` leaves out every `series` and `strip` (the per-run points): "
-                        "the summaries alone, for lists and small screens.")] = True,
+            description="`false` leaves out every `series` and `strip` (the per-run points) "
+                        "and the live `progress.entries`: the summaries alone, for lists "
+                        "and small screens.")] = True,
 ) -> BatchDetails:  # pragma: no cover
     return await get_batch(batch_id, series, session)
 

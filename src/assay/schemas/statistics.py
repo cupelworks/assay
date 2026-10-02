@@ -422,27 +422,6 @@ class RunCounts(BaseModel):
     NotRan: int = 0
 
 
-class BatchProgress(BaseModel):
-    """How far the batch has got — what the running batch page shows beside
-    Stop, so stopping is an informed choice."""
-    times_requested: int = Field(description="Times the batch was created to run the scope.")
-    times_done: int = Field(
-        description="Times whose every run has finished (Green, Amber, Red or Not Ran).",
-    )
-    runs_total: int = Field(description="Runs the batch created: times × entries.")
-    runs_done: int = Field(description="Runs that have finished, whatever their outcome.")
-    runs: RunCounts = Field(description="Runs by status.")
-    runs_cancelled: int = Field(
-        description="Of the Not Ran runs, those a stop cancelled before they ran (counted in "
-                    "`runs_done` too: they're finished, they'll never run).",
-    )
-    times_cancelled: int = Field(
-        description="Times every run of which a stop cancelled: they never ran. "
-                    "`times_requested − times_cancelled` is how many times actually ran.",
-    )
-    calls: BatchCalls = Field(description="What has been paid for so far, and what's planned.")
-
-
 class SeriesPoint(BaseModel):
     """One run's outcome for one check — one point of a chart."""
     index: int = Field(
@@ -480,6 +459,47 @@ class RunStripPoint(BaseModel):
     execution_id: uuid.UUID | None = Field(
         description="Its set or plan execution; null for a standalone run.")
     status: str = Field(description="The run's status, Pending and Running included.")
+
+
+class EntryProgress(BaseModel):
+    """One entry's runs while the batch runs: a row of the runs matrix before
+    there is a result."""
+    entry_id: uuid.UUID | None = Field(description="The test set entry; null for a test.")
+    test_id: uuid.UUID | None = Field(description="The live test it was copied from.")
+    test_set_id: uuid.UUID | None = Field(description="Its test set; null for a test.")
+    test_set_name: str | None = Field(description="Its test set's name; null for a test.")
+    name: str
+    runs: RunCounts = Field(description="This entry's runs by status.")
+    strip: list[RunStripPoint] = Field(
+        description="This entry's runs by time, Pending and Running included.")
+
+
+class BatchProgress(BaseModel):
+    """How far the batch has got — what the running batch page shows beside
+    Stop, so stopping is an informed choice."""
+    times_requested: int = Field(description="Times the batch was created to run the scope.")
+    times_done: int = Field(
+        description="Times whose every run has finished (Green, Amber, Red or Not Ran).",
+    )
+    runs_total: int = Field(description="Runs the batch created: times × entries.")
+    runs_done: int = Field(description="Runs that have finished, whatever their outcome.")
+    runs: RunCounts = Field(description="Runs by status.")
+    runs_cancelled: int = Field(
+        description="Of the Not Ran runs, those a stop cancelled before they ran (counted in "
+                    "`runs_done` too: they're finished, they'll never run).",
+    )
+    times_cancelled: int = Field(
+        description="Times every run of which a stop cancelled: they never ran. "
+                    "`times_requested − times_cancelled` is how many times actually ran.",
+    )
+    calls: BatchCalls = Field(description="What has been paid for so far, and what's planned.")
+    entries: list[EntryProgress] | None = Field(
+        default=None,
+        description="On the batch read while the batch runs: the runs matrix as it fills in, "
+                    "one row per entry in the result's entry order, each run's status by "
+                    "time. Null in lists, with `series=false`, and once the result is "
+                    "stored (`result.entries[].strip` is the finished matrix).",
+    )
 
 
 class Scale(BaseModel):
