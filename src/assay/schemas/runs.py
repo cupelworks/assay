@@ -461,7 +461,7 @@ class PaginatedTestSetExecutionMetadata(Pagination):
     items: list[TestSetExecutionMetadata]
 
 
-class TestSetExecutionRunMetadata(RunID, RunStatus, RunCreationDate):
+class TestSetExecutionRunMetadata(BatchMembership, RunID, RunStatus, RunCreationDate):
     test_set_entry_id: TestSetEntryID
     test_set_execution_id: TestSetExecutionID
 
@@ -565,7 +565,7 @@ class PaginatedTestPlanExecutionMetadata(Pagination):
     items: list[TestPlanExecutionMetadata]
 
 
-class TestPlanExecutionRunMetadata(RunID, RunStatus, RunCreationDate):
+class TestPlanExecutionRunMetadata(BatchMembership, RunID, RunStatus, RunCreationDate):
     test_set_entry_id: TestSetEntryID
     test_plan_execution_id: TestPlanExecutionID
 

@@ -619,6 +619,7 @@ async def get_test_set_execution_run_metadata_all_runs(
 
     Returns:
         A paginated response with each run's ID, status, created_at,
+        batch_id and batch_index (null outside a statistical batch),
         test_set_entry_id, and test_set_execution_id, plus total count,
         offset, and limit.
 
@@ -642,6 +643,8 @@ async def get_test_set_execution_run_metadata_all_runs(
             TestRunModel.id,
             TestRunModel.status,
             TestRunModel.created_at,
+            TestRunModel.batch_id,
+            TestRunModel.batch_index,
             TestRunModel.test_set_entry_id,
         )
         .where(TestRunModel.test_set_execution_id == test_set_execution_id)
@@ -659,6 +662,8 @@ async def get_test_set_execution_run_metadata_all_runs(
                 id=item.id,
                 status=item.status,
                 created_at=item.created_at,
+                batch_id=item.batch_id,
+                batch_index=item.batch_index,
                 test_set_entry_id=TestSetEntryID(id=item.test_set_entry_id),
                 test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
             )
@@ -688,6 +693,7 @@ async def get_test_plan_execution_run_metadata_all_runs(
 
     Returns:
         A paginated response with each run's ID, status, created_at,
+        batch_id and batch_index (null outside a statistical batch),
         test_set_entry_id, and test_plan_execution_id, plus total count,
         offset, and limit.
 
@@ -712,6 +718,8 @@ async def get_test_plan_execution_run_metadata_all_runs(
             TestRunModel.id,
             TestRunModel.status,
             TestRunModel.created_at,
+            TestRunModel.batch_id,
+            TestRunModel.batch_index,
             TestRunModel.test_set_entry_id,
         )
         .where(TestRunModel.test_plan_execution_id == test_plan_execution_id)
@@ -729,6 +737,8 @@ async def get_test_plan_execution_run_metadata_all_runs(
                 id=item.id,
                 status=item.status,
                 created_at=item.created_at,
+                batch_id=item.batch_id,
+                batch_index=item.batch_index,
                 test_set_entry_id=TestSetEntryID(id=item.test_set_entry_id),
                 test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
             )

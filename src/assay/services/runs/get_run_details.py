@@ -137,7 +137,8 @@ async def get_run_details_by_test_set_execution_and_run_id(
         session: Active async database session.
 
     Returns:
-        The run's id, status, created_at, test_set_entry_id, and
+        The run's id, status, created_at, batch_id and batch_index (null
+        outside a statistical batch), test_set_entry_id, and
         test_set_execution_id, plus results, error, and executed_at (null
         until the run reaches a terminal status), plus the snapshotted
         entry it ran against — test_case_id, name, input, expected_output,
@@ -166,6 +167,8 @@ async def get_run_details_by_test_set_execution_and_run_id(
         select(
             TestRunModel.status,
             TestRunModel.created_at,
+            TestRunModel.batch_id,
+            TestRunModel.batch_index,
             TestRunModel.test_set_entry_id,
             TestRunModel.results,
             TestRunModel.error,
@@ -193,6 +196,8 @@ async def get_run_details_by_test_set_execution_and_run_id(
         id=test_run_id,
         status=test_run.status,
         created_at=test_run.created_at,
+        batch_id=test_run.batch_id,
+        batch_index=test_run.batch_index,
         test_set_entry_id=TestSetEntryID(id=test_run.test_set_entry_id),
         test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
         results=test_run.results,
@@ -239,7 +244,8 @@ async def get_run_details_by_test_plan_execution_and_run_id(
         session: Active async database session.
 
     Returns:
-        The run's id, status, created_at, test_set_entry_id, and
+        The run's id, status, created_at, batch_id and batch_index (null
+        outside a statistical batch), test_set_entry_id, and
         test_plan_execution_id, plus results, error, and executed_at (null
         until the run reaches a terminal status), plus the snapshotted
         entry it ran against — test_case_id, name, input, expected_output,
@@ -276,6 +282,8 @@ async def get_run_details_by_test_plan_execution_and_run_id(
         select(
             TestRunModel.status,
             TestRunModel.created_at,
+            TestRunModel.batch_id,
+            TestRunModel.batch_index,
             TestRunModel.test_set_entry_id,
             TestRunModel.results,
             TestRunModel.error,
@@ -304,6 +312,8 @@ async def get_run_details_by_test_plan_execution_and_run_id(
         id=test_run_id,
         status=test_run.status,
         created_at=test_run.created_at,
+        batch_id=test_run.batch_id,
+        batch_index=test_run.batch_index,
         test_set_entry_id=TestSetEntryID(id=test_run.test_set_entry_id),
         test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
         results=test_run.results,

@@ -285,6 +285,8 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path():
     row = SimpleNamespace(
         status=TestStatus.green,
         created_at=created_at,
+        batch_id=None,
+        batch_index=None,
         test_set_entry_id=test_set_entry_id,
         results=results,
         error=None,
@@ -368,6 +370,8 @@ def test_get_run_details_by_test_set_execution_and_run_id_reachable_after_unlink
     row = SimpleNamespace(
         status=TestStatus.green,
         created_at=created_at,
+        batch_id=None,
+        batch_index=None,
         test_set_entry_id=test_set_entry_id,
         results=results,
         error=None,
@@ -417,6 +421,8 @@ def test_get_run_details_by_test_set_execution_and_run_id_happy_path_non_termina
     row = SimpleNamespace(
         status=TestStatus.pending,
         created_at=created_at,
+        batch_id=None,
+        batch_index=None,
         test_set_entry_id=test_set_entry_id,
         results=None,
         error=None,
@@ -583,6 +589,8 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path():
     row = SimpleNamespace(
         status=TestStatus.green,
         created_at=created_at,
+        batch_id=None,
+        batch_index=None,
         test_set_entry_id=test_set_entry_id,
         results=results,
         error=None,
@@ -656,6 +664,8 @@ def test_get_run_details_by_test_plan_execution_and_run_id_happy_path_non_termin
     row = SimpleNamespace(
         status=TestStatus.pending,
         created_at=created_at,
+        batch_id=None,
+        batch_index=None,
         test_set_entry_id=test_set_entry_id,
         results=None,
         error=None,
@@ -738,6 +748,8 @@ def test_get_run_details_by_test_plan_execution_and_run_id_reachable_after_unlin
     row = SimpleNamespace(
         status=TestStatus.green,
         created_at=created_at,
+        batch_id=None,
+        batch_index=None,
         test_set_entry_id=test_set_entry_id,
         results=results,
         error=None,
@@ -802,3 +814,42 @@ def test_standalone_details_carry_the_applications_whole_reply():
     response = asyncio.run(get_run_details_by_test_and_run_id(test_id, test_run_id, session))
 
     assert response.application_reply == reply
+
+
+def test_set_run_details_carry_the_batch():
+    test_set_id, execution_id, run_id, batch_id = (uuid.uuid4() for _ in range(4))
+    session = AsyncMock()
+    session.scalar.side_effect = [test_set_id, execution_id, execution_id, run_id, run_id]
+    row = SimpleNamespace(
+        status=TestStatus.pending, created_at=datetime.now().astimezone(),
+        batch_id=batch_id, batch_index=7, test_set_entry_id=uuid.uuid4(), results=None,
+        error=None, evaluated_output=None, output_source=None, application_reply=None,
+        executed_at=None, test_id=uuid.uuid4(), name="n", input="i", expected_output=None,
+        model_output="m", test_type_assignments=[], snapshot_at=datetime.now().astimezone(),
+    )
+    session.execute.return_value = MagicMock(one=MagicMock(return_value=row))
+
+    response = asyncio.run(get_run_details_by_test_set_execution_and_run_id(
+        test_set_id, execution_id, run_id, session))
+
+    assert (response.batch_id, response.batch_index) == (batch_id, 7)
+
+
+def test_plan_run_details_carry_the_batch():
+    test_plan_id, execution_id, run_id, batch_id = (uuid.uuid4() for _ in range(4))
+    session = AsyncMock()
+    session.scalar.side_effect = [test_plan_id, execution_id, execution_id, run_id, run_id]
+    row = SimpleNamespace(
+        status=TestStatus.pending, created_at=datetime.now().astimezone(),
+        batch_id=batch_id, batch_index=3, test_set_entry_id=uuid.uuid4(), results=None,
+        error=None, evaluated_output=None, output_source=None, application_reply=None,
+        executed_at=None, test_id=uuid.uuid4(), test_set_id=None, name="n", input="i",
+        expected_output=None, model_output="m", test_type_assignments=[],
+        snapshot_at=datetime.now().astimezone(),
+    )
+    session.execute.return_value = MagicMock(one=MagicMock(return_value=row))
+
+    response = asyncio.run(get_run_details_by_test_plan_execution_and_run_id(
+        test_plan_id, execution_id, run_id, session))
+
+    assert (response.batch_id, response.batch_index) == (batch_id, 3)

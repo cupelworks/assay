@@ -30,6 +30,8 @@ _RUN_DETAIL_RECORDED = {
     "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
     "status": "Green",
     "created_at": "2026-07-15T16:44:30.163355",
+    "batch_id": None,
+    "batch_index": None,
     "test_set_entry_id": {
         "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
     },
@@ -458,6 +460,8 @@ async def get_test_set_execution_metadata(
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
                                 "status": "Green",
                                 "created_at": "2026-07-15T16:44:30.163355",
+                                "batch_id": None,
+                                "batch_index": None,
                                 "test_set_entry_id": {
                                     "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
                                 },
@@ -469,6 +473,8 @@ async def get_test_set_execution_metadata(
                                 "id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123",
                                 "status": "Pending",
                                 "created_at": "2026-07-15T16:44:30.163355",
+                                "batch_id": None,
+                                "batch_index": None,
                                 "test_set_entry_id": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                                 },

@@ -313,6 +313,29 @@ def test_listings_carry_the_batch_and_filter_by_it(db):
     assert db.client.get(executions, params={"batch": "nope"}).status_code == 422
 
 
+def test_an_executions_runs_and_their_details_carry_the_batch(db):
+    test_set = db.test_set("support", [db.test()])
+    plan = db.test_plan("campaign", [test_set])
+    set_batch = _create(db, test_set_id=test_set["id"]).json()
+    plan_batch = _create(db, test_plan_id=plan["id"]).json()
+    set_run = db.runs_of(set_batch["id"])[0]
+    plan_run = db.runs_of(plan_batch["id"])[0]
+    set_base = f"/runs/test-sets/{test_set['id']}/executions/{set_run.test_set_execution_id}"
+    plan_base = f"/runs/test-plans/{plan['id']}/executions/{plan_run.test_plan_execution_id}"
+
+    set_runs = db.client.get(f"{set_base}/test-runs").json()
+    set_detail = db.client.get(f"{set_base}/test-runs/{set_run.id}").json()
+    plan_runs = db.client.get(f"{plan_base}/test-runs").json()
+    plan_detail = db.client.get(f"{plan_base}/test-runs/{plan_run.id}").json()
+
+    assert (set_runs["items"][0]["batch_id"], set_runs["items"][0]["batch_index"]) == (
+        set_batch["id"], 1)
+    assert (set_detail["batch_id"], set_detail["batch_index"]) == (set_batch["id"], 1)
+    assert (plan_runs["items"][0]["batch_id"], plan_runs["items"][0]["batch_index"]) == (
+        plan_batch["id"], 1)
+    assert (plan_detail["batch_id"], plan_detail["batch_index"]) == (plan_batch["id"], 1)
+
+
 def test_a_tests_run_listing_filters_by_batch_too(db):
     test = db.test()
     db.client.post(f"/runs/standalone/{test['id']}")
