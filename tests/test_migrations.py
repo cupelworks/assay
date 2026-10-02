@@ -1601,3 +1601,52 @@ def test_downgrade_restores_the_seeded_hints(scratch):
         "The share of runs each check must pass: 0.9 means")
     assert hints[("judge_stability", "confidence")].startswith(
         "How sure a verdict must be: at 0.95")
+
+
+# --- b2e8f4a6c0d3: the statistical tests in plain words ---
+
+
+def _catalogue_texts(db_path: Path) -> dict[str, dict]:
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            "SELECT id, name, question, floor_explanation, parameters FROM statistical_tests"
+        ).fetchall()
+    return {row_id: {"name": name, "question": question, "floor": floor,
+                     "parameters": {p["key"]: p for p in json.loads(parameters)}}
+            for row_id, name, question, floor, parameters in rows}
+
+
+def test_upgrade_says_the_tests_in_plain_words_and_leaves_edited_texts_alone(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "9c4d2e7f0a1b")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("UPDATE statistical_tests SET name = 'Our gate' "
+                           "WHERE id = 'binomial_gate'")
+
+    command.upgrade(config, "b2e8f4a6c0d3")
+
+    texts = _catalogue_texts(db_path)
+    assert texts["binomial_gate"]["name"] == "Our gate"
+    assert texts["binomial_gate"]["question"].startswith("Does each check pass almost every")
+    assert texts["binomial_gate"]["floor"].startswith("A few passes in a row can be luck.")
+    assert texts["binomial_gate"]["parameters"]["confidence"]["label"] == "How sure"
+    assert [texts[test_id]["name"] for test_id in (
+        "one_sample_t", "judge_stability", "pass_rates", "no_worse", "mean_scores",
+        "score_ranks", "paired_entries")] == [
+        "Scores high enough on average", "The judge is consistent", "Did it get better?",
+        "Is it still as good?", "Did scores go up?", "Did scores go up? (scores near 0 or 1)",
+        "Did each entry get better?"]
+    assert not any("^" in t["floor"] or "p = " in t["floor"] for t in texts.values())
+
+
+def test_downgrade_brings_the_statisticians_words_back(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "b2e8f4a6c0d3")
+
+    command.downgrade(config, "9c4d2e7f0a1b")
+
+    texts = _catalogue_texts(db_path)
+    assert texts["binomial_gate"]["name"] == "Binomial gate"
+    assert texts["one_sample_t"]["parameters"]["difference"]["label"] == (
+        "Smallest gap worth detecting")
+    assert "0.9^29" in texts["binomial_gate"]["floor"]
