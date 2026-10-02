@@ -194,6 +194,13 @@ def test_identical_scores_are_decided_by_the_threshold_alone():
     assert statistic.reason.endswith("— every run scored exactly 0.7.")
 
 
+def test_identical_scores_are_said_once_rounded_the_same_way():
+    statistic = _scored([24.7522] * 10, threshold="30").statistic
+
+    assert statistic.reason == ("Average score 24.8 over 10 runs: below the 30 needed (95% "
+                                "sure) — every run scored exactly 24.8.")
+
+
 def test_a_pass_fail_check_under_a_t_test_has_no_statistic():
     check = _check(runs=[_run(1, results=_passed("Contains"))], name=T_TEST,
                    parameters=T_PARAMETERS, floor=10)

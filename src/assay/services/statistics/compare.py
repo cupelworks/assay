@@ -128,8 +128,9 @@ def _pass_rates(common: dict, a: ComparisonSide, b: ComparisonSide,
                                                                  POWER)
         message = _decide_message(times_to_decide)
         if times_to_decide is None:
-            message = ("Both passed equally often: no number of runs would show a difference "
-                       "that isn't there.")
+            both = ("Both failed every time" if rate_a == 0 else
+                    "Both passed every time" if rate_a == 1 else "Both passed equally often")
+            message = f"{both}: no number of runs would show a difference that isn't there."
     return CheckComparison(
         **common,
         difference=make_interval(test.lower, test.difference, test.upper,

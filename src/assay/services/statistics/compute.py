@@ -258,7 +258,7 @@ def _t_test(scores: list[float], threshold: float, higher_is_better: bool,
                 test.mean, test.sd or 0.0, threshold, confidence, POWER, limit=MAX_TIMES),
                 floor, leaning)
     if test.sd == 0 and n > 1:
-        reason = reason[:-1] + f" — every run scored exactly {test.mean:g}."
+        reason = reason[:-1] + f" — every run scored exactly {average}."
     return Statistic(
         verdict=CheckVerdict(test.verdict.value), reason=reason, n=n, interval=interval,
         p_value_pass=r4(test.p_value_pass), p_value_fail=r4(test.p_value_fail), rule=None,

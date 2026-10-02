@@ -65,8 +65,17 @@ def test_equal_rates_can_never_be_told_apart():
 
     assert check.verdict == "no_difference"
     assert check.times_to_decide is None
-    assert "no number of runs would show a difference" in check.times_to_decide_message
+    assert check.times_to_decide_message == (
+        "Both passed every time: no number of runs would show a difference that isn't there.")
     assert check.reason == "No difference: both passed every time."
+
+
+def test_two_batches_failing_every_time_say_so():
+    check = _check(_entry(0), _entry(0))
+
+    assert check.reason == "No difference: both failed every time."
+    assert check.times_to_decide_message == (
+        "Both failed every time: no number of runs would show a difference that isn't there.")
 
 
 def test_errored_runs_are_left_out_of_both_samples():
