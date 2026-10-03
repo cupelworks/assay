@@ -12,11 +12,11 @@ The fold, per entry and per check (by label, the check's identity):
 - the rest is the sample: passed or failed, with a score for scored checks.
 """
 import math
-import uuid
 from dataclasses import dataclass, field
 
-from assay import stats_math
+from assay import sequential, stats_math
 from assay.assignment_labels import in_label_order, labelled
+from assay.batch_waves import read_overrides
 from assay.models import JUDGE_ENGINE, BatchStatus, TestStatus, TestTypesModel
 from assay.schemas import TestTypeAssignment
 from assay.schemas.statistics import (
@@ -44,17 +44,6 @@ from assay.services.statistics.catalogue import MAX_TIMES, POWER, often, sure
 NO_RESULT = "No result for this check in this run"
 LEFT_OUT = "Left out of this batch"
 TRIAL_REASON = "A trial gives no verdict: it shows how often the check passes"
-
-
-def read_overrides(stored: dict | None) -> tuple[dict[tuple, float], set[tuple]]:
-    """A batch's stored overrides as lookups by (entry id, label) — the entry
-    id a UUID, None for a standalone test."""
-    def key(item: dict) -> tuple:
-        entry = item.get("entry_id")
-        return (uuid.UUID(str(entry)) if entry else None, item["label"])
-    stored = stored or {}
-    return ({key(item): float(item["target"]) for item in stored.get("targets", [])},
-            {key(item) for item in stored.get("leave_out", [])})
 
 
 @dataclass(frozen=True)
@@ -145,7 +134,7 @@ def applies(name: StatisticalEngine, row: TestTypesModel | None,
         return False, TRIAL_REASON
     if name == StatisticalEngine.one_sample_t and (row is None or row.comparison is None):
         return False, "It only passes or fails: an average needs a check that gives a score"
-    if name == StatisticalEngine.judge_stability:
+    if name in (StatisticalEngine.judge_stability, StatisticalEngine.sequential_judge_stability):
         if row is None or row.engine != JUDGE_ENGINE:
             return False, "Not an LLM judge: this test checks whether the judge is consistent"
         if not recorded_answer:
@@ -319,6 +308,50 @@ def _agreement(passed: int, n: int, target: float, confidence: float, floor: int
     )
 
 
+def _sequential(series: list[SeriesPoint], plan: sequential.WavePlan, target: float,
+                confidence: float, stopped: bool, agreement: bool) -> Statistic:
+    """Until there's an answer: the first look that decided the check, at the
+    look's stricter level, and the numbers as they were then."""
+    outcomes = [(p.index, bool(p.passed)) for p in series if p.passed is not None]
+    found = sequential.decide(outcomes, plan, target, agreement=agreement)
+    counted, n = found.passes, found.evaluated
+    gate = stats_math.binomial_gate(counted, n, target, plan.level)
+    goal = often(target)
+    if agreement:
+        usual = "pass" if sum(o[1] for o in outcomes[:n]) * 2 >= n else "fail"
+        told = f"{counted} of its first {_runs(n)} said {usual}"
+        if found.verdict == "pass":
+            reason = (f"The judge is consistent: {told}. It agrees with itself at least "
+                      f"{goal} ({sure(confidence)}).")
+        elif found.verdict == "fail":
+            reason = (f"The judge is inconsistent: {told}. It agrees with itself less than "
+                      f"{goal} ({sure(confidence)}).")
+    elif found.verdict == "pass":
+        reason = (f"Passed {counted} of its first {_runs(n)}: it passes at least {goal} "
+                  f"({sure(confidence)}).")
+    elif found.verdict == "fail":
+        record = (f"Failed all of its first {_runs(n)}" if counted == 0
+                  else f"Passed only {counted} of its first {_runs(n)}")
+        reason = f"{record}: it passes less than {goal} ({sure(confidence)})."
+    if found.verdict is None:
+        reason = (f"The batch was stopped before this check had its answer ({counted} of "
+                  f"{_runs(n)})." if stopped else
+                  f"Can't tell yet: {counted} of {_runs(n)}, the most this batch could run, "
+                  f"is too close to {goal}. A new batch with a higher maximum might settle "
+                  "it.")
+    interval = make_interval(gate.lower, counted / n if n else None, gate.upper,
+                             IntervalMethod.exact, round(plan.level, 4), IntervalSides.one)
+    verdict = {"pass": CheckVerdict.passed, "fail": CheckVerdict.failed}.get(
+        found.verdict, CheckVerdict.inconclusive)
+    rule = stats_math.binomial_gate_rule(n, target, plan.level)
+    return Statistic(
+        verdict=verdict, reason=reason, n=n, interval=interval,
+        p_value_pass=r4(gate.p_value_pass), p_value_fail=r4(gate.p_value_fail),
+        rule=GateRuleSchema(times=n, pass_at_least=rule.pass_at_least,
+                            fail_at_most=rule.fail_at_most),
+        times_to_decide=None, times_to_decide_message=None)
+
+
 def _no_verdict(reason: str, n: int) -> Statistic:
     return Statistic(verdict=None, reason=reason, n=n, interval=None, p_value_pass=None,
                      p_value_fail=None, rule=None, times_to_decide=None,
@@ -328,15 +361,20 @@ def _no_verdict(reason: str, n: int) -> Statistic:
 def check_result(name: StatisticalEngine, parameters: dict[str, float], floor: int,
                  stopped: bool, assignment: TestTypeAssignment, row: TestTypesModel | None,
                  runs: list[BatchRun], recorded_answer: bool = True,
-                 target: float | None = None, left_out: bool = False) -> CheckResult:
+                 target: float | None = None, left_out: bool = False,
+                 waves: dict | None = None) -> CheckResult:
     """One check's result. `target` is its own target when the batch set one
-    (else the batch's); `left_out` marks a check the batch's runs skipped."""
+    (else the batch's); `left_out` marks a check the batch's runs skipped;
+    `waves` is a batch's wave plan when it ran until there's an answer."""
     confidence = parameters.get("confidence", 0.95)
     series, counts = fold(runs, assignment.label)
     decided = [p for p in series if p.passed is not None]
     passed = counts.passed
-    is_gate = name == StatisticalEngine.binomial_gate
-    is_stability = name == StatisticalEngine.judge_stability
+    is_sequential = name in (StatisticalEngine.sequential_gate,
+                             StatisticalEngine.sequential_judge_stability)
+    is_gate = name in (StatisticalEngine.binomial_gate, StatisticalEngine.sequential_gate)
+    is_stability = name in (StatisticalEngine.judge_stability,
+                            StatisticalEngine.sequential_judge_stability)
     if is_gate or is_stability:
         target = target if target is not None else parameters["target"]
         floor = stats_math.binomial_floor(target, confidence)
@@ -376,7 +414,7 @@ def check_result(name: StatisticalEngine, parameters: dict[str, float], floor: i
             statistic = _no_verdict(
                 "No run gave this check a result: the check couldn't run, or the run was Not "
                 "Ran.", 0)
-        elif stopped and n < floor:
+        elif stopped and n < floor and not is_sequential:
             statistic = _no_verdict(
                 f"The batch was stopped after {_runs(n)} with a result, fewer than the "
                 f"{floor} this test needs to give an answer. The numbers above show what "
@@ -394,6 +432,14 @@ def check_result(name: StatisticalEngine, parameters: dict[str, float], floor: i
                 f"Only {n} {'score' if n == 1 else 'scores'} came back, fewer than the "
                 f"{floor} needed to judge an average. The other runs were Not Ran or "
                 "couldn't run the check; the scores above show what did.", n)
+        elif is_sequential:
+            plan = sequential.WavePlan.from_json(waves)
+            if target != parameters["target"]:
+                plan = sequential.WavePlan(looks=plan.looks, level=sequential._calibrate(
+                    plan.looks, target, confidence))
+            statistic = _sequential(series, plan, target, confidence, stopped, is_stability)
+            if is_stability:
+                agreement = statistic.interval
         elif is_gate:
             statistic = _gate(passed, n, target, confidence, floor)
         elif is_stability:
@@ -473,7 +519,8 @@ def failures_by_entry(entries: list[BatchEntry], confidence: float) -> FailuresB
 
 def compute(name: StatisticalEngine, parameters: dict[str, float], floor: int,
             stopped: bool, entries: list[BatchEntry], types: dict[str, TestTypesModel],
-            computed_at, overrides: dict | None = None) -> BatchResult:
+            computed_at, overrides: dict | None = None,
+            waves: dict | None = None) -> BatchResult:
     """The result of a batch none of whose runs is Pending or Running.
     `overrides` is the batch's per-check targets and left-out checks, as
     stored."""
@@ -483,7 +530,8 @@ def compute(name: StatisticalEngine, parameters: dict[str, float], floor: int,
         checks = [check_result(name, parameters, floor, stopped, assignment,
                                types.get(assignment.name), entry.runs, entry.recorded_answer,
                                target=targets.get((entry.entry_id, assignment.label)),
-                               left_out=(entry.entry_id, assignment.label) in left_out)
+                               left_out=(entry.entry_id, assignment.label) in left_out,
+                               waves=waves)
                   for assignment in entry.assignments]
         results.append(EntryResult(
             entry_id=entry.entry_id, test_id=entry.test_id, test_set_id=entry.test_set_id,

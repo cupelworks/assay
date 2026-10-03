@@ -16,7 +16,7 @@ import statistics
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-from assay import stats_math
+from assay import sequential, stats_math
 from assay.schemas.statistics import (
     CheaperKind,
     CheaperOption,
@@ -387,3 +387,100 @@ def option_words(found: Plan) -> str:
 
 def limit_for(runs_per_time: int, max_runs: int) -> int:
     return max(1, min(MAX_TIMES, max_runs // max(runs_per_time, 1)))
+
+
+# ── until there's an answer ──────────────────────────────────────────────────
+
+# the maxima worth considering for a batch that runs until there's an answer
+UNTIL_MAXIMA = (100, 200, 300, 500, 750, 1000)
+
+
+@dataclass
+class Until:
+    """What running until there's an answer, up to `maximum`, would give."""
+    checks: list[CheckOdds]
+    plan: sequential.WavePlan
+    by_look: list[float]          # chance every check is answered by each look
+    chances: list[sequential.LookChances]
+
+    @property
+    def maximum(self) -> int:
+        return self.plan.maximum
+
+    @property
+    def chance_by_max(self) -> float:
+        return self.by_look[-1] if self.by_look else 0.0
+
+    @property
+    def usual(self) -> int | None:
+        return next((look for look, chance in zip(self.plan.looks, self.by_look, strict=True)
+                     if chance >= 0.5), None)
+
+    @property
+    def expected(self) -> int:
+        total, previous, running = 0.0, 0, 1.0
+        for look, chance in zip(self.plan.looks, self.by_look, strict=True):
+            total += running * (look - previous)
+            running, previous = 1 - chance, look
+        return round(total)
+
+
+def until(checks: list[CheckOdds], maximum: int, target: float, confidence: float) -> Until:
+    """The chances by each look, for every check, up to `maximum`. A check
+    with its own target keeps the batch's looks, at its own level."""
+    plan = sequential.wave_plan(maximum, target, confidence)
+    per_check = []
+    for check in checks:
+        level = plan.level if check.target == target else sequential._calibrate(
+            plan.looks, check.target, confidence)
+        own = sequential.WavePlan(looks=plan.looks, level=level)
+        if check.certain:
+            result = check.certain_result
+            ones = tuple(1.0 for _ in own.looks)
+            zeros = tuple(0.0 for _ in own.looks)
+            per_check.append(sequential.LookChances(
+                looks=own.looks, passed_by=zeros if result == "fail" else ones,
+                failed_by=ones if result == "fail" else zeros))
+            continue
+        passed, failed = check.history.passed, check.history.failed
+        if check.engine in (StatisticalEngine.judge_stability,
+                            StatisticalEngine.sequential_judge_stability):
+            passed, failed = max(passed, failed), min(passed, failed)
+        per_check.append(sequential.look_chances(own, check.target, passed, failed))
+    by_look = [math.prod(c.decided_by(k) for c in per_check) for k in range(len(plan.looks))]
+    return Until(checks=checks, plan=plan, by_look=by_look, chances=per_check)
+
+
+def until_choice(checks: list[CheckOdds], target: float, confidence: float,
+                 limit: int) -> tuple[Until, list[Until]]:
+    """The maximum to offer, by the fixed sizes' rule: the smallest reaching
+    the goal by the maximum, else the smallest within 5 points of the best."""
+    first = sequential.wave_plan(UNTIL_MAXIMA[0], target, confidence).first
+    options = [until(checks, m, target, confidence) for m in UNTIL_MAXIMA
+               if first <= m <= limit] or [until(checks, max(first, min(limit, 1000)),
+                                                  target, confidence)]
+    reaching = next((o for o in options if o.chance_by_max >= GOAL), None)
+    if reaching is not None:
+        return reaching, options
+    best = max(o.chance_by_max for o in options)
+    return next(o for o in options if o.chance_by_max >= best - WITHIN), options
+
+
+def until_outcome(found: Until) -> tuple[OutcomeSplit | None, CheckRef | None]:
+    last = len(found.plan.looks) - 1
+    worst = min(zip(found.chances, found.checks, strict=True),
+                key=lambda pair: pair[0].decided_by(last))
+    likely = worst[1].ref if worst[0].decided_by(last) <= 0.95 else None
+    if any(check.certain and check.certain_result is None for check in found.checks):
+        return None, likely
+    passed = math.prod(c.passed_by[last] for c in found.chances)
+    failed = 1 - math.prod(1 - c.failed_by[last] for c in found.chances)
+    return OutcomeSplit(passed=round(passed, 4), failed=round(failed, 4),
+                        inconclusive=round(max(0.0, 1 - passed - failed), 4)), likely
+
+
+def until_summary(found: Until) -> str:
+    usual = (f"usually stops by {found.usual} times" if found.usual is not None
+             else "usually runs to the end")
+    return (f"Up to {found.maximum} times, it {usual} (about {found.expected} on average), "
+            f"and every check has its answer {_odds_words(found.chance_by_max)} of the time.")

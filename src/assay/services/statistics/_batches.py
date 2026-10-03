@@ -40,6 +40,7 @@ from assay.schemas.statistics import (
     Scope,
     ScopeKind,
     StatisticalEngine,
+    WaveProgress,
 )
 from assay.services.statistics import compute
 from assay.services.statistics.compute import entry_order
@@ -182,7 +183,16 @@ async def load_progress(batch: StatisticalBatchModel, session: AsyncSession,
                 judge["finished"] += judges * row.runs
 
     per_time = batch.plan["calls_per_time"]
+    waves = None
+    if batch.waves_released is not None:
+        looks = batch.plan["waves"]["looks"]
+        waves = WaveProgress(
+            released=batch.waves_released, planned=len(looks), looks=looks,
+            closed=batch.waves_closed_at is not None,
+            stopped_early=batch.waves_closed_at is not None and batch.stopped_at is None
+            and batch.waves_released < len(looks))
     return BatchProgress(
+        waves=waves,
         times_requested=batch.times_requested,
         times_done=sum(not row.open for row in by_time),
         runs_total=sum(row.runs for row in by_entry),
@@ -240,6 +250,10 @@ async def refresh(batch: StatisticalBatchModel, session: AsyncSession) -> None:
     if batch.status not in IN_PROGRESS_BATCH_STATUSES:
         return
     live = await _live_status(batch, session)
+    if live is None and batch.waves_released is not None and batch.waves_closed_at is None:
+        # between two waves of a batch that runs until there's an answer: the
+        # worker is deciding on the next one, so it's still running
+        live = BatchStatus.running
     if live is not None:
         if live != batch.status:
             previous = batch.status
@@ -264,7 +278,7 @@ async def refresh(batch: StatisticalBatchModel, session: AsyncSession) -> None:
     now = datetime.now().astimezone()
     engine = StatisticalEngine(batch.engine)
     result = compute.compute(engine, batch.parameters, batch.plan["floor"], stopped, entries,
-                             types, now, batch.overrides)
+                             types, now, batch.overrides, batch.plan.get("waves"))
     final = compute.roll_up(result, stopped, runs, engine)
     done = await load_progress(batch, session, entries, types)
     result.summary = compute.summary(final, result,

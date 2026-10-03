@@ -8,6 +8,7 @@ from assay.services import worker_health
 from assay.services.worker_health import expected_tasks, get_worker_health
 
 ALL_TASKS = [
+    "assay.worker.tasks.advance_batch.advance_batch",
     "assay.worker.tasks.check_judge.check_judge",
     "assay.worker.tasks.check_target.check_target",
     "assay.worker.tasks.execute_run.execute_run",
@@ -62,12 +63,13 @@ def test_no_worker_when_nobody_answers():
 def test_outdated_when_any_worker_lacks_a_task_and_it_names_them():
     health = _health(_app({
         "celery@current": ALL_TASKS,
-        "celery@old": ALL_TASKS[1:3],
+        "celery@old": ALL_TASKS[2:4],
     }))
 
     assert health.status == WorkerHealthStatus.outdated
     old = next(w for w in health.workers if w.name == "celery@old")
     assert old.missing_tasks == [
+        "assay.worker.tasks.advance_batch.advance_batch",
         "assay.worker.tasks.check_judge.check_judge",
         "assay.worker.tasks.reconcile_runs.reconcile_runs",
     ]
@@ -146,7 +148,7 @@ def test_a_worker_too_old_to_report_its_code_is_outdated():
 
 
 def test_a_worker_missing_a_task_says_how_many():
-    health = _health(_app({"celery@a": ALL_TASKS[:2]}))
+    health = _health(_app({"celery@a": ALL_TASKS[:3]}))
 
     assert health.workers[0].problem == (
         "It doesn't know 2 kind(s) of job: restart it on the current code.")

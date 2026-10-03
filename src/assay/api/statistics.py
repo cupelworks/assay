@@ -76,7 +76,8 @@ _NO_HISTORY = {"left_out": False, "history": None, "outlook": "unknown",
                "outlook_reason": "No runs yet: nothing to plan from.", "certain_result": None,
                "size_needed": None, "best_chance": None, "cheaper": []}
 _NO_ODDS = {"goal": 0.9, "goal_reachable": None, "best_chance": None, "best_times": None,
-            "odds_summary": None, "driving_check": None, "odds": [], "cheaper": []}
+            "odds_summary": None, "driving_check": None, "odds": [], "cheaper": [],
+            "until_answer": None}
 _SIZE_ONLY = {"chance": None, "failures_allowed": None, "outcome": None,
               "likely_undecided": None}
 
@@ -197,7 +198,7 @@ _ESTIMATE_T = {
     "odds": [{"times": n, "chance": 1.0} for n in (10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 125,
                                                   150, 200, 250, 300, 400, 500, 600, 750,
                                                   1000)],
-    "cheaper": [], "trial": None,
+    "cheaper": [], "trial": None, "until_answer": None,
 }
 
 

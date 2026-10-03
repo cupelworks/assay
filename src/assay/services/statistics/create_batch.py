@@ -7,6 +7,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay import sequential
 from assay.models import BatchStatus, StatisticalBatchModel
 from assay.schemas.statistics import BatchDetails, BatchRequest, StatisticalTestKind
 from assay.services.runs._common import _dispatch_runs
@@ -17,7 +18,7 @@ from assay.services.runs.create_new_run import (
 )
 from assay.services.statistics._batches import describe
 from assay.services.statistics._scope import resolve_scope
-from assay.services.statistics.catalogue import load_entry, resolve_parameters
+from assay.services.statistics.catalogue import SEQUENTIAL, load_entry, resolve_parameters
 from assay.services.statistics.estimate import build_estimate, resolve_overrides
 from assay.services.tests._common import _find_all_tests_with_details_or_404
 
@@ -58,14 +59,21 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
     for entry_id, label in leave_out:
         skips.setdefault(entry_id, []).append(label)
 
+    plan = {"floor": estimate.floor,
+            "calls_per_time": {"application": estimate.calls.application.per_time,
+                               "judge": estimate.calls.judge.per_time}}
+    # until there's an answer: `times` is the most it may run; only the first
+    # wave is created now, the worker releases the next after each one
+    waves = None
+    if chosen.engine.id in SEQUENTIAL:
+        waves = sequential.wave_plan(times, parameters["target"], parameters["confidence"])
+        plan["waves"] = waves.to_json()
     batch = StatisticalBatchModel(
         id=uuid.uuid4(), test_id=request.test_id, test_set_id=request.test_set_id,
         test_plan_id=request.test_plan_id, statistical_test=chosen.id,
         engine=chosen.engine.id.value,
         parameters=parameters, times_requested=times, runs_per_time=scope.runs_per_time,
-        plan={"floor": estimate.floor,
-              "calls_per_time": {"application": estimate.calls.application.per_time,
-                                 "judge": estimate.calls.judge.per_time}},
+        plan=plan, waves_released=1 if waves else None,
         note=(request.note or "").strip() or None, status=BatchStatus.pending,
         overrides=overrides,
     )
@@ -76,12 +84,12 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
     if request.test_id:
         (test,) = await _find_all_tests_with_details_or_404([request.test_id], session)
         runs = [_new_standalone_run(test, batch_id=batch.id, batch_index=index)
-                for index in range(1, times + 1)]
+                for index in range(1, (waves.first if waves else times) + 1)]
     else:
         entry_ids = [entry.entry_id for entry in scope.entries]
         build = (_new_test_set_execution if request.test_set_id
                  else _new_test_plan_execution)
-        for index in range(1, times + 1):
+        for index in range(1, (waves.first if waves else times) + 1):
             execution, time_runs = build(scope.scope.id, entry_ids, batch_id=batch.id,
                                          batch_index=index)
             executions.append(execution)

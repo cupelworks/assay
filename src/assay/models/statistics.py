@@ -111,6 +111,11 @@ class StatisticalBatchModel(Base):
     # "label", "target"}], "leave_out": [{"entry_id", "label"}]} — entry_id null
     # for a standalone test. A left-out check is skipped by every run of the batch.
     overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # "Until there's an answer" (a sequential engine): the waves released so far,
+    # and when releasing stopped — every check answered, the maximum reached, or
+    # a hand Stop. Null for every other batch. plan["waves"] holds the looks.
+    waves_released: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    waves_closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # The floor and the calls one time pays for, at creation:
     # {"floor": 29, "calls_per_time": {"application": 2, "judge": 1}}
     plan: Mapped[dict] = mapped_column(JSON, nullable=False)

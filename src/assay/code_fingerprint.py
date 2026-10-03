@@ -29,7 +29,7 @@ _PACKAGE = Path(__file__).resolve().parent
 # Code only the API process runs, and the fingerprint leaves out: top-level
 # directories and files of the package. Nothing outside it may import it.
 API_ONLY = frozenset({"api", "services", "main.py", "middleware.py", "exception_handlers.py",
-                      "db.py", "stats_math.py"})
+                      "db.py"})
 
 
 def compute_fingerprint(package: Path = _PACKAGE) -> str:

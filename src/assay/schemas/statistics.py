@@ -34,6 +34,8 @@ class StatisticalEngine(StrEnum):
     score_ranks = "score_ranks"
     paired_entries = "paired_entries"
     trial = "trial"
+    sequential_gate = "sequential_gate"
+    sequential_judge_stability = "sequential_judge_stability"
 
 
 class StatisticalTestKind(StrEnum):
@@ -313,6 +315,7 @@ class SuggestionKind(StrEnum):
     worth_its_cost = "worth_its_cost"
     best_chance = "best_chance"
     trial = "trial"
+    maximum = "maximum"
 
 
 class OutcomeSplit(BaseModel):
@@ -499,6 +502,29 @@ class OddsPoint(BaseModel):
     chance: float = Field(description="The chance that every check gets an answer.")
 
 
+class UntilAnswer(BaseModel):
+    """Running until there's an answer instead of a fixed size: the batch runs in
+    waves and stops as soon as every check has its answer — what that would
+    cost and give, from the checks' history."""
+    statistical_test: str = Field(description="The catalogue id to send to run it this way.")
+    max_times: int = Field(description="The most it would run: the maximum to send as `times`.")
+    first_wave: int = Field(description="Its first wave: a perfect record answers here.")
+    wave_size: int = Field(description="The waves after the first.")
+    looks: list[int] = Field(description="Where each wave ends, in times.")
+    usual_times: int | None = Field(
+        description="The size it most often stops at (the median); null when it usually "
+                    "runs to the maximum.")
+    expected_times: int = Field(description="The times it runs on average.")
+    chance_by_max: float = Field(
+        description="The chance every check has its answer by the maximum.")
+    outcome: OutcomeSplit | None = Field(
+        description="How it would most likely end; null while a certain check's result is "
+                    "unseen.")
+    likely_undecided: CheckRef | None = Field(
+        description="The check most likely to have no answer by the maximum.")
+    summary: str = Field(description="It in one sentence, to show as it is.")
+
+
 class TrialOffer(BaseModel):
     """A trial: the scope run a few times with no verdict, to learn how each
     check behaves before planning a batch."""
@@ -588,6 +614,14 @@ class Estimate(BaseModel):
         default=None,
         description="When a check has no history: a trial to run first, to learn how the "
                     "checks behave. Null otherwise.",
+    )
+    until_answer: UntilAnswer | None = Field(
+        default=None,
+        description="With a history for every check: running until there's an answer "
+                    "instead — its maximum, waves, usual and average size, chance and "
+                    "outcome. For a fixed-size test it describes its \"until there's an "
+                    "answer\" counterpart; for that test itself, the maximum asked. Null "
+                    "without history.",
     )
 
 
@@ -710,6 +744,19 @@ class EntryProgress(BaseModel):
         description="This entry's runs by time, Pending and Running included.")
 
 
+class WaveProgress(BaseModel):
+    """Where a batch that runs until there's an answer has got."""
+    released: int = Field(description="Waves released so far (created and sent to run).")
+    planned: int = Field(description="The most waves it can run.")
+    looks: list[int] = Field(
+        description="Where each wave ends, in times: it looks at the results there.")
+    closed: bool = Field(
+        description="No more waves: every check has its answer, the maximum is reached, or "
+                    "it was stopped.")
+    stopped_early: bool = Field(
+        description="It stopped before the maximum because every check had its answer.")
+
+
 class BatchProgress(BaseModel):
     """How far the batch has got — what the running batch page shows beside
     Stop, so stopping is an informed choice."""
@@ -728,7 +775,13 @@ class BatchProgress(BaseModel):
         description="Times every run of which a stop cancelled: they never ran. "
                     "`times_requested − times_cancelled` is how many times actually ran.",
     )
-    calls: BatchCalls = Field(description="What has been paid for so far, and what's planned.")
+    calls: BatchCalls = Field(
+        description="What has been paid for so far, and what's planned — for a batch that "
+                    "runs until there's an answer, the most it can cost.")
+    waves: WaveProgress | None = Field(
+        default=None,
+        description="For a batch that runs until there's an answer: its waves. Null "
+                    "otherwise.")
     entries: list[EntryProgress] | None = Field(
         default=None,
         description="On the batch read while the batch runs: the runs matrix as it fills in, "

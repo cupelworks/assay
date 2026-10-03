@@ -4,6 +4,7 @@ from assay.logging_config import request_id_var, run_id_var
 from assay.worker import app
 from assay.worker.db import get_session
 from assay.worker.services import execute_run as _execute_run_service
+from assay.worker.services.advance_batch import batch_to_advance
 
 
 @app.task(bind=True)
@@ -31,6 +32,12 @@ def execute_run(self, run_id: uuid.UUID) -> None:  # pragma: no cover
     try:
         with get_session() as session:
             _execute_run_service(run_id, session)
+            # the last run of a wave of a batch that runs until there's an
+            # answer: decide on the next wave
+            batch_id = batch_to_advance(run_id, session)
+        if batch_id is not None:
+            from assay.worker.tasks.advance_batch import advance_batch
+            advance_batch.delay(batch_id)
     finally:
         run_id_var.reset(run_token)
         request_id_var.reset(request_token)

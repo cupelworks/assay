@@ -17,12 +17,18 @@ PING_TIMEOUT_SECONDS = 1.0
 RESTART = "restart it on the current code"
 
 
+# workers send it to one another after each wave of a batch that runs until
+# there's an answer; a worker without it would leave such a batch stalled
+ADVANCE_BATCH_TASK = "assay.worker.tasks.advance_batch.advance_batch"
+
+
 def expected_tasks() -> set[str]:
-    """Every task the API or Beat sends a worker, by name."""
+    """Every task the API, Beat or another worker sends a worker, by name."""
     return {
         EXECUTE_RUN_TASK,
         CHECK_TARGET_TASK,
         CHECK_JUDGE_TASK,
+        ADVANCE_BATCH_TASK,
         _celery_app.conf.beat_schedule["reconcile-runs"]["task"],
     }
 

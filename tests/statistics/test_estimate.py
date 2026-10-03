@@ -23,8 +23,8 @@ def test_the_catalogue_lists_each_test_with_its_parameters_and_floor(db):
 
     by_id = {item["id"]: item for item in catalogue["items"]}
     assert set(by_id) == {"binomial_gate", "one_sample_t", "judge_stability", "trial",
-                          "pass_rates", "no_worse", "mean_scores", "score_ranks",
-                          "paired_entries"}
+                          "sequential_gate", "sequential_judge_stability", "pass_rates",
+                          "no_worse", "mean_scores", "score_ranks", "paired_entries"}
     gate = by_id["binomial_gate"]
     assert (gate["kind"], gate["reads"], gate["applies_to"]) == (
         "batch", "pass_fail", "every_check")

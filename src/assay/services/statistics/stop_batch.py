@@ -35,12 +35,18 @@ async def stop_batch(batch_id: uuid.UUID, session: AsyncSession) -> BatchDetails
         .where(TestRunModel.batch_id == batch.id, TestRunModel.status == TestStatus.pending)
         .values(status=TestStatus.not_ran, error=STOP_REASON, executed_at=now)
     )).rowcount
-    if cancelled:
+    # a batch running until there's an answer may be between waves, nothing
+    # pending: stopping it still ends it — no more waves
+    closing = batch.waves_released is not None and batch.waves_closed_at is None
+    if cancelled or closing:
+        values = {"stopped_at": now}
+        if closing:
+            values["waves_closed_at"] = now
         await session.execute(
             update(StatisticalBatchModel)
             .where(StatisticalBatchModel.id == batch.id,
                    StatisticalBatchModel.stopped_at.is_(None))
-            .values(stopped_at=now))
+            .values(**values))
     await session.commit()
     await session.refresh(batch)
     if cancelled:

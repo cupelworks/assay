@@ -244,4 +244,17 @@ WITH_HISTORY = {'scope': {'kind': 'test_set',
               'best_chance': 0.7698,
               'best_times': 964,
               'judge_calls_saved_per_time': 0}],
- 'trial': None}
+ 'trial': None,
+ 'until_answer': {'statistical_test': 'sequential_gate',
+                  'max_times': 1000,
+                  'first_wave': 42,
+                  'wave_size': 137,
+                  'looks': [42, 179, 316, 453, 589, 726, 863, 1000],
+                  'usual_times': 589,
+                  'expected_times': 604,
+                  'chance_by_max': 0.6675,
+                  'outcome': {'passed': 0.5292, 'inconclusive': 0.3001, 'failed': 0.1707},
+                  'likely_undecided': {'entry_id': 'd4e5f6a7-b8c9-0123-def4-56789012345a',
+                                       'label': 'Relevance'},
+                  'summary': 'Up to 1000 times, it usually stops by 589 times (about 604 on '
+                             'average), and every check has its answer 67% of the time.'}}

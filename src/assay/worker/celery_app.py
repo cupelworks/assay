@@ -68,6 +68,7 @@ app = Celery(
     include=[
         "assay.worker.tasks.execute_run",
         "assay.worker.tasks.reconcile_runs",
+        "assay.worker.tasks.advance_batch",
         "assay.worker.tasks.check_target",
         "assay.worker.tasks.check_judge",
     ],

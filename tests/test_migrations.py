@@ -1695,3 +1695,22 @@ def test_the_trial_row_and_done_come_and_go(scratch):
             "SELECT sql FROM sqlite_master WHERE name = 'statistical_batches'").fetchone()[0]
     assert "trial" not in ids
     assert "'done'" not in constraint
+
+
+# --- e7f9a1b3c5d6: until there's an answer ---
+
+
+def test_the_until_rows_and_the_wave_columns_come_and_go(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "e7f9a1b3c5d6")
+
+    with sqlite3.connect(db_path) as connection:
+        ids = [r[0] for r in connection.execute(
+            "SELECT id FROM statistical_tests ORDER BY created_at")]
+    assert ids[-2:] == ["sequential_gate", "sequential_judge_stability"]
+    assert {"waves_released", "waves_closed_at"} <= set(
+        _table_columns(db_path, "statistical_batches"))
+
+    command.downgrade(config, "d6e8f0a2c4b5")
+
+    assert "waves_released" not in _table_columns(db_path, "statistical_batches")

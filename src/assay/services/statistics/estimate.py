@@ -7,7 +7,7 @@ import uuid
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay import stats_math
+from assay import sequential, stats_math
 from assay.judge_settings import resolve_judge_settings
 from assay.models import SettingsModel, SettingsSection
 from assay.schemas import TestTypeAssignment
@@ -22,16 +22,21 @@ from assay.schemas.statistics import (
     GateRuleSchema,
     StatisticalEngine,
     StatisticalTestKind,
+    Suggestion,
+    SuggestionKind,
     TrialOffer,
+    UntilAnswer,
     Warning_,
 )
 from assay.services.statistics import compute, odds
 from assay.services.statistics._scope import ResolvedScope, resolve_scope
 from assay.services.statistics.catalogue import (
     MAX_RUNS,
+    SEQUENTIAL,
     CatalogueEntry,
     _invalid,
     check_times,
+    find_engine,
     find_trial,
     load_entry,
     often,
@@ -171,19 +176,32 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
             recorded_answer=entry.recorded_answer, checks=plans,
         ))
     if applicable == 0 and engine != StatisticalEngine.trial:
-        raise _invalid([(("statistical_test",), _NOTHING_APPLIES.get(
-            engine, "Every check is left out: keep at least one"))])
+        # what none of the checks is, before blaming what was left out
+        nothing = _NOTHING_APPLIES.get(_UNTIL_OF.get(engine, engine))
+        if nothing is None or leave_out and any(
+                applies(engine, scope, entry, a)[0] for entry in scope.entries
+                for a in entry.assignments):
+            nothing = "Every check this test can judge is left out: keep at least one"
+        raise _invalid([(("statistical_test",), nothing)])
 
     floor = size.floor
-    if batch_target is not None:
+    until_engine = engine in SEQUENTIAL
+    if batch_target is not None and not until_engine:
         # the targets in play decide: a check's own target has its own floor
         floor = max(stats_math.binomial_floor(check.target, confidence)
                     for check in checks.values())
-    found = (odds.plan(list(checks.values()), limit)
-             if all(check.known for check in checks.values()) else None)
+    known = all(check.known for check in checks.values())
+    found = odds.plan(list(checks.values()), limit) if known and not until_engine else None
+    until_pick = until_options = None
+    if known and until_engine:
+        until_pick, until_options = odds.until_choice(list(checks.values()), batch_target,
+                                                      confidence, limit)
     capped_from = None
     if times is None:
-        times = found.default if found is not None and found.default else size.default
+        if until_pick is not None:
+            times = until_pick.maximum
+        else:
+            times = found.default if found is not None and found.default else size.default
         most = MAX_RUNS // scope.runs_per_time
         if times > most:
             # a default the scope can't run: the most it can, if that still
@@ -197,13 +215,22 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
                                  f"{floor * scope.runs_per_time} runs, more than the "
                                  f"{MAX_RUNS} a batch can create. Run it on a smaller set")])
             capped_from, times = times, most
+    if until_engine:
+        # its first wave is the least it runs: a perfect record answers there
+        floor = sequential.wave_plan(times, batch_target, confidence).first
     check_times(times, scope.runs_per_time, floor, chosen, parameters)
 
     application_per_time = sum(not entry.recorded_answer for entry in scope.entries)
     judge_per_time = sum(scope.is_judge(a) for entry in scope.entries for a in entry.assignments
                          if (entry.entry_id, a.label) not in leave_out)
     rule = None
-    if engine in (StatisticalEngine.binomial_gate, StatisticalEngine.judge_stability):
+    if until_engine:
+        # what decides at its first wave, at the wave's stricter level
+        first = sequential.wave_plan(times, batch_target, confidence)
+        gate_rule = stats_math.binomial_gate_rule(first.first, batch_target, first.level)
+        rule = GateRuleSchema(times=first.first, pass_at_least=gate_rule.pass_at_least,
+                              fail_at_most=gate_rule.fail_at_most)
+    elif engine in (StatisticalEngine.binomial_gate, StatisticalEngine.judge_stability):
         gate_rule = stats_math.binomial_gate_rule(times, batch_target, confidence)
         rule = GateRuleSchema(times=times, pass_at_least=gate_rule.pass_at_least,
                               fail_at_most=gate_rule.fail_at_most)
@@ -225,10 +252,64 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
         goal=odds.GOAL,
     )
     _with_odds(estimate, chosen, checks, found, limit, floor)
-    if found is None and engine != StatisticalEngine.trial:
+    if until_pick is not None:
+        asked = (until_pick if until_pick.maximum == times else
+                 odds.until(list(checks.values()), times, batch_target, confidence))
+        estimate.suggestions = _until_suggestions(until_options, until_pick)
+        estimate.until_answer = _until_block(chosen.id, asked)
+        estimate.goal_reachable = until_pick.chance_by_max >= odds.GOAL
+    elif found is not None and engine in _UNTIL_COUNTERPART:
+        counterpart = await find_engine(session, _UNTIL_COUNTERPART[engine])
+        if counterpart is not None:
+            pick, _ = odds.until_choice(list(checks.values()), batch_target, confidence, limit)
+            estimate.until_answer = _until_block(counterpart.id, pick)
+    if not known and engine != StatisticalEngine.trial:
         estimate.trial = await _trial_offer(checks, application_per_time, judge_per_time,
                                             session)
     return estimate
+
+
+_UNTIL_OF = {
+    StatisticalEngine.sequential_gate: StatisticalEngine.binomial_gate,
+    StatisticalEngine.sequential_judge_stability: StatisticalEngine.judge_stability,
+}
+_UNTIL_COUNTERPART = {
+    StatisticalEngine.binomial_gate: StatisticalEngine.sequential_gate,
+    StatisticalEngine.judge_stability: StatisticalEngine.sequential_judge_stability,
+}
+
+
+def _until_block(test_id: str, found: odds.Until) -> UntilAnswer:
+    outcome, likely = odds.until_outcome(found)
+    return UntilAnswer(
+        statistical_test=test_id, max_times=found.maximum, first_wave=found.plan.first,
+        wave_size=found.plan.wave_size, looks=list(found.plan.looks),
+        usual_times=found.usual, expected_times=found.expected,
+        chance_by_max=round(found.chance_by_max, 4), outcome=outcome,
+        likely_undecided=likely, summary=odds.until_summary(found))
+
+
+def _until_suggestions(options: list[odds.Until], pick: odds.Until) -> list[Suggestion]:
+    """The maxima worth offering, each with its chance by the maximum: the
+    smallest, the one the rule picks, and the best."""
+    best = max(options, key=lambda o: (o.chance_by_max, -o.maximum))
+    kinds = {options[0].maximum: SuggestionKind.maximum, best.maximum: SuggestionKind.best_chance}
+    kinds[pick.maximum] = (SuggestionKind.reaches_goal if pick.chance_by_max >= odds.GOAL
+                           else SuggestionKind.worth_its_cost)
+    chosen = {o.maximum: o for o in options if o.maximum in kinds}
+    out = []
+    for maximum in sorted(chosen):
+        found = chosen[maximum]
+        outcome, likely = odds.until_outcome(found)
+        usual = (f"usually {found.usual}" if found.usual is not None
+                 else "usually runs to the end")
+        out.append(Suggestion(
+            times=maximum, kind=kinds[maximum], default=maximum == pick.maximum,
+            label=f"at most {maximum} times · {round(found.chance_by_max * 100)}% chance "
+                  f"of an answer, {usual}",
+            chance=round(found.chance_by_max, 4), failures_allowed=None, outcome=outcome,
+            likely_undecided=likely))
+    return out
 
 
 async def _trial_offer(checks: dict[CheckKey, odds.CheckOdds], application_per_time: int,

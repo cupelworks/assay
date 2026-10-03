@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay import stats_math
+from assay import sequential, stats_math
 from assay.models import StatisticalTestModel
 from assay.schemas.statistics import (
     AppliesTo,
@@ -42,6 +42,11 @@ MAX_RUNS = 10_000
 # Statistical power for every "enough to see it" suggestion: an 80% chance of
 # detecting a difference that is really there, the usual choice.
 POWER = 0.8
+# "Until there's an answer": the maxima offered without a history, the default
+UNTIL_MAXIMA = (100, 300, 1000)
+UNTIL_DEFAULT = 300
+SEQUENTIAL = frozenset({StatisticalEngine.sequential_gate,
+                        StatisticalEngine.sequential_judge_stability})
 
 _EXACT_FLOOR = "times ≥ ln(1 − confidence) / ln(target)"
 _THREE_WAY = ("pass", "fail", "inconclusive")
@@ -115,6 +120,18 @@ ENGINES: dict[StatisticalEngine, Engine] = {engine.id: engine for engine in (
         parameters={"confidence": ParameterKind.level},
         floor_kind=FloorKind.exact, floor_formula=None,
         settings={"recommended_times": False},
+    ),
+    Engine(
+        id=StatisticalEngine.sequential_gate, kind=StatisticalTestKind.batch, wave=3,
+        reads=Reads.pass_fail, applies_to=AppliesTo.every_check, verdicts=_THREE_WAY,
+        parameters={"target": ParameterKind.rate, "confidence": ParameterKind.level},
+        floor_kind=FloorKind.exact, floor_formula=None, settings={},
+    ),
+    Engine(
+        id=StatisticalEngine.sequential_judge_stability, kind=StatisticalTestKind.batch,
+        wave=3, reads=Reads.pass_fail, applies_to=AppliesTo.judge_checks, verdicts=_THREE_WAY,
+        parameters={"target": ParameterKind.rate, "confidence": ParameterKind.level},
+        floor_kind=FloorKind.exact, floor_formula=None, settings={},
     ),
     Engine(
         id=StatisticalEngine.trial, kind=StatisticalTestKind.batch, wave=3,
@@ -247,14 +264,18 @@ async def load_entry(test_id: str, kind: StatisticalTestKind,
     return entry
 
 
-async def find_trial(session: AsyncSession) -> CatalogueEntry | None:
-    """The catalogue's trial, the first row on the trial engine; None when
-    there is none."""
+async def find_engine(session: AsyncSession, engine: StatisticalEngine) -> CatalogueEntry | None:
+    """The catalogue's first row on an engine (the trial, an "until there's
+    an answer" test); None when there is none."""
     row = await session.scalar(
         select(StatisticalTestModel)
-        .where(StatisticalTestModel.engine == StatisticalEngine.trial.value)
+        .where(StatisticalTestModel.engine == engine.value)
         .order_by(StatisticalTestModel.created_at).limit(1))
     return entry_of(row) if row is not None else None
+
+
+async def find_trial(session: AsyncSession) -> CatalogueEntry | None:
+    return await find_engine(session, StatisticalEngine.trial)
 
 
 def catalogue(entries: list[CatalogueEntry]) -> StatisticalTestCatalogue:
@@ -395,6 +416,17 @@ def sizing(entry: CatalogueEntry, parameters: dict[str, float]) -> Sizing:
             if suggestion.times not in by_times or suggestion.default:
                 by_times[suggestion.times] = suggestion
         return Sizing(floor, explanation, [by_times[times] for times in sorted(by_times)])
+    if engine in SEQUENTIAL:
+        first = sequential.wave_plan(UNTIL_DEFAULT, parameters["target"], confidence).first
+        explanation = (
+            f"It looks at the results after each wave, a little more strictly than a single "
+            f"test: a perfect record answers at the first look, {first} times. Set the most "
+            "you'll pay for; it stops as soon as every check has an answer."
+        )
+        return Sizing(first, explanation, [
+            Suggestion(times=most, kind=SuggestionKind.maximum,
+                       label=f"at most {most} times", default=most == UNTIL_DEFAULT)
+            for most in UNTIL_MAXIMA])
     if engine == StatisticalEngine.trial:
         times = entry.settings["default_times"]
         return Sizing(1, (f"No minimum: a trial answers no question. {times} times show "
