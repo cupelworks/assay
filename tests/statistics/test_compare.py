@@ -117,6 +117,27 @@ def test_the_summary_leads_with_what_got_worse():
         "B is better on 1 of 4 checks, worse on none.")
 
 
+def test_the_outcome_follows_the_order_the_summary_leads_with():
+    cases = [
+        ({"worse": 1, "better": 3, "no_worse": 2}, "worse"),
+        ({"better": 1, "no_difference": 5, "inconclusive": 1}, "better"),
+        ({"no_worse": 3}, "no_worse"),
+        ({"no_worse": 2, "inconclusive": 1}, "inconclusive"),
+        ({"inconclusive": 1}, "inconclusive"),
+        ({"no_difference": 4, "none": 1}, "no_difference"),
+        ({"none": 2}, "none"),
+        ({}, "none"),
+    ]
+    for verdicts, expected in cases:
+        assert compare.outcome(verdicts).value == expected, verdicts
+
+
+def test_all_verdicts_fills_every_key_with_zero():
+    assert compare.all_verdicts({"better": 2}) == {
+        "better": 2, "worse": 0, "no_difference": 0, "no_worse": 0, "inconclusive": 0,
+        "none": 0}
+
+
 # --- the second wave ---
 
 from assay.models import Comparison, TestTypesModel  # noqa: E402

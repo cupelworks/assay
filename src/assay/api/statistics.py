@@ -35,6 +35,7 @@ from assay.services.statistics import (
     load_catalogue,
     stop_batch,
 )
+from assay.services.statistics.compare import all_verdicts, outcome
 
 router = APIRouter(tags=["statistics"])
 
@@ -1020,6 +1021,9 @@ _COMPARISON_SUMMARY = {
     "batch_b": _compared(_BATCH_B_ID, "Prompt v3, temperature 0.2",
                          "2026-10-01T09:30:00+02:00"),
     "summary": "B is better on 1 of 2 checks, worse on none.",
+    "verdicts": {"better": 1, "worse": 0, "no_difference": 1, "no_worse": 0,
+                 "inconclusive": 0, "none": 0},
+    "outcome": "better",
     "created_at": "2026-10-01T10:05:12+02:00",
 }
 
@@ -1042,7 +1046,7 @@ def _comparison_with(test: str, parameters: dict, checks: list[dict], verdicts: 
     counts = {"better": 0, "worse": 0, "no_difference": 0, "no_worse": 0,
               "inconclusive": 0, "none": 0} | verdicts
     return {**_COMPARISON, "statistical_test": test, "engine": test, "parameters": parameters,
-            "summary": summary,
+            "summary": summary, "verdicts": counts, "outcome": outcome(counts).value,
             "result": {"verdicts": counts, "summary": summary,
                        "entries": [{**_COMPARISON["result"]["entries"][0], "checks": checks}],
                        "unmatched": [], "paired": paired}}
@@ -1071,7 +1075,10 @@ _COMPARISON_EXAMPLES = {
                                   "pairs cut)",
                        "value": {**_COMPARISON, "statistical_test": "paired_entries",
                                  "engine": "paired_entries",
-                                 "summary": _PAIRED["summary"], "result": _PAIRED}},
+                                 "summary": _PAIRED["summary"],
+                                 "verdicts": all_verdicts(_PAIRED["verdicts"]),
+                                 "outcome": outcome(_PAIRED["verdicts"]).value,
+                                 "result": _PAIRED}},
 }
 
 _COMPARISON_404 = {

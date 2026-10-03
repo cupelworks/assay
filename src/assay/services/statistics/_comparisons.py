@@ -16,6 +16,7 @@ from assay.schemas.statistics import (
     StatisticalEngine,
 )
 from assay.services.statistics._batches import scope_kind, scope_names
+from assay.services.statistics.compare import all_verdicts, outcome
 
 
 async def find_comparison_or_404(comparison_id: uuid.UUID,
@@ -52,7 +53,9 @@ async def describe_many(comparisons: list[StatisticalComparisonModel], session: 
             engine=StatisticalEngine(comparison.engine),
             parameters=comparison.parameters, note=comparison.note,
             batch_a=compared(batch_a), batch_b=compared(batches[comparison.batch_b_id]),
-            summary=comparison.result["summary"], created_at=comparison.created_at,
+            summary=comparison.result["summary"],
+            verdicts=all_verdicts(comparison.result["verdicts"]),
+            outcome=outcome(comparison.result["verdicts"]), created_at=comparison.created_at,
         )
         if not with_result:
             described.append(ComparisonSummary(**fields))

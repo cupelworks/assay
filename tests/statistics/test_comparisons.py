@@ -38,6 +38,10 @@ def test_a_changed_recorded_answer_is_compared_and_stored(db):
     assert check["verdict"] == "worse"
     assert (check["a"]["pass_rate"]["point"], check["b"]["pass_rate"]["point"]) == (1.0, 0.0)
     assert comparison["summary"] == "B is worse on the check."
+    assert comparison["outcome"] == "worse"
+    assert comparison["verdicts"] == comparison["result"]["verdicts"] == {
+        "better": 0, "worse": 1, "no_difference": 0, "no_worse": 0, "inconclusive": 0,
+        "none": 0}
     read = db.client.get(f"/statistics/comparisons/{comparison['id']}").json()
     assert read == comparison
     bare = db.client.get(f"/statistics/comparisons/{comparison['id']}",
@@ -46,6 +50,8 @@ def test_a_changed_recorded_answer_is_compared_and_stored(db):
     listed = db.client.get("/statistics/comparisons", params={"batch_id": a["id"]}).json()
     assert [c["id"] for c in listed["items"]] == [comparison["id"]]
     assert "result" not in listed["items"][0]
+    assert (listed["items"][0]["outcome"], listed["items"][0]["verdicts"]) == (
+        "worse", comparison["verdicts"])
     by_scope = db.client.get("/statistics/comparisons", params={"test_id": test["id"]}).json()
     assert by_scope["total"] == 1
 

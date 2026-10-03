@@ -1097,6 +1097,20 @@ class ComparisonVerdictName(StrEnum):
     inconclusive = "inconclusive"
 
 
+class ComparisonOutcome(StrEnum):
+    """A comparison's one overall answer, read off its checks' verdicts in the order its
+    `summary` sentence leads with: any check `worse` makes it `worse`; else any `better`,
+    `better`; else every check `no_worse`, `no_worse`; else any `no_worse` or
+    `inconclusive`, `inconclusive`; else any `no_difference`, `no_difference`; else `none`
+    (nothing could be compared)."""
+    better = "better"
+    worse = "worse"
+    no_difference = "no_difference"
+    no_worse = "no_worse"
+    inconclusive = "inconclusive"
+    none = "none"
+
+
 class ComparisonSide(BaseModel):
     """One batch's side of a check: its counts, its pass rate, its runs."""
     counts: CheckCounts
@@ -1258,6 +1272,19 @@ class ComparisonSummary(BaseModel):
     batch_a: ComparedBatch = Field(description="The baseline.")
     batch_b: ComparedBatch = Field(description="The change: differences are B − A.")
     summary: str
+    verdicts: dict[str, int] = Field(
+        description="Checks by verdict, always with all six keys: `better`, `worse`, "
+                    "`no_difference`, `no_worse`, `inconclusive` and `none` — the same counts "
+                    "as `result.verdicts`, here for lists.",
+    )
+    outcome: ComparisonOutcome = Field(
+        description="The comparison's one overall answer, for a mark beside `summary`: "
+                    "`worse` if any check is worse; else `better` if any is better; else "
+                    "`no_worse` if every check is still as good; else `inconclusive` if any "
+                    "is still as good or can't be told yet; else `no_difference`; else "
+                    "`none`, when nothing could be compared. The same order `summary` "
+                    "follows.",
+    )
     created_at: datetime
 
 

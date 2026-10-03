@@ -19,6 +19,7 @@ from assay import stats_math
 from assay.models import TestTypesModel
 from assay.schemas.statistics import (
     CheckComparison,
+    ComparisonOutcome,
     ComparisonResult,
     ComparisonSide,
     ComparisonVerdictName,
@@ -388,9 +389,33 @@ def compare(entries_a: list[BatchEntry], entries_b: list[BatchEntry],
                             unmatched=unmatched, paired=paired_result)
 
 
+VERDICT_KEYS = ("better", "worse", "no_difference", "no_worse", "inconclusive", "none")
+
+
+def all_verdicts(verdicts: dict[str, int]) -> dict[str, int]:
+    """The counts with every key, zero where a verdict didn't occur."""
+    return {key: verdicts.get(key, 0) for key in VERDICT_KEYS}
+
+
+def outcome(verdicts: dict[str, int]) -> ComparisonOutcome:
+    """The comparison's one overall answer, in the order `summary` leads with."""
+    verdicts = all_verdicts(verdicts)
+    total = sum(verdicts.values())
+    if verdicts["worse"]:
+        return ComparisonOutcome.worse
+    if verdicts["better"]:
+        return ComparisonOutcome.better
+    if total and verdicts["no_worse"] == total:
+        return ComparisonOutcome.no_worse
+    if verdicts["no_worse"] or verdicts["inconclusive"]:
+        return ComparisonOutcome.inconclusive
+    if verdicts["no_difference"]:
+        return ComparisonOutcome.no_difference
+    return ComparisonOutcome.none
+
+
 def summary(verdicts: dict[str, int], unmatched: list[Unmatched]) -> str:
-    verdicts = {key: verdicts.get(key, 0) for key in
-                ("better", "worse", "no_difference", "no_worse", "inconclusive", "none")}
+    verdicts = all_verdicts(verdicts)
     total = sum(verdicts.values())
     checks = f"{total} {'check' if total == 1 else 'checks'}"
     if total == 0:
