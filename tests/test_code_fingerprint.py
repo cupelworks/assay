@@ -54,7 +54,7 @@ def test_a_renamed_file_changes_it(tmp_path):
 
 def test_a_worker_reports_its_fingerprint_and_version():
     assert CODE_COMMAND == "assay_code"
-    assert _report_code(None) == {"fingerprint": CODE_FINGERPRINT, "version": "1.0.0"}
+    assert _report_code(None) == {"fingerprint": CODE_FINGERPRINT, "version": "1.1.0"}
 
 
 # --- the rule the fingerprint relies on ---

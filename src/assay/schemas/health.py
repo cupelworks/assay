@@ -26,7 +26,7 @@ class WorkerStatus(BaseModel):
     """One worker that answered, and whether it can be trusted with work."""
     name: str = Field(description="The worker's node name, e.g. `celery@worker1`.")
     version: str | None = Field(
-        description="The Assay version the worker runs, e.g. `1.0.0`. Null for a worker "
+        description="The Assay version the worker runs, e.g. `1.1.0`. Null for a worker "
                     "started on code older than this report.",
     )
     code_fingerprint: str | None = Field(
