@@ -8,8 +8,8 @@ from assay.models import StatisticalTestModel
 from assay.services.statistics.catalogue import CatalogueError, entry_of
 
 ENGINES = ["binomial_gate", "one_sample_t", "judge_stability", "trial", "sequential_gate",
-           "sequential_judge_stability", "pass_rates", "no_worse", "mean_scores",
-           "score_ranks", "paired_entries"]
+           "sequential_judge_stability", "sequential_t", "pass_rates", "no_worse",
+           "mean_scores", "score_ranks", "paired_entries"]
 
 
 def _row(db, test_id: str) -> StatisticalTestModel:
@@ -49,7 +49,7 @@ def test_the_seed_is_one_test_on_each_engine(db):
 
     assert [item["id"] for item in items] == ENGINES
     assert [item["engine"] for item in items] == ENGINES
-    assert [item["kind"] for item in items] == ["batch"] * 6 + ["comparison"] * 5
+    assert [item["kind"] for item in items] == ["batch"] * 7 + ["comparison"] * 5
     t_test = items[1]
     assert t_test["engine_settings"] == {"floor": 10, "recommended_times": 30}
     assert t_test["recommended_times"] == 30
@@ -92,7 +92,7 @@ def test_a_new_row_on_an_existing_engine_is_a_new_test(db):
     finished = db.client.get(f"/statistics/batches/{batch['id']}").json()
 
     # batch tests first, the new row last among them
-    assert ids == ENGINES[:6] + ["strict_gate"] + ENGINES[6:]
+    assert ids == ENGINES[:7] + ["strict_gate"] + ENGINES[7:]
     assert (estimate["statistical_test"], estimate["engine"]) == ("strict_gate", "binomial_gate")
     assert estimate["parameters"] == {"target": 0.95, "confidence": 0.99}
     assert estimate["floor"] == 90  # ln(0.01) / ln(0.95) = 89.8, rounded up

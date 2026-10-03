@@ -10,7 +10,8 @@ def test_the_catalogue_lists_the_trial_after_the_first_batch_tests(db):
 
     batch_tests = [i["id"] for i in items if i["kind"] == "batch"]
     assert batch_tests == ["binomial_gate", "one_sample_t", "judge_stability", "trial",
-                           "sequential_gate", "sequential_judge_stability"]
+                           "sequential_gate", "sequential_judge_stability",
+                           "sequential_t"]
     trial = next(i for i in items if i["id"] == "trial")
     assert (trial["name"], trial["engine"], trial["parameters"], trial["verdicts"]) == (
         "Learn how it behaves", "trial", [], [])

@@ -219,3 +219,149 @@ def look_chances(plan: WavePlan, target: float, passed: int, failed: int) -> Loo
 
 def _beta_binomial(n: int, a: float, b: float) -> list[float]:
     return stats_math.beta_binomial_pmf(n, a, b)
+
+
+# ── an average, until there's an answer ──────────────────────────────────────
+#
+# The one-sample t-test at each wave's end, at one stricter level. A score's
+# spread isn't known in advance, so the level can't be calibrated exactly as
+# the pass/fail test's is: it's Pocock's constant for the batch's own looks —
+# the boundary c such that a mean exactly at the threshold crosses it at some
+# look with probability 1 − confidence, for normal scores — found by
+# integrating the normal score process across the looks on a grid. The test
+# at each look is then Student's t at that level, as the fixed test is:
+# exact for normal scores in the limit, approximate for a few.
+
+_GRID_STEP = 0.05
+_GRID_LOW = -8.0
+
+
+def _phi(z: float) -> float:
+    return math.exp(-0.5 * z * z) / math.sqrt(2 * math.pi)
+
+
+def _crossing(looks: tuple[int, ...], c: float, drift: float = 0.0) -> tuple[list, list]:
+    """For the standardized mean Z_k = √n_k (mean_k − threshold) / σ at each
+    look, with a true standardized gap `drift` per run: the chance of first
+    crossing above c, and below −c, at each look. Recursive integration on a
+    grid of z (Armitage–McPherson–Rowe)."""
+    grid = [_GRID_LOW + i * _GRID_STEP for i in range(int((2 * -_GRID_LOW) / _GRID_STEP) + 1)]
+    inside = [z for z in grid if -c < z < c]
+    up, down = [], []
+    density = None  # over `inside`, the undecided paths after the previous look
+    previous = 0
+    for look in looks:
+        if density is None:
+            mean = math.sqrt(look) * drift
+            up.append(stats_math.normal_sf(c - mean))
+            down.append(stats_math.normal_sf(c + mean))
+            density = [_phi(z - mean) * _GRID_STEP for z in inside]
+        else:
+            a = math.sqrt(previous / look)
+            b = (look - previous) * drift / math.sqrt(look)
+            spread = math.sqrt((look - previous) / look)
+            crossed_up = crossed_down = 0.0
+            following = [0.0] * len(inside)
+            for z, mass in zip(inside, density, strict=True):
+                if mass < 1e-14:
+                    continue
+                centre = a * z + b
+                crossed_up += mass * stats_math.normal_sf((c - centre) / spread)
+                crossed_down += mass * stats_math.normal_sf((c + centre) / spread)
+                for j, target in enumerate(inside):
+                    following[j] += mass * _phi((target - centre) / spread) / spread * _GRID_STEP
+            up.append(crossed_up)
+            down.append(crossed_down)
+            density = following
+        previous = look
+    return up, down
+
+
+@lru_cache(maxsize=1024)
+def mean_level(looks: tuple[int, ...], confidence: float) -> float:
+    """Each look's confidence for the average: Φ(c), c Pocock's constant for
+    these looks — the chance of a wrong pass over all the looks, for a mean
+    exactly at the threshold, is 1 − confidence (and of a wrong fail, by
+    symmetry)."""
+    alpha = 1 - confidence
+    if len(looks) == 1:
+        return confidence
+    low, high = stats_math.z_quantile(confidence), stats_math.z_quantile(1 - alpha / len(looks))
+    for _ in range(25):
+        middle = (low + high) / 2
+        if sum(_crossing(looks, middle)[0]) > alpha:
+            low = middle
+        else:
+            high = middle
+    return 1 - stats_math.normal_sf(high)
+
+
+@lru_cache(maxsize=1024)
+def mean_wave_plan(maximum: int, floor: int, confidence: float) -> WavePlan:
+    """The looks for an average: the first at the t-test's floor (too few
+    scores mean nothing), then evenly spaced up to the maximum."""
+    looks = _looks(floor, maximum)
+    return WavePlan(looks=looks, level=mean_level(looks, confidence))
+
+
+def decide_mean(scores: list[tuple[int, float]], plan: WavePlan, threshold: float,
+                higher_is_better: bool, through_look: int | None = None) -> tuple[
+                    str | None, int | None, stats_math.OneSampleTResult | None]:
+    """An average's sequential verdict from its scores so far ((time,
+    score)): the t-test at the plan's level at each look reached, on the
+    scores up to it; the first that decides is the answer. Returns the
+    verdict ("pass", "fail" or None), the look, and the test there."""
+    looks = plan.looks if through_look is None else plan.looks[:through_look]
+    ordered = sorted(scores)
+    last = None
+    for look in looks:
+        values = [score for time, score in ordered if time <= look]
+        if len(values) < 2:
+            continue
+        test = stats_math.one_sample_t(values, threshold, higher_is_better, plan.level)
+        last = test
+        if test.verdict == stats_math.Verdict.passed:
+            return "pass", look, test
+        if test.verdict == stats_math.Verdict.failed:
+            return "fail", look, test
+    return None, None, last
+
+
+def mean_look_chances(plan: WavePlan, mean: float, sd: float, history_runs: int,
+                      threshold: float, higher_is_better: bool) -> LookChances:
+    """The chance an average is decided by each look, averaged over what its
+    true mean could be given its past scores (normal around their average,
+    with their standard error; the spread taken as known). A spread of 0 is
+    certain at the first look, undecidable exactly on the threshold."""
+    sign = 1.0 if higher_is_better else -1.0
+    looks = plan.looks
+    if sd <= 0:
+        gap = sign * (mean - threshold)
+        passes = 1.0 if gap > 0 else 0.0
+        fails = 1.0 if gap < 0 else 0.0
+        return LookChances(looks=looks, passed_by=tuple(passes for _ in looks),
+                           failed_by=tuple(fails for _ in looks))
+    c = stats_math.z_quantile(plan.level)
+    centre = sign * (mean - threshold) / sd           # the standardized gap per run
+    uncertainty = 1 / math.sqrt(max(history_runs, 1))  # its standard error
+    passed = [0.0] * len(looks)
+    failed = [0.0] * len(looks)
+    for node, weight in _GAUSS_HERMITE:
+        drift = centre + math.sqrt(2) * uncertainty * node
+        up, down = _crossing(looks, c, drift)
+        for k in range(len(looks)):
+            passed[k] += weight * sum(up[:k + 1])
+            failed[k] += weight * sum(down[:k + 1])
+    total = sum(w for _, w in _GAUSS_HERMITE)
+    return LookChances(looks=looks, passed_by=tuple(min(1.0, p / total) for p in passed),
+                       failed_by=tuple(min(1.0, f / total) for f in failed))
+
+
+# Gauss–Hermite nodes and weights (9 points), for averaging over a normal
+_GAUSS_HERMITE = (
+    (-3.190993201781528, 3.960697726326438e-05), (-2.266580584531843, 0.004943624275536947),
+    (-1.468553289216668, 0.08847452739437657), (-0.7235510187528376, 0.4326515590025558),
+    (0.0, 0.7202352156060510), (0.7235510187528376, 0.4326515590025558),
+    (1.468553289216668, 0.08847452739437657), (2.266580584531843, 0.004943624275536947),
+    (3.190993201781528, 3.960697726326438e-05),
+)

@@ -43,6 +43,8 @@ _SCORE_SIZES = (10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 125, 150, 200, 250, 300
 # confidence levels one step apart, for "less sure"
 _CONFIDENCE_STEPS = (0.999, 0.99, 0.95, 0.9, 0.85, 0.8)
 _TARGET_STEP = 0.05
+# the tests on a check's average score
+_AVERAGES = frozenset({StatisticalEngine.one_sample_t, StatisticalEngine.sequential_t})
 
 
 @lru_cache(maxsize=65536)
@@ -99,7 +101,7 @@ class CheckOdds:
             return True
         if self.history is None or self.history.runs == 0:
             return False
-        if self.engine == StatisticalEngine.one_sample_t:
+        if self.engine in _AVERAGES:
             return len(self.history.scores) >= 2
         return True
 
@@ -116,7 +118,7 @@ class CheckOdds:
                 n=n, passes=1.0 if result != "fail" else 0.0, fails=1.0 if result == "fail"
                 else 0.0)
         history = self.history
-        if self.engine == StatisticalEngine.one_sample_t:
+        if self.engine in _AVERAGES:
             scores = history.scores
             return stats_math.mean_answer_chance(
                 n, statistics.fmean(scores), statistics.stdev(scores), len(scores),
@@ -133,7 +135,7 @@ class CheckOdds:
         return "pass" if self.history.passed * 2 >= self.history.runs else "fail"
 
     def sizes(self, limit: int) -> tuple[int, ...]:
-        if self.engine == StatisticalEngine.one_sample_t:
+        if self.engine in _AVERAGES:
             return tuple(n for n in (self.floor, *_SCORE_SIZES) if self.floor <= n <= limit)
         return _peaks(self.target, self.confidence, limit)
 
@@ -291,7 +293,7 @@ def outlook(check: CheckOdds) -> tuple[Outlook, str]:
         return Outlook.unknown, "No runs yet: nothing to plan from."
     history = check.history
     runs = history.runs
-    if check.engine == StatisticalEngine.one_sample_t:
+    if check.engine in _AVERAGES:
         scores = history.scores
         mean, sd = statistics.fmean(scores), statistics.stdev(scores)
         sign = 1 if check.higher_is_better else -1
@@ -425,9 +427,33 @@ class Until:
         return round(total)
 
 
-def until(checks: list[CheckOdds], maximum: int, target: float, confidence: float) -> Until:
+def until(checks: list[CheckOdds], maximum: int, target: float | None, confidence: float,
+          floor: int | None = None) -> Until:
     """The chances by each look, for every check, up to `maximum`. A check
-    with its own target keeps the batch's looks, at its own level."""
+    with its own target keeps the batch's looks, at its own level. Averages
+    (no target) look first at `floor`, the t-test's."""
+    if target is None:
+        plan = sequential.mean_wave_plan(maximum, floor, confidence)
+        per_check = []
+        for check in checks:
+            scores = check.history.scores if check.history else []
+            if check.certain and not scores:
+                # it can't vary, and one run tells which way: answered at the first wave
+                ones = tuple(1.0 for _ in plan.looks)
+                per_check.append(sequential.LookChances(
+                    looks=plan.looks, passed_by=ones, failed_by=tuple(0.0 for _ in plan.looks)))
+                continue
+            if check.certain or len(scores) < 2:
+                per_check.append(sequential.mean_look_chances(
+                    plan, statistics.fmean(scores), 0.0, 1, check.threshold,
+                    check.higher_is_better))
+                continue
+            per_check.append(sequential.mean_look_chances(
+                plan, statistics.fmean(scores), statistics.stdev(scores), len(scores),
+                check.threshold, check.higher_is_better))
+        by_look = [math.prod(c.decided_by(k) for c in per_check)
+                   for k in range(len(plan.looks))]
+        return Until(checks=checks, plan=plan, by_look=by_look, chances=per_check)
     plan = sequential.wave_plan(maximum, target, confidence)
     per_check = []
     for check in checks:
@@ -451,14 +477,15 @@ def until(checks: list[CheckOdds], maximum: int, target: float, confidence: floa
     return Until(checks=checks, plan=plan, by_look=by_look, chances=per_check)
 
 
-def until_choice(checks: list[CheckOdds], target: float, confidence: float,
-                 limit: int) -> tuple[Until, list[Until]]:
+def until_choice(checks: list[CheckOdds], target: float | None, confidence: float,
+                 limit: int, floor: int | None = None) -> tuple[Until, list[Until]]:
     """The maximum to offer, by the fixed sizes' rule: the smallest reaching
     the goal by the maximum, else the smallest within 5 points of the best."""
-    first = sequential.wave_plan(UNTIL_MAXIMA[0], target, confidence).first
-    options = [until(checks, m, target, confidence) for m in UNTIL_MAXIMA
+    first = (floor if target is None
+             else sequential.wave_plan(UNTIL_MAXIMA[0], target, confidence).first)
+    options = [until(checks, m, target, confidence, floor) for m in UNTIL_MAXIMA
                if first <= m <= limit] or [until(checks, max(first, min(limit, 1000)),
-                                                  target, confidence)]
+                                                  target, confidence, floor)]
     reaching = next((o for o in options if o.chance_by_max >= GOAL), None)
     if reaching is not None:
         return reaching, options

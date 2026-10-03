@@ -132,7 +132,8 @@ def applies(name: StatisticalEngine, row: TestTypesModel | None,
     (the estimate and the result use this one rule)."""
     if name == StatisticalEngine.trial:
         return False, TRIAL_REASON
-    if name == StatisticalEngine.one_sample_t and (row is None or row.comparison is None):
+    if name in (StatisticalEngine.one_sample_t, StatisticalEngine.sequential_t) and (
+            row is None or row.comparison is None):
         return False, "It only passes or fails: an average needs a check that gives a score"
     if name in (StatisticalEngine.judge_stability, StatisticalEngine.sequential_judge_stability):
         if row is None or row.engine != JUDGE_ENGINE:
@@ -352,6 +353,47 @@ def _sequential(series: list[SeriesPoint], plan: sequential.WavePlan, target: fl
         times_to_decide=None, times_to_decide_message=None)
 
 
+def _sequential_mean(series: list[SeriesPoint], plan: sequential.WavePlan,
+                     threshold: float | None, higher_is_better: bool, stopped: bool,
+                     confidence: float) -> Statistic:
+    """Until there's an answer, for an average: the first look whose t-test
+    decided it, at the looks' stricter level, and the numbers then."""
+    if threshold is None:
+        return _no_verdict("This check's threshold isn't a number, so there's nothing to "
+                           "compare the average with.", 0)
+    scores = [(p.index, p.score) for p in series if p.passed is not None and p.score is not None]
+    verdict, _, test = sequential.decide_mean(scores, plan, threshold, higher_is_better)
+    if test is None:
+        return _no_verdict("Fewer than two scores came back: nothing to judge an average "
+                           "from.", len(scores))
+    n = test.n
+    passing, failing = ("above", "below") if higher_is_better else ("below", "above")
+    average = f"{test.mean:.3g}"
+    if verdict == "pass":
+        reason = (f"Average score {average} over its first {_runs(n)}: safely {passing} the "
+                  f"{threshold:g} needed ({sure(confidence)}).")
+    elif verdict == "fail":
+        reason = (f"Average score {average} over its first {_runs(n)}: {failing} the "
+                  f"{threshold:g} needed ({sure(confidence)}).")
+    elif stopped:
+        reason = (f"The batch was stopped before this average had its answer (average "
+                  f"{average} over {_runs(n)}).")
+    else:
+        reason = (f"Can't tell yet: an average of {average} over {_runs(n)}, the most this "
+                  f"batch could run, is too close to the {threshold:g} needed. A new batch "
+                  "with a higher maximum might settle it.")
+    interval = (None if test.lower is None else make_interval(
+        test.lower, test.mean, test.upper, IntervalMethod.t, round(plan.level, 4),
+        IntervalSides.one))
+    return Statistic(
+        verdict={"pass": CheckVerdict.passed, "fail": CheckVerdict.failed}.get(
+            verdict, CheckVerdict.inconclusive),
+        reason=reason, n=n, interval=interval, p_value_pass=r4(test.p_value_pass),
+        p_value_fail=r4(test.p_value_fail), rule=None, t=r4(test.t), df=test.df,
+        standard_error=r4(test.standard_error), times_to_decide=None,
+        times_to_decide_message=None)
+
+
 def _no_verdict(reason: str, n: int) -> Statistic:
     return Statistic(verdict=None, reason=reason, n=n, interval=None, p_value_pass=None,
                      p_value_fail=None, rule=None, times_to_decide=None,
@@ -432,6 +474,10 @@ def check_result(name: StatisticalEngine, parameters: dict[str, float], floor: i
                 f"Only {n} {'score' if n == 1 else 'scores'} came back, fewer than the "
                 f"{floor} needed to judge an average. The other runs were Not Ran or "
                 "couldn't run the check; the scores above show what did.", n)
+        elif name == StatisticalEngine.sequential_t:
+            statistic = _sequential_mean(series, sequential.WavePlan.from_json(waves),
+                                         threshold, row.comparison.value == "gte", stopped,
+                                         confidence)
         elif is_sequential:
             plan = sequential.WavePlan.from_json(waves)
             if target != parameters["target"]:

@@ -198,7 +198,14 @@ _ESTIMATE_T = {
     "odds": [{"times": n, "chance": 1.0} for n in (10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 125,
                                                   150, 200, 250, 300, 400, 500, 600, 750,
                                                   1000)],
-    "cheaper": [], "trial": None, "until_answer": None,
+    "cheaper": [], "trial": None,
+    # running until there's an answer instead: certain too, so its first wave answers it
+    "until_answer": {
+        "statistical_test": "sequential_t", "max_times": 100, "first_wave": 10,
+        "wave_size": 13, "looks": [10, 23, 36, 49, 61, 74, 87, 100], "usual_times": 10,
+        "expected_times": 10, "chance_by_max": 1.0, "outcome": None, "likely_undecided": None,
+        "summary": "Up to 100 times, it usually stops by 10 times (about 10 on average), and "
+                   "every check has its answer 100% of the time."},
 }
 
 
@@ -233,9 +240,9 @@ async def list_statistical_tests(
         verdict on the same recorded answer? (judge checks of recorded answers only)
       - **Learn how it behaves** (`trial`) — a few runs with no verdict, so the next batch
         can be planned from them; a trial ends `Done`.
-      - **…until there's an answer** (`sequential_gate`, `sequential_judge_stability`) — the
-        first and third questions run in waves up to a maximum, stopping as soon as every
-        check has its answer; `times` is the maximum.
+      - **…until there's an answer** (`sequential_gate`, `sequential_t`,
+        `sequential_judge_stability`) — the three questions run in waves up to a maximum,
+        stopping as soon as every check has its answer; `times` is the maximum.
     - **`comparison`** — reads two finished batches of the same scope (`POST
       /statistics/comparisons`), A the baseline and B the change:
       - **pass rates, A against B** — did a check pass more or less often?

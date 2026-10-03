@@ -50,13 +50,23 @@ def advance_batch(batch_id: uuid.UUID, session: Session,
         return
     released = batch.waves_released
     looks = batch.plan["waves"]["looks"]
-    found = batch_waves.outcomes(batch_id, session)
     checks = batch_waves.judged_checks(batch, session)
-    undecided = [
-        check for check in checks
-        if sequential.decide(found.get((check.entry_id, check.label), []),
-                             batch_waves.wave_plan_for(batch, check.target), check.target,
-                             through_look=released, agreement=check.agreement).verdict is None]
+    if batch.engine == "sequential_t":
+        plan = sequential.WavePlan.from_json(batch.plan["waves"])
+        found = batch_waves.scores(batch_id, session)
+        undecided = [
+            check for check in checks
+            if sequential.decide_mean(found.get((check.entry_id, check.label), []), plan,
+                                      check.threshold, check.higher_is_better,
+                                      through_look=released)[0] is None]
+    else:
+        found = batch_waves.outcomes(batch_id, session)
+        undecided = [
+            check for check in checks
+            if sequential.decide(found.get((check.entry_id, check.label), []),
+                                 batch_waves.wave_plan_for(batch, check.target), check.target,
+                                 through_look=released,
+                                 agreement=check.agreement).verdict is None]
 
     if not undecided or released >= len(looks):
         closed = session.execute(

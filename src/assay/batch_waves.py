@@ -4,6 +4,7 @@ next wave. The worker advances such a batch after each wave; the API reads
 the same answers back. Code both need, so it lives outside the API-only
 code (a worker can't import services/).
 """
+import math
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -27,18 +28,22 @@ from assay.models import (
 )
 from assay.schemas import TestTypeAssignment
 
-SEQUENTIAL_ENGINES = frozenset({"sequential_gate", "sequential_judge_stability"})
+SEQUENTIAL_ENGINES = frozenset({"sequential_gate", "sequential_judge_stability",
+                                "sequential_t"})
 _IN_FLIGHT = (TestStatus.pending, TestStatus.running)
 
 
 @dataclass(frozen=True)
 class SequentialCheck:
     """One check the batch judges: its entry (None for a standalone test),
-    its label, its target, and whether its count is the judge's agreement."""
+    its label, its target, and whether its count is the judge's agreement —
+    or, for an average, the threshold its scores are judged against."""
     entry_id: uuid.UUID | None
     label: str
-    target: float
+    target: float | None
     agreement: bool
+    threshold: float | None = None
+    higher_is_better: bool = True
 
 
 def read_overrides(stored: dict | None) -> tuple[dict, set]:
@@ -67,22 +72,54 @@ def judged_checks(batch: StatisticalBatchModel, session: Session) -> list[Sequen
     or, judging the judge, its judge checks on a recorded answer."""
     targets, left_out = read_overrides(batch.overrides)
     agreement = batch.engine == "sequential_judge_stability"
+    average = batch.engine == "sequential_t"
     entries = _frozen_entries(batch, session)
     names = {a.name for _, _, assignments in entries for a in assignments}
-    engines = dict(session.execute(select(TestTypesModel.name, TestTypesModel.engine)
-                                   .where(TestTypesModel.name.in_(names))).all())
+    rows = {row.name: row for row in session.scalars(
+        select(TestTypesModel).where(TestTypesModel.name.in_(names)))}
     checks = []
     for entry_id, recorded, assignments in entries:
         for assignment in assignments:
             key = (entry_id, assignment.label)
+            row = rows.get(assignment.name)
             if key in left_out:
                 continue
-            if agreement and (engines.get(assignment.name) != JUDGE_ENGINE or not recorded):
+            if agreement and (row is None or row.engine != JUDGE_ENGINE or not recorded):
+                continue
+            if average:
+                threshold = _threshold(assignment)
+                if row is None or row.comparison is None or threshold is None:
+                    continue
+                checks.append(SequentialCheck(entry_id, assignment.label, None, False,
+                                              threshold, row.comparison.value == "gte"))
                 continue
             checks.append(SequentialCheck(entry_id, assignment.label,
                                           targets.get(key, batch.parameters["target"]),
                                           agreement))
     return checks
+
+
+def _threshold(assignment: TestTypeAssignment) -> float | None:
+    try:
+        value = float((assignment.config or {}).get("threshold"))
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def scores(batch_id: uuid.UUID, session: Session) -> dict[tuple, list[tuple[int, float]]]:
+    """Every scored check's scores so far, as (time, score), by (entry id,
+    label)."""
+    rows = session.execute(
+        select(TestRunModel.test_set_entry_id, TestRunModel.batch_index, TestRunModel.results)
+        .where(TestRunModel.batch_id == batch_id, TestRunModel.results.is_not(None))).all()
+    found: dict[tuple, list[tuple[int, float]]] = defaultdict(list)
+    for entry_id, index, results in rows:
+        for label, result in (results or {}).items():
+            if isinstance(result, dict) and not result.get("errored") \
+                    and isinstance(result.get("score"), int | float):
+                found[(entry_id, label)].append((index, float(result["score"])))
+    return found
 
 
 def outcomes(batch_id: uuid.UUID, session: Session) -> dict[tuple, list[tuple[int, bool]]]:

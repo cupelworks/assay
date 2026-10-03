@@ -46,7 +46,8 @@ POWER = 0.8
 UNTIL_MAXIMA = (100, 300, 1000)
 UNTIL_DEFAULT = 300
 SEQUENTIAL = frozenset({StatisticalEngine.sequential_gate,
-                        StatisticalEngine.sequential_judge_stability})
+                        StatisticalEngine.sequential_judge_stability,
+                        StatisticalEngine.sequential_t})
 
 _EXACT_FLOOR = "times ≥ ln(1 − confidence) / ln(target)"
 _THREE_WAY = ("pass", "fail", "inconclusive")
@@ -132,6 +133,12 @@ ENGINES: dict[StatisticalEngine, Engine] = {engine.id: engine for engine in (
         wave=3, reads=Reads.pass_fail, applies_to=AppliesTo.judge_checks, verdicts=_THREE_WAY,
         parameters={"target": ParameterKind.rate, "confidence": ParameterKind.level},
         floor_kind=FloorKind.exact, floor_formula=None, settings={},
+    ),
+    Engine(
+        id=StatisticalEngine.sequential_t, kind=StatisticalTestKind.batch, wave=3,
+        reads=Reads.scores, applies_to=AppliesTo.scored_checks, verdicts=_THREE_WAY,
+        parameters={"confidence": ParameterKind.level},
+        floor_kind=FloorKind.rule_of_thumb, floor_formula=None, settings={"floor": True},
     ),
     Engine(
         id=StatisticalEngine.trial, kind=StatisticalTestKind.batch, wave=3,
@@ -416,6 +423,17 @@ def sizing(entry: CatalogueEntry, parameters: dict[str, float]) -> Sizing:
             if suggestion.times not in by_times or suggestion.default:
                 by_times[suggestion.times] = suggestion
         return Sizing(floor, explanation, [by_times[times] for times in sorted(by_times)])
+    if engine == StatisticalEngine.sequential_t:
+        first = entry.settings["floor"]
+        explanation = (
+            f"It looks at the average after each wave: below {first} scores an average is "
+            "too unreliable to judge, so the first wave is that size. Set the most you'll "
+            "pay for; it stops as soon as every average has its answer."
+        )
+        return Sizing(first, explanation, [
+            Suggestion(times=most, kind=SuggestionKind.maximum,
+                       label=f"at most {most} times", default=most == UNTIL_DEFAULT)
+            for most in UNTIL_MAXIMA])
     if engine in SEQUENTIAL:
         first = sequential.wave_plan(UNTIL_DEFAULT, parameters["target"], confidence).first
         explanation = (

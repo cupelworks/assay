@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay import sequential
 from assay.models import BatchStatus, StatisticalBatchModel
-from assay.schemas.statistics import BatchDetails, BatchRequest, StatisticalTestKind
+from assay.schemas.statistics import (
+    BatchDetails,
+    BatchRequest,
+    StatisticalEngine,
+    StatisticalTestKind,
+)
 from assay.services.runs._common import _dispatch_runs
 from assay.services.runs.create_new_run import (
     _new_standalone_run,
@@ -65,7 +70,11 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
     # until there's an answer: `times` is the most it may run; only the first
     # wave is created now, the worker releases the next after each one
     waves = None
-    if chosen.engine.id in SEQUENTIAL:
+    if chosen.engine.id == StatisticalEngine.sequential_t:
+        waves = sequential.mean_wave_plan(times, chosen.settings["floor"],
+                                          parameters["confidence"])
+        plan["waves"] = waves.to_json()
+    elif chosen.engine.id in SEQUENTIAL:
         waves = sequential.wave_plan(times, parameters["target"], parameters["confidence"])
         plan["waves"] = waves.to_json()
     batch = StatisticalBatchModel(

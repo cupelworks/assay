@@ -216,3 +216,81 @@ def test_leaving_out_the_only_judged_check_says_that(db):
 
     assert response.json()["detail"][0]["msg"] == (
         "Every check this test can judge is left out: keep at least one")
+
+
+# --- an average, until there's an answer ---
+
+ROUGE = {"name": "ROUGE", "config": {"threshold": "0.5"}}
+
+
+def test_the_average_level_keeps_the_error_near_the_confidence():
+    plan = sequential.mean_wave_plan(100, 10, 0.95)
+
+    up, down = sequential._crossing(plan.looks, sequential.stats_math.z_quantile(plan.level))
+
+    assert plan.looks[0] == 10 and plan.maximum == 100
+    assert abs(sum(up) - 0.05) < 0.002 and abs(sum(down) - 0.05) < 0.002
+
+
+def test_a_clear_average_answers_at_the_first_wave_and_a_close_one_waits():
+    plan = sequential.mean_wave_plan(100, 10, 0.95)
+    clear = [(i, 0.7 + 0.01 * (i % 3)) for i in range(1, 11)]
+    close = [(i, 0.5 + 0.05 * (1 if i % 2 else -1)) for i in range(1, 11)]
+
+    assert sequential.decide_mean(clear, plan, 0.5, True)[:2] == ("pass", 10)
+    assert sequential.decide_mean(close, plan, 0.5, True)[0] is None
+
+
+def _scored(db, scores):
+    test = db.test(model_output=None, checks=[ROUGE])
+    for score in scores:
+        run = db.client.post(f"/runs/standalone/{test['id']}").json()
+        db.finish(uuid.UUID(run["id"]), {"ROUGE": {"passed": score >= 0.5, "score": score}})
+    return test
+
+
+def test_the_t_tests_estimate_offers_its_until_counterpart(db):
+    test = _scored(db, [0.6 + 0.02 * (i % 5) for i in range(20)])
+
+    estimate = db.client.post("/statistics/estimate", json={
+        "test_id": test["id"], "statistical_test": "one_sample_t"}).json()
+    until = db.client.post("/statistics/estimate", json={
+        "test_id": test["id"], "statistical_test": "sequential_t"}).json()
+
+    assert estimate["until_answer"]["statistical_test"] == "sequential_t"
+    assert estimate["until_answer"]["first_wave"] == 10
+    assert (until["floor"], until["rule"]) == (10, None)
+    assert until["until_answer"]["chance_by_max"] >= 0.9
+
+
+def test_an_average_batch_stops_once_it_is_clear(db):
+    test = _scored(db, [0.7] * 3)
+    batch = db.client.post("/statistics/batches", json={
+        "test_id": test["id"], "statistical_test": "sequential_t", "times": 100}).json()
+    runs = db.runs_of(batch["id"])
+    for run in runs:
+        db.finish(run.id, {"ROUGE": {"passed": True, "score": 0.7 + 0.01 * (run.batch_index % 3)}})
+
+    assert len(runs) == 10
+    assert _advance(db, batch["id"]) == []
+    read = db.client.get(f"/statistics/batches/{batch['id']}").json()
+
+    assert read["status"] == "Passed"
+    statistic = read["result"]["entries"][0]["checks"][0]["statistic"]
+    assert statistic["reason"].startswith("Average score 0.71 over its first 10 runs: safely "
+                                          "above the 0.5 needed")
+    assert statistic["interval"]["method"] == "t"
+
+
+def test_an_average_that_is_not_clear_gets_another_wave(db):
+    test = _scored(db, [0.5, 0.6])
+    batch = db.client.post("/statistics/batches", json={
+        "test_id": test["id"], "statistical_test": "sequential_t", "times": 100}).json()
+    for run in db.runs_of(batch["id"]):
+        score = 0.5 + 0.05 * (1 if run.batch_index % 2 else -1)
+        db.finish(run.id, {"ROUGE": {"passed": score >= 0.5, "score": score}})
+
+    published = _advance(db, batch["id"])
+
+    plan = sequential.mean_wave_plan(100, 10, 0.95)
+    assert len(published) == plan.looks[1] - plan.looks[0]

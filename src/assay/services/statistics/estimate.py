@@ -198,9 +198,10 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
     known = all(check.known for check in checks.values())
     found = odds.plan(list(checks.values()), limit) if known and not until_engine else None
     until_pick = until_options = None
+    average_floor = chosen.settings.get("floor")
     if known and until_engine:
         until_pick, until_options = odds.until_choice(list(checks.values()), batch_target,
-                                                      confidence, limit)
+                                                      confidence, limit, average_floor)
     capped_from = None
     if times is None:
         if until_pick is not None:
@@ -222,14 +223,15 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
             capped_from, times = times, most
     if until_engine:
         # its first wave is the least it runs: a perfect record answers there
-        floor = sequential.wave_plan(times, batch_target, confidence).first
+        floor = (average_floor if batch_target is None
+                 else sequential.wave_plan(times, batch_target, confidence).first)
     check_times(times, scope.runs_per_time, floor, chosen, parameters)
 
     application_per_time = sum(not entry.recorded_answer for entry in scope.entries)
     judge_per_time = sum(scope.is_judge(a) for entry in scope.entries for a in entry.assignments
                          if (entry.entry_id, a.label) not in leave_out)
     rule = None
-    if until_engine:
+    if until_engine and batch_target is not None:
         # what decides at its first wave, at the wave's stricter level
         first = sequential.wave_plan(times, batch_target, confidence)
         gate_rule = stats_math.binomial_gate_rule(first.first, batch_target, first.level)
@@ -266,14 +268,16 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
                 plan.certain_result = check.certain_result
     if until_pick is not None:
         asked = (until_pick if until_pick.maximum == times else
-                 odds.until(list(checks.values()), times, batch_target, confidence))
+                 odds.until(list(checks.values()), times, batch_target, confidence,
+                            average_floor))
         estimate.suggestions = _until_suggestions(until_options, until_pick)
         estimate.until_answer = _until_block(chosen.id, asked)
         estimate.goal_reachable = until_pick.chance_by_max >= odds.GOAL
     elif found is not None and engine in _UNTIL_COUNTERPART:
         counterpart = await find_engine(session, _UNTIL_COUNTERPART[engine])
         if counterpart is not None:
-            pick, _ = odds.until_choice(list(checks.values()), batch_target, confidence, limit)
+            pick, _ = odds.until_choice(list(checks.values()), batch_target, confidence, limit,
+                                        counterpart.settings.get("floor"))
             estimate.until_answer = _until_block(counterpart.id, pick)
     if not known and engine != StatisticalEngine.trial:
         estimate.trial = await _trial_offer(checks, application_per_time, judge_per_time,
@@ -284,11 +288,9 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
 _UNTIL_OF = {
     StatisticalEngine.sequential_gate: StatisticalEngine.binomial_gate,
     StatisticalEngine.sequential_judge_stability: StatisticalEngine.judge_stability,
+    StatisticalEngine.sequential_t: StatisticalEngine.one_sample_t,
 }
-_UNTIL_COUNTERPART = {
-    StatisticalEngine.binomial_gate: StatisticalEngine.sequential_gate,
-    StatisticalEngine.judge_stability: StatisticalEngine.sequential_judge_stability,
-}
+_UNTIL_COUNTERPART = {engine: until for until, engine in _UNTIL_OF.items()}
 
 
 def _until_block(test_id: str, found: odds.Until) -> UntilAnswer:
@@ -355,7 +357,7 @@ def _odds_of(engine: StatisticalEngine, scope: ResolvedScope, entry: compute.Bat
         and engine != StatisticalEngine.judge_stability, floor=floor)
     if target is not None:
         check.floor = stats_math.binomial_floor(target, confidence)
-    if engine == StatisticalEngine.one_sample_t:
+    if engine in (StatisticalEngine.one_sample_t, StatisticalEngine.sequential_t):
         check.threshold = compute.threshold_of(assignment)
         check.higher_is_better = row is None or row.comparison is None or (
             row.comparison.value == "gte")

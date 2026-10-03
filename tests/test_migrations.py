@@ -1714,3 +1714,22 @@ def test_the_until_rows_and_the_wave_columns_come_and_go(scratch):
     command.downgrade(config, "d6e8f0a2c4b5")
 
     assert "waves_released" not in _table_columns(db_path, "statistical_batches")
+
+
+# --- f8a0b2c4d6e7: the average, until there's an answer ---
+
+
+def test_the_average_until_row_comes_and_goes(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "f8a0b2c4d6e7")
+
+    with sqlite3.connect(db_path) as connection:
+        ids = [r[0] for r in connection.execute(
+            "SELECT id FROM statistical_tests ORDER BY created_at")]
+    assert ids[-1] == "sequential_t"
+
+    command.downgrade(config, "e7f9a1b3c5d6")
+
+    with sqlite3.connect(db_path) as connection:
+        ids = [r[0] for r in connection.execute("SELECT id FROM statistical_tests")]
+    assert "sequential_t" not in ids

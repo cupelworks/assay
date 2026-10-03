@@ -36,6 +36,7 @@ class StatisticalEngine(StrEnum):
     trial = "trial"
     sequential_gate = "sequential_gate"
     sequential_judge_stability = "sequential_judge_stability"
+    sequential_t = "sequential_t"
 
 
 class StatisticalTestKind(StrEnum):
