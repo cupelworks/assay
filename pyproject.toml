@@ -1,6 +1,6 @@
 [project]
 name = "assay"
-version = "1.1.0"
+version = "1.2.0"
 authors = [{ name = "Francesco Campanile", email = "francescocampanile96@gmail.com" }]
 description = "Test how a GenAI-powered application behaves: score its outputs with deterministic checks, NLP metrics and LLM-as-judge verdicts, organise cases into test sets and plans, and keep a reproducible record of every run."
 readme = "README.md"
