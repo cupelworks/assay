@@ -36,11 +36,15 @@ def test_the_catalogue_lists_each_test_with_its_parameters_and_floor(db):
 
 
 def test_the_catalogues_worked_examples_are_what_the_estimate_computes(db):
-    # a recorded answer with a scored and a judge check: every batch test applies
-    test = db.test(checks=[ROUGE, TOXICITY])
+    # no history, so the sizes come from the floor alone: an answer the
+    # application gives (it can vary) for the gate and the t-test, a recorded
+    # one with a judge for judge stability
+    varies = db.test(name="varies", model_output=None, checks=[ROUGE, TOXICITY])
+    recorded = db.test(name="recorded", checks=[ROUGE, TOXICITY])
     for item in db.client.get("/statistics/tests").json()["items"]:
         if item["kind"] != "batch":
             continue
+        test = recorded if item["engine"] == "judge_stability" else varies
         for example in item["floor"]["examples"]:
             parameters = {k: v for k, v in example.items() if k != "times"}
             estimate = _estimate(db, test_id=test["id"], statistical_test=item["id"],
@@ -53,7 +57,7 @@ def test_the_catalogues_worked_examples_are_what_the_estimate_computes(db):
 
 
 def test_the_gate_suggests_the_floor_one_spare_and_one_miss(db):
-    test = db.test()
+    test = db.test(model_output=None)
 
     estimate = _estimate(db, test_id=test["id"], statistical_test="binomial_gate").json()
 
@@ -83,7 +87,7 @@ def test_the_gates_rule_follows_the_times_asked(db):
 
 @pytest.mark.parametrize("target,floor", [(0.8, 14), (0.95, 59), (0.99, 299)])
 def test_the_gates_floor_follows_the_target(db, target, floor):
-    test = db.test()
+    test = db.test(model_output=None)
 
     estimate = _estimate(db, test_id=test["id"], statistical_test="binomial_gate",
                          parameters={"target": target}).json()
@@ -92,7 +96,7 @@ def test_the_gates_floor_follows_the_target(db, target, floor):
 
 
 def test_the_t_test_suggests_its_floor_the_size_that_sees_the_gap_and_30(db):
-    test = db.test(checks=[ROUGE])
+    test = db.test(model_output=None, checks=[ROUGE])
 
     estimate = _estimate(db, test_id=test["id"], statistical_test="one_sample_t").json()
 
@@ -103,7 +107,7 @@ def test_the_t_test_suggests_its_floor_the_size_that_sees_the_gap_and_30(db):
 
 
 def test_a_t_test_suggestion_never_goes_below_its_floor(db):
-    test = db.test(checks=[ROUGE])
+    test = db.test(model_output=None, checks=[ROUGE])
 
     estimate = _estimate(db, test_id=test["id"], statistical_test="one_sample_t",
                          parameters={"difference": 0.2}).json()
@@ -152,10 +156,10 @@ def test_a_t_test_applies_only_to_scored_checks(db):
 
     checks = {c["label"]: c for c in estimate["entries"][0]["checks"]}
     assert checks["ROUGE"]["applies"] is True
-    assert checks["Contains"] == {"label": "Contains", "test_type": "Contains",
-                                  "applies": False,
-                                  "reason": "It only passes or fails: an average needs a "
-                                            "check that gives a score"}
+    assert {k: checks["Contains"][k] for k in ("label", "test_type", "applies", "reason")} == {
+        "label": "Contains", "test_type": "Contains", "applies": False,
+        "reason": "It only passes or fails: an average needs a check that gives a score"}
+    assert checks["Contains"]["outlook"] is None
     assert estimate["checks_applicable"] == 1
     assert "checks_not_applicable" in [w["code"] for w in estimate["warnings"]]
 
@@ -334,7 +338,7 @@ def test_judge_stability_needs_a_judge_check_on_a_recorded_answer(db):
 
 
 def test_a_t_test_gap_too_small_for_one_batch_defaults_to_the_most_a_batch_can_run(db):
-    test = db.test(checks=[ROUGE])
+    test = db.test(model_output=None, checks=[ROUGE])
 
     response = _estimate(db, test_id=test["id"], statistical_test="one_sample_t",
                          parameters={"difference": 0.005})
@@ -348,7 +352,8 @@ def test_a_t_test_gap_too_small_for_one_batch_defaults_to_the_most_a_batch_can_r
 
 
 def test_a_default_bigger_than_the_scope_can_run_is_capped_with_a_warning(db):
-    scored = db.test_set("scored", [db.test(name=f"s{i}", checks=[ROUGE]) for i in range(11)])
+    scored = db.test_set("scored", [db.test(name=f"s{i}", model_output=None, checks=[ROUGE])
+                                    for i in range(11)])
 
     response = _estimate(db, test_set_id=scored["id"], statistical_test="one_sample_t",
                          parameters={"difference": 0.005})

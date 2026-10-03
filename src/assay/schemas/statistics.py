@@ -281,6 +281,26 @@ class SuggestionKind(StrEnum):
     allows_one_miss = "allows_one_miss"
     detects_difference = "detects_difference"
     recommended = "recommended"
+    reaches_goal = "reaches_goal"
+    worth_its_cost = "worth_its_cost"
+    best_chance = "best_chance"
+    trial = "trial"
+
+
+class CheckRef(BaseModel):
+    """One check of the scope: its entry (null for a standalone test) and its
+    label."""
+    entry_id: uuid.UUID | None = Field(
+        default=None, description="The test set entry; null for a standalone test.")
+    label: str = Field(description="The check's label within its test.")
+
+
+class OutcomeSplit(BaseModel):
+    """How a batch of this size would most likely end, from the history:
+    chances that add up to 1."""
+    passed: float = Field(description="Every check passes.")
+    inconclusive: float = Field(description="No check fails and at least one can't be told.")
+    failed: float = Field(description="At least one check fails.")
 
 
 class Suggestion(BaseModel):
@@ -290,10 +310,34 @@ class Suggestion(BaseModel):
                     "more, so a run that can't be evaluated doesn't cost the verdict), "
                     "`allows_one_miss` (the gate still passes with one failure), "
                     "`detects_difference` (enough to see the difference you set, 80% of the "
-                    "time), `recommended` (where the test's maths is comfortable).",
+                    "time), `recommended` (where the test's maths is comfortable). With a "
+                    "history for every check: `reaches_goal` (the fewest times with a "
+                    "`goal` chance that every check gets an answer), and when no size "
+                    "reaches it `worth_its_cost` (the fewest times within 5 points of the "
+                    "best chance) and `best_chance` (the size with the best chance). `trial`: "
+                    "the trial's size.",
     )
-    label: str = Field(description="A short caption, e.g. \"29 · no miss allowed\".")
+    label: str = Field(description="A short caption, e.g. \"29 times · no failure allowed\".")
     default: bool = Field(description="The one used when `times` is left out.")
+    chance: float | None = Field(
+        default=None,
+        description="The chance that every check gets an answer at this size, from the "
+                    "checks' history (averaged over what their rates could be). Null when a "
+                    "check has no history.",
+    )
+    failures_allowed: int | None = Field(
+        default=None,
+        description="For a target test: failures a check may have at this size and still "
+                    "pass, at the batch's target. Null otherwise.",
+    )
+    outcome: OutcomeSplit | None = Field(
+        default=None, description="How the batch would most likely end; null without "
+                                  "history.")
+    likely_undecided: CheckRef | None = Field(
+        default=None,
+        description="The check most likely to stay undecided at this size; null when none "
+                    "has a real chance of it, or without history.",
+    )
 
 
 class GateRuleSchema(BaseModel):
@@ -325,11 +369,113 @@ class Calls(BaseModel):
     )
 
 
+class Outlook(StrEnum):
+    likely_pass = "likely_pass"
+    likely_fail = "likely_fail"
+    too_close = "too_close"
+    unknown = "unknown"
+    certain = "certain"
+
+
+class CheckHistoryOut(BaseModel):
+    """What earlier runs showed about the check: its most recent runs (at
+    most 200) that asked the same question and gave it a result."""
+    runs: int = Field(description="Runs that gave the check a result.")
+    passed: int = Field(description="Of those, the ones it passed.")
+    rate: float = Field(description="passed / runs.")
+    mean: float | None = Field(
+        default=None, description="For a scored check: the scores' average.")
+    sd: float | None = Field(
+        default=None, description="For a scored check: how much the scores varied.")
+
+
+class CheaperKind(StrEnum):
+    lower_target = "lower_target"
+    leave_out = "leave_out"
+    less_sure = "less_sure"
+
+
+class CheaperOption(BaseModel):
+    """A change that makes an answer more likely or the batch cheaper, with
+    what it does to the batch."""
+    kind: CheaperKind = Field(
+        description="`lower_target`: a lower target for this one check. `leave_out`: the "
+                    "batch without this check (its runs skip it). `less_sure`: the whole "
+                    "batch one step less sure.",
+    )
+    label: str = Field(description="The option in plain words, to show as it is.")
+    check: CheckRef | None = Field(
+        default=None, description="The check it changes; null for `less_sure`.")
+    target: float | None = Field(default=None, description="For `lower_target`: the target.")
+    confidence: float | None = Field(
+        default=None, description="For `less_sure`: the confidence level.")
+    times: int = Field(description="The size the batch would then default to.")
+    chance: float = Field(description="Its chance that every check gets an answer.")
+    reaches_goal: bool = Field(description="Whether that chance reaches the goal.")
+    judge_calls_saved_per_time: int = Field(
+        default=0, description="For `leave_out`: judge calls one time no longer makes.")
+
+
 class CheckPlan(BaseModel):
     label: str = Field(description="The check's label within its test.")
     test_type: str = Field(description="The catalogue type it runs.")
     applies: bool = Field(description="Whether the statistical test gives it a verdict.")
     reason: str | None = Field(description="Why not, when it doesn't.")
+    target: float | None = Field(
+        default=None,
+        description="For a target test: the check's target — the batch's, or its own when "
+                    "the request set one (`targets`).",
+    )
+    left_out: bool = Field(
+        default=False, description="Left out of the batch by the request (`leave_out`).")
+    history: CheckHistoryOut | None = Field(
+        default=None, description="What earlier runs showed; null when none gave it a result.")
+    outlook: Outlook | None = Field(
+        default=None,
+        description="How the check looks against its target: `likely_pass`, "
+                    "`likely_fail` (each at least 9 chances in 10, from its history), "
+                    "`too_close` (neither: expensive to tell either way), `unknown` (no "
+                    "history), `certain` (it can't vary: a recorded answer read by a fixed "
+                    "check). Null when the test doesn't apply to it.",
+    )
+    outlook_reason: str | None = Field(
+        default=None, description="The outlook in one sentence, to show as it is.")
+    certain_result: str | None = Field(
+        default=None,
+        description="For a `certain` check with a history: `pass` or `fail`, the result "
+                    "every run gives.",
+    )
+    size_needed: int | None = Field(
+        default=None,
+        description="The fewest times for a `goal` chance of an answer for this check "
+                    "alone; null when no size within one batch reaches it, or without "
+                    "history.",
+    )
+    best_chance: float | None = Field(
+        default=None,
+        description="This check's best chance of an answer within one batch; null without "
+                    "history.",
+    )
+    cheaper: list[CheaperOption] = Field(
+        default_factory=list,
+        description="Changes to this check that make the batch's answer more likely or "
+                    "cheaper: lower targets, leaving it out.",
+    )
+
+
+class OddsPoint(BaseModel):
+    times: int
+    chance: float = Field(description="The chance that every check gets an answer.")
+
+
+class TrialOffer(BaseModel):
+    """A trial: the scope run a few times with no verdict, to learn how each
+    check behaves before planning a batch."""
+    statistical_test: str = Field(description="The trial's catalogue id, to send as is.")
+    times: int = Field(description="Its default size.")
+    application_calls: int = Field(description="What it costs: application calls.")
+    judge_calls: int = Field(description="What it costs: judge calls.")
+    reason: str = Field(description="Why it's offered, to show as it is.")
 
 
 class EntryPlan(BaseModel):
@@ -371,6 +517,47 @@ class Estimate(BaseModel):
                     "statistical test applies to it.",
     )
     warnings: list[Warning_] = Field(description="What to know before confirming.")
+    goal: float = Field(
+        default=0.9,
+        description="The chance that every check gets an answer the default size aims for.")
+    goal_reachable: bool | None = Field(
+        default=None,
+        description="Whether a size within one batch reaches `goal`; null when a check has "
+                    "no history (run a trial first).",
+    )
+    best_chance: float | None = Field(
+        default=None,
+        description="The best chance that every check gets an answer within one batch; "
+                    "null without history.",
+    )
+    best_times: int | None = Field(default=None, description="The size with `best_chance`.")
+    odds_summary: str | None = Field(
+        default=None,
+        description="The odds in one sentence, to show as it is — e.g. \"Even 977 times "
+                    "give every check an answer only 71% of the time; 715 times give 66% for "
+                    "27% fewer runs.\" Null without history.",
+    )
+    driving_check: CheckRef | None = Field(
+        default=None,
+        description="The check that needs the most runs: the one to act on to make the "
+                    "batch cheaper. Null without history.",
+    )
+    odds: list[OddsPoint] = Field(
+        default_factory=list,
+        description="Chart-ready: the chance that every check gets an answer, at the sizes "
+                    "where one more failure becomes allowed (the curve's peaks), up to what "
+                    "one batch can run. Empty without history.",
+    )
+    cheaper: list[CheaperOption] = Field(
+        default_factory=list,
+        description="Changes to the whole batch that make an answer more likely or cheaper "
+                    "(one step less sure).",
+    )
+    trial: TrialOffer | None = Field(
+        default=None,
+        description="When a check has no history: a trial to run first, to learn how the "
+                    "checks behave. Null otherwise.",
+    )
 
 
 # ── batches ──────────────────────────────────────────────────────────────────

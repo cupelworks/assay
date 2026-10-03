@@ -70,6 +70,17 @@ _SCOPE_409 = {
     }}},
 }
 
+# what an estimate says about a check and the batch when nothing has run yet
+_NO_HISTORY = {"left_out": False, "history": None, "outlook": "unknown",
+               "outlook_reason": "No runs yet: nothing to plan from.", "certain_result": None,
+               "size_needed": None, "best_chance": None, "cheaper": []}
+_NO_ODDS = {"goal": 0.9, "goal_reachable": None, "best_chance": None, "best_times": None,
+            "odds_summary": None, "driving_check": None, "odds": [], "cheaper": [],
+            "trial": None}
+_SIZE_ONLY = {"chance": None, "failures_allowed": None, "outcome": None,
+              "likely_undecided": None}
+
+
 _ESTIMATE_GATE = {
     "scope": _SCOPE_SET,
     "statistical_test": "binomial_gate",
@@ -82,11 +93,12 @@ _ESTIMATE_GATE = {
                          "record could be luck.",
     "suggestions": [
         {"times": 29, "kind": "floor", "label": "29 times · no failure allowed",
-         "default": True},
-        {"times": 30, "kind": "absorbs_not_ran",
+         "default": True, **_SIZE_ONLY},
+        {"times": 30, "kind": "absorbs_not_ran", **_SIZE_ONLY,
          "label": "30 times · one spare, in case a run can't run",
          "default": False},
         {"times": 46, "kind": "allows_one_miss", "label": "46 times · one failure allowed",
+         **_SIZE_ONLY,
          "default": False},
     ],
     "times": 29,
@@ -104,18 +116,20 @@ _ESTIMATE_GATE = {
          "test_set_name": "Support answers", "name": "Opening hours",
          "recorded_answer": False,
          "checks": [{"label": "Contains", "test_type": "Contains", "applies": True,
-                     "reason": None}]},
+                     "reason": None, "target": 0.9, **_NO_HISTORY}]},
         {"entry_id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
          "test_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890", "test_set_id": _SET_ID,
          "test_set_name": "Support answers", "name": "Reset a password",
          "recorded_answer": False,
          "checks": [
-             {"label": "Contains", "test_type": "Contains", "applies": True, "reason": None},
+             {"label": "Contains", "test_type": "Contains", "applies": True, "reason": None,
+              "target": 0.9, **_NO_HISTORY},
              {"label": "Relevance", "test_type": "Relevance", "applies": True,
-              "reason": None},
+              "reason": None, "target": 0.9, **_NO_HISTORY},
          ]},
     ],
     "warnings": [],
+    **_NO_ODDS,
 }
 
 _ESTIMATE_T = {
@@ -129,19 +143,17 @@ _ESTIMATE_T = {
     "floor_explanation": "An average of fewer than 10 scores is too unreliable to judge. To "
                          "spot an average 5% of the score range away from the threshold, when "
                          "scores usually vary by about 10% of the range, takes about 27 times.",
+    # a recorded answer gives the same score every run: certain, so its floor
+    # answers it, and nothing more is worth paying for
     "suggestions": [
-        {"times": 10, "kind": "floor", "label": "10 times · the minimum",
-         "default": False},
-        {"times": 27, "kind": "detects_difference",
-         "label": "27 times · spots a gap of 5% of the range",
-         "default": True},
-        {"times": 30, "kind": "recommended", "label": "30 times · comfortable",
-         "default": False},
+        {"times": 10, "kind": "reaches_goal", "label": "10 times · 100% chance of an answer",
+         "default": True, "chance": 1.0, "failures_allowed": None, "outcome": None,
+         "likely_undecided": None},
     ],
-    "times": 27,
+    "times": 10,
     "rule": None,
     "runs_per_time": 1,
-    "runs_total": 27,
+    "runs_total": 10,
     "calls": {"application": {"per_time": 0, "total": 0},
               "judge": {"per_time": 0, "total": 0}},
     "checks_total": 2,
@@ -151,10 +163,16 @@ _ESTIMATE_T = {
         "test_set_id": None, "test_set_name": None, "name": "Summarise the outage report",
         "recorded_answer": True,
         "checks": [
-            {"label": "ROUGE", "test_type": "ROUGE", "applies": True, "reason": None},
+            {"label": "ROUGE", "test_type": "ROUGE", "applies": True, "reason": None,
+             "target": None, "left_out": False, "history": None, "outlook": "certain",
+             "outlook_reason": "It can't vary — a recorded answer read by a fixed check — "
+                               "so one run tells its result.",
+             "certain_result": None, "size_needed": 10, "best_chance": 1.0, "cheaper": []},
             {"label": "Word Count Limit", "test_type": "Word Count Limit", "applies": False,
              "reason": "It only passes or fails: an average needs a check that gives a "
-                       "score"},
+                       "score", "target": None, "left_out": False, "history": None,
+             "outlook": None, "outlook_reason": None, "certain_result": None,
+             "size_needed": None, "best_chance": None, "cheaper": []},
         ],
     }],
     "warnings": [
@@ -168,6 +186,13 @@ _ESTIMATE_T = {
          "message": ("1 check isn't something this test can judge: you'll see how often it passed, "
                     "without an answer.")},
     ],
+    "goal": 0.9, "goal_reachable": True, "best_chance": 1.0, "best_times": 10,
+    "odds_summary": "10 times give every check an answer 100% of the time.",
+    "driving_check": None,
+    "odds": [{"times": n, "chance": 1.0} for n in (10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 125,
+                                                  150, 200, 250, 300, 400, 500, 600, 750,
+                                                  1000)],
+    "cheaper": [], "trial": None,
 }
 
 

@@ -2,6 +2,8 @@
 (docs/statistics/dev_notes.md note 6): the floor, the sizes worth
 suggesting, the gate's rule at the chosen size, the calls it will pay for,
 which checks get a verdict, and what to know before confirming."""
+import uuid
+
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +14,7 @@ from assay.schemas import TestTypeAssignment
 from assay.schemas.statistics import (
     CallCount,
     Calls,
+    CheaperKind,
     CheckPlan,
     EntryPlan,
     Estimate,
@@ -21,7 +24,7 @@ from assay.schemas.statistics import (
     StatisticalTestKind,
     Warning_,
 )
-from assay.services.statistics import compute
+from assay.services.statistics import compute, odds
 from assay.services.statistics._scope import ResolvedScope, resolve_scope
 from assay.services.statistics.catalogue import (
     MAX_RUNS,
@@ -29,9 +32,12 @@ from assay.services.statistics.catalogue import (
     _invalid,
     check_times,
     load_entry,
+    often,
+    percent,
     resolve_parameters,
     sizing,
 )
+from assay.services.statistics.history import CheckHistory, load_history
 from assay.target_settings import resolve_target_settings
 
 
@@ -42,6 +48,9 @@ def applies(engine: StatisticalEngine, scope: ResolvedScope, entry: compute.Batc
     verdict the result won't give."""
     return compute.applies(engine, scope.types.get(assignment.name), entry.recorded_answer)
 
+
+# a check of the scope: its entry (None for a standalone test) and its label
+CheckKey = tuple[uuid.UUID | None, str]
 
 _NOTHING_APPLIES = {
     StatisticalEngine.one_sample_t:
@@ -72,13 +81,52 @@ async def estimate_batch(request: EstimateRequest, session: AsyncSession) -> Est
 
 
 async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
-                         times: int | None, scope: ResolvedScope,
-                         session: AsyncSession) -> Estimate:
+                         times: int | None, scope: ResolvedScope, session: AsyncSession,
+                         targets: dict[CheckKey, float] | None = None,
+                         leave_out: set[CheckKey] | None = None) -> Estimate:
+    """The estimate. `targets` sets a check's own target, `leave_out` drops
+    checks from the batch — both keyed by (entry id, label), the entry id
+    None for a standalone test."""
+    targets, leave_out = targets or {}, leave_out or set()
     engine = chosen.engine.id
     size = sizing(chosen, parameters)
+    confidence = parameters.get("confidence", 0.95)
+    batch_target = parameters.get("target")
+    histories = await load_history(scope.entries, session)
+    limit = odds.limit_for(scope.runs_per_time, MAX_RUNS)
+
+    entries, total, applicable, checks = [], 0, 0, {}
+    for entry in scope.entries:
+        plans = []
+        for assignment in entry.assignments:
+            key = (entry.entry_id, assignment.label)
+            does_apply, reason = applies(engine, scope, entry, assignment)
+            left_out = key in leave_out
+            if left_out:
+                does_apply, reason = False, "Left out of this batch"
+            target = targets.get(key, batch_target) if batch_target is not None else None
+            plans.append(CheckPlan(label=assignment.label, test_type=assignment.name,
+                                   applies=does_apply, reason=reason, target=target,
+                                   left_out=left_out))
+            total += 1
+            applicable += does_apply
+            if does_apply:
+                checks[key] = _odds_of(engine, scope, entry, assignment, target, confidence,
+                                       size.floor, histories.get(key))
+        entries.append(EntryPlan(
+            entry_id=entry.entry_id, test_id=entry.test_id, test_set_id=entry.test_set_id,
+            test_set_name=entry.test_set_name, name=entry.name,
+            recorded_answer=entry.recorded_answer, checks=plans,
+        ))
+    if applicable == 0:
+        raise _invalid([(("statistical_test",), _NOTHING_APPLIES.get(
+            engine, "Every check is left out: keep at least one"))])
+
+    found = (odds.plan(list(checks.values()), limit)
+             if all(check.known for check in checks.values()) else None)
     capped_from = None
     if times is None:
-        times = size.default
+        times = found.default if found is not None and found.default else size.default
         most = MAX_RUNS // scope.runs_per_time
         if times > most:
             # a default the scope can't run: the most it can, if that still
@@ -92,35 +140,18 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
                                  f"{size.floor * scope.runs_per_time} runs, more than the "
                                  f"{MAX_RUNS} a batch can create. Run it on a smaller set")])
             capped_from, times = times, most
-
-    entries, total, applicable = [], 0, 0
-    for entry in scope.entries:
-        checks = []
-        for assignment in entry.assignments:
-            does_apply, reason = applies(engine, scope, entry, assignment)
-            checks.append(CheckPlan(label=assignment.label, test_type=assignment.name,
-                                    applies=does_apply, reason=reason))
-            total += 1
-            applicable += does_apply
-        entries.append(EntryPlan(
-            entry_id=entry.entry_id, test_id=entry.test_id, test_set_id=entry.test_set_id,
-            test_set_name=entry.test_set_name, name=entry.name,
-            recorded_answer=entry.recorded_answer, checks=checks,
-        ))
-    if applicable == 0:
-        raise _invalid([(("statistical_test",), _NOTHING_APPLIES[engine])])
     check_times(times, scope.runs_per_time, size.floor, chosen, parameters)
 
     application_per_time = sum(not entry.recorded_answer for entry in scope.entries)
-    judge_per_time = sum(scope.is_judge(a) for entry in scope.entries for a in entry.assignments)
+    judge_per_time = sum(scope.is_judge(a) for entry in scope.entries for a in entry.assignments
+                         if (entry.entry_id, a.label) not in leave_out)
     rule = None
     if engine in (StatisticalEngine.binomial_gate, StatisticalEngine.judge_stability):
-        gate_rule = stats_math.binomial_gate_rule(
-            times, parameters["target"], parameters["confidence"])
+        gate_rule = stats_math.binomial_gate_rule(times, batch_target, confidence)
         rule = GateRuleSchema(times=times, pass_at_least=gate_rule.pass_at_least,
                               fail_at_most=gate_rule.fail_at_most)
 
-    return Estimate(
+    estimate = Estimate(
         scope=scope.scope, statistical_test=chosen.id, engine=engine, parameters=parameters,
         floor=size.floor, floor_explanation=size.explanation, suggestions=size.suggestions,
         times=times, rule=rule, runs_per_time=scope.runs_per_time,
@@ -131,8 +162,108 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
             judge=CallCount(per_time=judge_per_time, total=judge_per_time * times),
         ),
         checks_total=total, checks_applicable=applicable, entries=entries,
-        warnings=await _warnings(scope, total - applicable, session, times, capped_from),
+        warnings=await _warnings(scope, total - applicable - len(leave_out), session, times,
+                                 capped_from),
+        goal=odds.GOAL,
     )
+    _with_odds(estimate, chosen, checks, found, limit, size.floor)
+    return estimate
+
+
+def _odds_of(engine: StatisticalEngine, scope: ResolvedScope, entry: compute.BatchEntry,
+             assignment: TestTypeAssignment, target: float | None, confidence: float,
+             floor: int, history: CheckHistory | None) -> odds.CheckOdds:
+    """A check as the plan reads it. A recorded answer read by anything but a
+    judge gives the same result every run: certain."""
+    row = scope.types.get(assignment.name)
+    is_judge = scope.is_judge(assignment)
+    check = odds.CheckOdds(
+        entry_id=entry.entry_id, label=assignment.label, engine=engine,
+        confidence=confidence, target=target, history=history, is_judge=is_judge,
+        certain=entry.recorded_answer and not is_judge
+        and engine != StatisticalEngine.judge_stability, floor=floor)
+    if target is not None:
+        check.floor = stats_math.binomial_floor(target, confidence)
+    if engine == StatisticalEngine.one_sample_t:
+        check.threshold = compute.threshold_of(assignment)
+        check.higher_is_better = row is None or row.comparison is None or (
+            row.comparison.value == "gte")
+    return check
+
+
+def _with_odds(estimate: Estimate, chosen: CatalogueEntry,
+               checks: dict[CheckKey, odds.CheckOdds], found: odds.Plan | None, limit: int,
+               floor: int) -> None:
+    """Fill in what the history tells: per check its history, outlook and
+    odds alone; for the batch the curve, the sizes worth offering, and what
+    would make it cheaper. Without a history for every check, only the
+    per-check parts that exist."""
+    for entry in estimate.entries:
+        for plan in entry.checks:
+            check = checks.get((entry.entry_id, plan.label))
+            if check is None:
+                continue
+            plan.history = odds.history_out(check)
+            plan.outlook, plan.outlook_reason = odds.outlook(check)
+            plan.certain_result = check.certain_result
+            if check.known:
+                alone = odds.plan([check], limit)
+                plan.size_needed = alone.reaches
+                points = odds.curve(alone)
+                plan.best_chance = max((p.chance for p in points), default=None)
+    if found is None or not found.sizes:
+        return
+
+    estimate.goal_reachable = found.reaches is not None
+    points = odds.curve(found)
+    best = max(points, key=lambda p: (p.chance, -p.times))
+    estimate.best_chance, estimate.best_times = best.chance, best.times
+    estimate.odds = points
+    estimate.odds_summary = odds.summary(found)
+    estimate.suggestions = odds.suggestions(found, floor)
+    at = found.default
+    driving = min(checks.values(), key=lambda c: c.chance(at).answer) if at else None
+    if driving is not None and driving.chance(at).answer >= 0.999:
+        driving = None  # every check is as good as answered: nothing drives the size
+    estimate.driving_check = driving.ref if driving else None
+
+    minimum = {p.key: p.min for p in chosen.parameters}
+    everyone = list(checks.values())
+    for entry in estimate.entries:
+        for plan in entry.checks:
+            check = checks.get((entry.entry_id, plan.label))
+            if check is None or check.certain:
+                continue
+            worth_it = check is driving or plan.outlook in (odds.Outlook.too_close,
+                                                            odds.Outlook.likely_fail)
+            if not worth_it:
+                continue
+            others = [c for c in everyone if c is not check]
+            for target in odds.lower_targets(check, minimum.get("target", 0.0)):
+                lowered = check.with_(target=target, floor=stats_math.binomial_floor(
+                    target, check.confidence))
+                changed = odds.plan(others + [lowered], limit)
+                if not odds.helps(changed, found):
+                    continue
+                plan.cheaper.append(odds.option(
+                    CheaperKind.lower_target,
+                    f"{plan.label} at \"at least {often(target)}\": "
+                    f"{odds.option_words(changed)}", changed, check=check.ref, target=target))
+            without = odds.plan(others, limit) if others else None
+            if without is not None and odds.helps(without, found):
+                plan.cheaper.append(odds.option(
+                    CheaperKind.leave_out, f"Leave {plan.label} out: "
+                    f"{odds.option_words(without)}", without, check=check.ref,
+                    judge_calls_saved_per_time=int(check.is_judge)))
+    lower = odds.less_sure(everyone[0].confidence, minimum.get("confidence", 0.0))
+    if lower is not None:
+        relaxed = [c.with_(confidence=lower, floor=stats_math.binomial_floor(c.target, lower)
+                           if c.target is not None else c.floor) for c in everyone]
+        changed = odds.plan(relaxed, limit)
+        if odds.helps(changed, found):
+            estimate.cheaper.append(odds.option(
+                CheaperKind.less_sure, f"{percent(lower)} sure: {odds.option_words(changed)}",
+                changed, confidence=lower))
 
 
 async def _warnings(scope: ResolvedScope, not_applicable: int, session: AsyncSession,

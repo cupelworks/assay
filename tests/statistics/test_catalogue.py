@@ -103,7 +103,8 @@ def test_a_new_row_on_an_existing_engine_is_a_new_test(db):
 
 def test_the_t_tests_floor_and_comfortable_size_come_from_its_row(db):
     _edit(db, "one_sample_t", engine_settings={"floor": 20, "recommended_times": 40})
-    test = db.test(checks=[{"name": "ROUGE", "config": {"threshold": "0.5"}}])
+    # no recorded answer and no history: the sizes come from the row alone
+    test = db.test(model_output=None, checks=[{"name": "ROUGE", "config": {"threshold": "0.5"}}])
 
     estimate = db.client.post("/statistics/estimate", json={
         "test_id": test["id"], "statistical_test": "one_sample_t"}).json()
