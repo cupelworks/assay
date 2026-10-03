@@ -382,3 +382,50 @@ def test_runs_needed_for_means():
     # 2 · ((1.96 + 0.8416) · 0.1 / 0.05)² = 62.8
     assert m.runs_needed_for_means(0.1, 0.05, 0.95) == 63
     assert m.runs_needed_for_means(0.1, 0.0, 0.95) is None
+
+
+# --- the odds of an answer before running (notes 30-32) ---
+
+
+def test_the_beta_binomial_sums_to_one_and_matches_its_mean():
+    pmf = m.beta_binomial_pmf(50, 39, 3)
+
+    assert sum(pmf) == pytest.approx(1.0)
+    assert sum(k * p for k, p in enumerate(pmf)) == pytest.approx(50 * 39 / 42)
+
+
+@pytest.mark.parametrize("n,passed,failed,chance", [
+    (29, 40, 0, 0.587), (142, 40, 0, 0.907), (179, 38, 2, 0.574), (239, 38, 2, 0.629),
+])
+def test_the_averaged_chance_of_an_answer_matches_numerical_integration(n, passed, failed,
+                                                                          chance):
+    # the figures of note 32, checked there against a 400-point integration
+    assert m.gate_answer_chance(n, 0.9, 0.95, passed, failed).answer == pytest.approx(
+        chance, abs=0.001)
+
+
+def test_the_averaged_chance_splits_into_passes_and_fails():
+    chance = m.gate_answer_chance(179, 0.9, 0.95, 38, 2)
+
+    assert (round(chance.passes, 3), round(chance.fails, 3)) == (0.503, 0.071)
+    assert chance.undecided == pytest.approx(1 - chance.passes - chance.fails)
+
+
+def test_below_the_floor_nothing_can_pass():
+    assert m.gate_answer_chance(28, 0.9, 0.95, 40, 0).passes == 0.0
+
+
+def test_the_chance_a_rate_clears_its_target():
+    assert m.rate_at_least(0.9, 38, 2) == pytest.approx(0.79, abs=0.01)
+    assert m.rate_at_least(0.9, 40, 0) > 0.98
+    assert m.rate_at_least(0.9, 30, 10) < 0.01
+
+
+def test_the_t_tests_chance_is_certain_without_spread_and_grows_with_the_gap():
+    assert m.mean_answer_chance(10, 0.7, 0.0, 10, 0.5, True, 0.95).passes == 1.0
+    assert m.mean_answer_chance(10, 0.5, 0.0, 10, 0.5, True, 0.95).answer == 0.0
+    near = m.mean_answer_chance(30, 0.52, 0.1, 40, 0.5, True, 0.95).answer
+    far = m.mean_answer_chance(30, 0.62, 0.1, 40, 0.5, True, 0.95).answer
+    assert near < far
+    lower_better = m.mean_answer_chance(30, 0.38, 0.1, 40, 0.5, False, 0.95)
+    assert lower_better.passes > 0.9

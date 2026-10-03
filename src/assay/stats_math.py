@@ -1036,3 +1036,94 @@ def runs_needed_for_means(spread: float, difference: float, confidence: float,
         return None
     z = z_quantile(1 - (1 - confidence) / 2) + z_quantile(power)
     return max(2, math.ceil(2 * (z * spread / abs(difference)) ** 2))
+
+
+# ── the odds of an answer, before running ────────────────────────────────────
+#
+# How likely a batch of n runs is to give a check an answer at all (pass or
+# fail, rather than inconclusive), given what earlier runs showed. The rate
+# isn't known, only what `passed` of `passed + failed` runs suggest; the chance
+# is averaged over every rate those runs leave possible — a Beta(passed + 1,
+# failed + 1) belief, the uniform prior updated by the history. Averaging the
+# binomial over a Beta is the beta-binomial distribution, so the averaged
+# chance is exact: two beta-binomial tails at the gate's rule.
+
+
+def beta_binomial_pmf(n: int, a: float, b: float) -> list[float]:
+    """P(X = k) for k = 0..n, X ~ BetaBinomial(n, a, b): the number of passes
+    in n runs when the pass rate is Beta(a, b)."""
+    if n < 0 or a <= 0 or b <= 0:
+        raise ValueError("n must be non-negative and a, b positive")
+    log_beta_ab = math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
+    return [math.exp(_log_comb(n, k) + math.lgamma(k + a) + math.lgamma(n - k + b)
+                     - math.lgamma(n + a + b) - log_beta_ab) for k in range(n + 1)]
+
+
+@dataclass(frozen=True)
+class AnswerChance:
+    """What a batch of `n` runs would most likely say about one check: the
+    chance it passes, fails, or stays undecided. `answer` = passes + fails."""
+    n: int
+    passes: float
+    fails: float
+
+    @property
+    def answer(self) -> float:
+        return self.passes + self.fails
+
+    @property
+    def undecided(self) -> float:
+        return max(0.0, 1.0 - self.passes - self.fails)
+
+
+def gate_answer_chance(n: int, target: float, confidence: float, passed: int,
+                       failed: int) -> AnswerChance:
+    """The averaged chance that the gate at n runs passes and that it fails,
+    for a check that passed `passed` of `passed + failed` earlier runs: both
+    tails of BetaBinomial(n, passed + 1, failed + 1) at the gate's rule.
+
+    40 of 40 passed, 9 in 10, 95% sure: 58.7% at 29 runs, 90.7% at 142.
+    38 of 40: 57.4% at 179 — the history can't rule out a rate near 0.9.
+    """
+    if passed < 0 or failed < 0:
+        raise ValueError("Counts can't be negative")
+    rule = binomial_gate_rule(n, target, confidence)
+    if n <= 0:
+        return AnswerChance(n=n, passes=0.0, fails=0.0)
+    pmf = beta_binomial_pmf(n, passed + 1, failed + 1)
+    passes = sum(pmf[rule.pass_at_least:]) if rule.pass_at_least is not None else 0.0
+    fails = (sum(pmf[:rule.fail_at_most + 1])
+             if rule.fail_at_most is not None and rule.fail_at_most >= 0 else 0.0)
+    return AnswerChance(n=n, passes=min(1.0, passes), fails=min(1.0, fails))
+
+
+def rate_at_least(target: float, passed: int, failed: int) -> float:
+    """The chance the check's true rate is at least `target`, given its
+    history: 1 − I_target(passed + 1, failed + 1). 38 of 40 against 0.9: 0.79."""
+    _check_target(target)
+    return 1.0 - regularized_incomplete_beta(passed + 1, failed + 1, target)
+
+
+def mean_answer_chance(n: int, mean: float, sd: float, history_runs: int, threshold: float,
+                       higher_is_better: bool, confidence: float) -> AnswerChance:
+    """The one-sample t-test's chance of passing and failing at n scores, for
+    a check whose `history_runs` earlier scores averaged `mean` with spread
+    `sd`. Approximate: the spread is taken as known, the true mean as
+    uncertain by the history's standard error (sd / √history_runs); a batch's
+    mean is then normal around the history's with variance sd²(1/n +
+    1/history_runs), and the test passes when it lands a t-bound past the
+    threshold. A spread of 0 (every score the same) is certain either way,
+    and undecidable exactly on the threshold."""
+    if n < 2 or history_runs < 1:
+        return AnswerChance(n=n, passes=0.0, fails=0.0)
+    sign = 1.0 if higher_is_better else -1.0
+    gap = sign * (mean - threshold)  # > 0: on the passing side
+    if sd <= 0:
+        if gap == 0:
+            return AnswerChance(n=n, passes=0.0, fails=0.0)
+        return AnswerChance(n=n, passes=float(gap > 0), fails=float(gap < 0))
+    bound = t_quantile(confidence, n - 1) * sd / math.sqrt(n)
+    spread = sd * math.sqrt(1 / n + 1 / history_runs)
+    passes = normal_sf((bound - gap) / spread)
+    fails = normal_sf((bound + gap) / spread)
+    return AnswerChance(n=n, passes=passes, fails=fails)
