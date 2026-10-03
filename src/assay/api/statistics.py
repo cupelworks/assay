@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.api import _statistics_examples as computed
+from assay.api._estimate_example import WITH_HISTORY as _ESTIMATE_WITH_HISTORY
 from assay.db import get_session
 from assay.schemas.statistics import (
     BatchDetails,
@@ -272,14 +273,21 @@ async def list_statistical_tests(
     responses={
         200: {
             "description": (
-                "What a batch of this scope and test would need and cost. **Nothing is "
-                "created.** `floor` is the least that can conclude, `suggestions` the sizes "
-                "worth offering (one marked `default`), `rule` what the binomial gate "
-                "decides at `times`, `calls` what the batch pays for, `entries` which "
-                "checks get a verdict, and `warnings` what to know before confirming."
+                "What a batch of this scope and test would need and cost, planned from what "
+                "the checks have already shown. **Nothing is created.** With a history for "
+                "every check: each size's `chance` of an answer, the `odds` curve, the "
+                "default size for a `goal` chance (or the one worth its cost when no size "
+                "reaches it, `odds_summary` saying so), each check's `outlook`, the "
+                "`driving_check` and what would make it `cheaper`. Without: the plain sizes "
+                "and a `trial` to run first. Always: `floor`, `rule`, `calls`, `entries`, "
+                "`warnings`."
             ),
             "content": {"application/json": {"examples": {
-                "gate": {"summary": "A binomial gate on a test set", "value": _ESTIMATE_GATE},
+                "with_history": {"summary": "Planned from 40 runs of history: the goal "
+                                            "is out of reach, the size worth its cost",
+                                 "value": _ESTIMATE_WITH_HISTORY},
+                "gate": {"summary": "Nothing has run yet: the plain sizes, and a trial first",
+                         "value": _ESTIMATE_GATE},
                 "t_test": {"summary": "A t-test on a test with a recorded answer",
                            "value": _ESTIMATE_T},
             }}},
@@ -292,9 +300,11 @@ async def list_statistical_tests(
                 "once, each `loc` pointing at the field: not exactly one of `test_id` / "
                 "`test_set_id` / `test_plan_id`; a comparison test (`pass_rates`) instead of a "
                 "batch test; an unknown parameter or one out of range; `times` below the "
-                "floor, above `max_times`, or creating more than `max_runs` runs; parameters "
-                "whose floor is above `max_times`; or a t-test on a scope with no scored "
-                "check."
+                "floor, above `max_times` (50 for a trial), or creating more than `max_runs` "
+                "runs; parameters whose floor is above `max_times`; a t-test on a scope with "
+                "no scored check; or `targets` / `leave_out` that don't fit the scope (an "
+                "unknown check, a target out of range or on a test without one, a target "
+                "set twice, an entry with every check left out)."
             ),
             "content": {"application/json": {"examples": {
                 "below_floor": {"summary": "Fewer times than the floor", "value":
@@ -334,30 +344,56 @@ async def estimate(request: EstimateRequest, session: SessionDep) -> Estimate:  
 
     Send the scope (exactly one of `test_id`, `test_set_id`, `test_plan_id`), a batch
     test from `GET /statistics/tests`, its `parameters` (any left out take their
-    default), and optionally `times`. The answer:
+    default), and optionally `times`, `targets` and `leave_out`.
 
-    - **`floor`** — the fewest times the test can conclude anything at, with
-      `floor_explanation` in plain words for these parameters.
-    - **`suggestions`** — sizes worth offering. For the binomial gate: the floor (no miss
-      allowed), one more (absorbs one run that can't be evaluated, e.g. an application
-      timeout, without costing the verdict), and the size that allows one miss. For the
-      t-test: its floor, the size that sees your `difference` 80% of the time (at most
-      the 1,000 a batch can run — the label says when it's capped), and 30. The one marked
-      `default` is used when `times` is left out; if it would create more runs than a
-      batch may for this scope, the estimate is for the most it can run instead, with a
-      `times_capped` warning.
-    - **`rule`** — for the binomial gate (and judge stability, on agreement), what decides
-      at `times`: at least `pass_at_least` passes (per check) pass, at most `fail_at_most`
-      fail, anything between is inconclusive. Computed here so the UI never recomputes the
-      binomial. Null for the t-test.
-    - **`calls`** — what it pays for, per time and in total: one application call per
-      run of an entry with no recorded answer, one judge call per LLM-judge check per
-      run. Retries aren't counted.
-    - **`entries`** — every entry the batch would run (one for a standalone test), each
-      check with whether the test applies to it (a t-test only applies to checks scored
-      on a scale; the others still show their pass rate, without a verdict).
-    - **`warnings`** — e.g. recorded answers (only judge checks can vary, so a batch over
-      them mostly repeats one run), no judge or application configured.
+    **Planned from history.** Each check's history is its most recent runs (up to 200)
+    that asked the same question and gave it a result — a set entry's runs, or a
+    standalone test's runs since its last edit; Not Ran runs and errored results don't
+    count. When every check has one, the estimate says how likely each size is to give
+    every check an answer, averaged over what the checks' true rates could be — so it's
+    honest about how little a short history proves:
+
+    - **`suggestions`** — the floor, then the fewest times with a **`goal`** (90%) chance
+      that every check gets an answer (`reaches_goal`, the default); when no size within
+      one batch reaches it, the fewest within 5 points of the best (`worth_its_cost`, the
+      default) and the best (`best_chance`). Each with its `chance`, `failures_allowed`
+      (at the batch's target), the `outcome` it would most likely end in (`passed` /
+      `inconclusive` / `failed`) and the check most likely to stay undecided.
+    - **`goal_reachable`**, **`best_chance`** / **`best_times`**, and **`odds_summary`**,
+      the odds in one sentence to show as it is.
+    - **`odds`** — the chart: the chance that every check answers, at each size where one
+      more failure becomes allowed (the curve's peaks).
+    - **`driving_check`** — the check that needs the most runs: where to act.
+    - Per check (`entries[].checks[]`): **`history`**, **`outlook`** (`likely_pass`,
+      `likely_fail`, `too_close` to call, `unknown`, `certain`) with `outlook_reason`,
+      **`size_needed`** and **`best_chance`** alone, and **`cheaper`**: a lower target
+      for this check, or leaving it out — each with the size the batch would then default
+      to, its chance, and its ceiling (`best_chance`, `best_times`).
+    - **`cheaper`** (the batch): one step less sure, and, when no single change reaches
+      the goal, the fewest checks to leave out together.
+
+    A recorded answer read by anything but a judge can't vary: `certain`, answered by the
+    floor, and nothing is cheaper than running it once.
+
+    **Without a history for every check**, the sizes are the plain ones: for the binomial
+    gate the floor (no failure allowed), one more (absorbs a run that can't be
+    evaluated), and the size that allows one failure; for the t-test its floor, the size
+    that sees your `difference`, and 30. And **`trial`** offers a trial to run first —
+    `statistical_test: "trial"`, 10 times, no verdict — whose runs become the history.
+
+    **Per-check choices**: **`targets`** gives one check its own target (`{entry_id,
+    label, target}`; `entry_id` null for a standalone test) and **`leave_out`** drops
+    checks from the batch (`{entry_id, label}`): their runs skip them, so their judge
+    calls aren't made. The estimate reflects both; `floor` follows the targets in play.
+
+    Always:
+    - **`floor`** and `floor_explanation`; **`times`** — yours, or the default (capped,
+      with a `times_capped` warning, if it would create more runs than a batch may);
+    - **`rule`** — for a target test, what decides at `times` (at least `pass_at_least`
+      passes pass, at most `fail_at_most` fail);
+    - **`calls`** — application and judge calls per time and in total;
+    - **`entries`** — every entry and check, and whether the test applies to it;
+    - **`warnings`** — recorded answers, nothing configured, checks the test can't judge.
 
     A test set or plan is resolved as it is **now**: entries added later aren't in a
     batch created from this estimate's numbers unless you estimate again.
@@ -659,9 +695,13 @@ _CREATE_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
     or out with `?batch=`). A replay of one of them is an ordinary replay, outside the batch.
 
     The body is the estimate's — send the same body to `POST /statistics/estimate` first to
-    show the cost — plus an optional `note`. `times` left out takes the estimate's default
-    suggestion. The guards are the estimate's, so what it shows is exactly what this
-    creates: the scope's own run guards (404, 409), then the parameters and size (422).
+    show the cost and the odds — plus an optional `note`. `times` left out takes the
+    estimate's default. `targets` and `leave_out` are kept with the batch (shown back on
+    every read, for "run again") and honoured: each check is judged at its own target, and
+    a left-out check is skipped by every run and gets no verdict. `statistical_test:
+    "trial"` runs a trial: no verdict, it ends `Done`. The guards are the estimate's, so
+    what it shows is exactly what this creates: the scope's own run guards (404, 409),
+    then the parameters, the size and the per-check choices (422).
 
     Every run is paid for (application calls for entries with no recorded answer, judge
     calls for LLM checks): the response's `progress.calls.*.planned` repeats the bill. A

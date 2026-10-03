@@ -150,3 +150,23 @@ def test_nothing_is_cheaper_when_nothing_can_vary(db):
     assert estimate["cheaper"] == []
     assert estimate["entries"][0]["checks"][0]["cheaper"] == []
     assert estimate["entries"][0]["checks"][0]["certain_result"] == "pass"
+
+
+def test_the_swagger_example_with_history_is_a_real_response(db, state_a):
+    from assay.api._estimate_example import ODDS_EVERY, WITH_HISTORY
+
+    db.client.patch("/settings/target", json={"url": "http://app.test/chat"})
+    db.client.patch("/settings/judge", json={"provider": "anthropic", "model": "m"})
+    real = _estimate(db, state_a)
+    real["odds"] = [p for i, p in enumerate(real["odds"])
+                    if i % ODDS_EVERY == 0 or p["times"] == real["best_times"]]
+
+    def blank(estimate):
+        text = str(estimate)
+        entry = estimate["entries"][0]
+        for value in (entry["entry_id"], entry["test_id"], entry["test_set_id"],
+                      estimate["scope"]["id"]):
+            text = text.replace(str(value), "<id>")
+        return text
+
+    assert blank(real) == blank(WITH_HISTORY)

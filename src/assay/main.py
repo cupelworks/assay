@@ -56,19 +56,32 @@ default, or any other part of your application's reply you point it at (`answer_
   (nothing could be attempted), with the result of each check kept alongside. Every run
   keeps a record of the test exactly as it was run, so editing a test later never changes
   a past run's history.
-- **Run with statistics** — run a test, set or plan *N times* as one batch and answer with
-  a stated confidence: "95% confident each check passes at least 90% of the time" (the
-  binomial gate) or "the mean ROUGE is above its threshold" (the one-sample t-test), with
-  the cost estimated first, a Stop control, and chart-ready results. Two batches compare
-  check by check: "did my change help?"
+- **Run with statistics** — one run can pass by luck; run a test, set or plan *N times* as
+  one batch and get an answer you can rely on, in plain words: "Passed 29 of 29 runs: it
+  passes at least 9 times in 10 (95% sure)". Pick a question from the catalogue —
+  *Passes reliably*, *Scores high enough on average*, *The judge is consistent* — and the
+  estimate plans the batch from what the checks have already shown: each size's chance of
+  an answer, the size worth paying for, which check drives the cost and what would make
+  it cheaper (a check's own target, leaving a check out, a little less certainty). A check
+  that has never run gets a short *trial* first. Every batch is paid for, so the cost is
+  always shown before anything runs; a Stop control and chart-ready results follow. Two
+  batches compare check by check: *Did it get better?*, *Is it still as good?*
 - **Settings** — how Assay calls your application (URL, headers, request body, where the
-  answer is in the reply), saved from the UI; and *checks* that make one call through a
-  worker to confirm the settings work before any run depends on them.
+  answer is in the reply) and which model judges the LLM checks, saved from the UI; and
+  *checks* that make one call through a worker to confirm the settings work before any
+  run depends on them.
 
 **Conventions.** List endpoints paginate with `offset`/`limit` and always return `total`.
 Every response carries an `X-Request-ID` header — send your own to have it reused — and a
 500 also returns it in the body: quote it when reporting a problem. Errors use
-`{"detail": ...}`.
+`{"detail": ...}`; a request that doesn't validate gets FastAPI's list, every problem at
+once, each `loc` pointing at its field.
+
+**Versions.** From 1.0.0 the API follows semantic versioning: a change that can break a
+client — a field removed or renamed, a meaning changed, an endpoint gone — raises the
+major version; new endpoints and new fields raise the minor; fixes raise the patch. New
+fields can appear in any minor version, so read responses tolerantly. `GET /health/worker`
+reports the version every worker runs beside the API's.
 """
 
 
