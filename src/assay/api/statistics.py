@@ -223,13 +223,19 @@ async def list_statistical_tests(
     checks. So it's always a deliberate choice, and the estimate (`POST
     /statistics/estimate`) shows the cost before anything is created.
 
-    Two kinds of test:
+    Two kinds of test (seeded rows; the names are the catalogue's own, in plain words):
     - **`batch`** — run as a batch (`POST /statistics/batches`):
-      - **binomial gate** — does each check pass at least a target share of the time?
-      - **one-sample t-test** — is each scored check's average on the passing side of its
-        threshold?
-      - **judge stability** — does each LLM judge give the same verdict on the same recorded
-        answer at least a target share of the time? (judge checks of recorded answers only)
+      - **Passes reliably** (`binomial_gate`) — does each check pass at least a target share
+        of the time?
+      - **Scores high enough on average** (`one_sample_t`) — is each scored check's average
+        on the passing side of its threshold?
+      - **The judge is consistent** (`judge_stability`) — does each LLM judge give the same
+        verdict on the same recorded answer? (judge checks of recorded answers only)
+      - **Learn how it behaves** (`trial`) — a few runs with no verdict, so the next batch
+        can be planned from them; a trial ends `Done`.
+      - **…until there's an answer** (`sequential_gate`, `sequential_judge_stability`) — the
+        first and third questions run in waves up to a maximum, stopping as soon as every
+        check has its answer; `times` is the maximum.
     - **`comparison`** — reads two finished batches of the same scope (`POST
       /statistics/comparisons`), A the baseline and B the change:
       - **pass rates, A against B** — did a check pass more or less often?
@@ -240,7 +246,8 @@ async def list_statistical_tests(
       - **paired by entry** — on the same entries, did B do better? One verdict over every
         (entry, check) pair: the strongest "did my change help?" for a test set.
 
-    `wave` says which build wave a test came in (1 or 2); both are available.
+    `wave` says which build wave a test came in (1, 2, or 3 for the trial and "until
+    there's an answer"); all are available.
 
     **The catalogue is a table**, like the check types: each row names the `engine` in code
     that does its arithmetic and carries the texts, each parameter's default and range, and
@@ -637,14 +644,20 @@ _BATCH_ANATOMY = """
   size — a bigger batch would decide the undecided), `Incomplete` (stopped before every run
   ran) or `NotRan` (nothing could be decided: every run Not Ran — e.g. no application
   configured — or every check errored in every run — e.g. no judge chosen; fix that first,
-  a bigger batch wouldn't help). `Passed` and `Failed` are a batch's words, never a run's:
-  a run stays `Green`/`Amber`/`Red`.
+  a bigger batch wouldn't help); a trial ends `Done` (no question, no verdict). `Passed`
+  and `Failed` are a batch's words, never a run's: a run stays `Green`/`Amber`/`Red`. A
+  batch that runs until there's an answer stays `Running` between its waves, and ends
+  `Passed` or `Failed` as soon as every check has its answer — `Inconclusive` only at its
+  maximum.
 - **`progress`** — `times_done` of `times_requested` (a time is done when all its runs are),
   `runs_done` of `runs_total`, runs by status, and `calls`: application and judge calls
   `planned`, `finished` and `in_flight` — what's been spent, for the Stop decision. While
   the batch runs, this read also carries `progress.entries`: the runs matrix as it fills
   in (one row per entry, each run's `status` by time, with `run_id` to open it) — statuses
   only, no verdicts. It's null in lists, with `series=false`, and once there is a result.
+  For a batch that runs until there's an answer, `progress.waves`: waves `released` of
+  `planned`, the `looks` (where each wave ends), `closed`, `stopped_early`.
+- **`targets`** and **`leave_out`** — the per-check choices it was created with.
 - **`result`** — null until every run has finished: there are **no verdicts mid-batch**
   (an interim verdict invites stopping on a lucky streak). The first read that finds every
   run finished computes it and stores it; later reads return exactly the same.
@@ -935,7 +948,9 @@ async def stop_statistical_batch(
     evaluated runs still reach the test's `floor`. The status stays `Incomplete` either
     way — the batch didn't run what was asked.
 
-    Stopping a batch that has nothing left pending changes nothing and returns it.
+    Stopping a batch that has nothing left pending changes nothing and returns it — except
+    a batch that runs until there's an answer, between two waves: it releases no more
+    waves, and is `Incomplete`.
     """
     return await stop_batch(batch_id, session)
 
