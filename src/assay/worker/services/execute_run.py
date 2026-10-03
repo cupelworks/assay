@@ -133,6 +133,11 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     # than by the broader try/except above. A failed result is still stamped
     # with the engine the row named (None only if the type isn't in the
     # catalogue at all), so it records what *would* have scored it.
+    # a statistical batch's left-out checks aren't evaluated at all: no result,
+    # and no judge call made for them
+    skipped = set(run.skip_labels or [])
+    resolved = [(assignment, row) for assignment, row in resolved
+                if assignment.label not in skipped]
     judge, judge_problem = _judge_settings(resolved, session)
     results: dict[str, TestTypeResult] = {}
     for assignment, catalogue_row in resolved:

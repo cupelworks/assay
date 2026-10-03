@@ -18,7 +18,7 @@ from assay.services.runs.create_new_run import (
 from assay.services.statistics._batches import describe
 from assay.services.statistics._scope import resolve_scope
 from assay.services.statistics.catalogue import load_entry, resolve_parameters
-from assay.services.statistics.estimate import build_estimate
+from assay.services.statistics.estimate import build_estimate, resolve_overrides
 from assay.services.tests._common import _find_all_tests_with_details_or_404
 
 logger = logging.getLogger(__name__)
@@ -41,8 +41,22 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
     chosen = await load_entry(request.statistical_test, StatisticalTestKind.batch, session)
     parameters = resolve_parameters(chosen, request.parameters)
     scope = await resolve_scope(request, session)
-    estimate = await build_estimate(chosen, parameters, request.times, scope, session)
+    targets, leave_out = resolve_overrides(request, chosen, scope)
+    estimate = await build_estimate(chosen, parameters, request.times, scope, session,
+                                    targets=targets, leave_out=leave_out)
     times = estimate.times
+    overrides = None
+    if targets or leave_out:
+        overrides = {
+            "targets": [{"entry_id": str(entry) if entry else None, "label": label,
+                         "target": target} for (entry, label), target in targets.items()],
+            "leave_out": [{"entry_id": str(entry) if entry else None, "label": label}
+                          for entry, label in sorted(leave_out, key=str)],
+        }
+    # what each entry's runs skip: its left-out checks
+    skips: dict = {}
+    for entry_id, label in leave_out:
+        skips.setdefault(entry_id, []).append(label)
 
     batch = StatisticalBatchModel(
         id=uuid.uuid4(), test_id=request.test_id, test_set_id=request.test_set_id,
@@ -53,6 +67,7 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
               "calls_per_time": {"application": estimate.calls.application.per_time,
                                  "judge": estimate.calls.judge.per_time}},
         note=(request.note or "").strip() or None, status=BatchStatus.pending,
+        overrides=overrides,
     )
     session.add(batch)
     await session.flush()
@@ -71,6 +86,8 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
                                          batch_index=index)
             executions.append(execution)
             runs.extend(time_runs)
+    for run in runs:
+        run.skip_labels = sorted(skips.get(run.test_set_entry_id, [])) or None
     session.add_all(executions)
     session.add_all(runs)
     await session.commit()

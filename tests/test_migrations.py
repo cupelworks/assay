@@ -1650,3 +1650,19 @@ def test_downgrade_brings_the_statisticians_words_back(scratch):
     assert texts["one_sample_t"]["parameters"]["difference"]["label"] == (
         "Smallest gap worth detecting")
     assert "0.9^29" in texts["binomial_gate"]["floor"]
+
+
+# --- c5d7e9a1b3f4: a batch's overrides, the checks a run skips ---
+
+
+def test_overrides_and_skipped_labels_come_and_go(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "c5d7e9a1b3f4")
+
+    assert "overrides" in _table_columns(db_path, "statistical_batches")
+    assert "skip_labels" in _table_columns(db_path, "test_runs")
+
+    command.downgrade(config, "b2e8f4a6c0d3")
+
+    assert "overrides" not in _table_columns(db_path, "statistical_batches")
+    assert "skip_labels" not in _table_columns(db_path, "test_runs")

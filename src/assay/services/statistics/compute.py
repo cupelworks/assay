@@ -12,6 +12,7 @@ The fold, per entry and per check (by label, the check's identity):
 - the rest is the sample: passed or failed, with a score for scored checks.
 """
 import math
+import uuid
 from dataclasses import dataclass, field
 
 from assay import stats_math
@@ -41,6 +42,18 @@ from assay.schemas.statistics import (
 from assay.services.statistics.catalogue import MAX_TIMES, POWER, often, sure
 
 NO_RESULT = "No result for this check in this run"
+LEFT_OUT = "Left out of this batch"
+
+
+def read_overrides(stored: dict | None) -> tuple[dict[tuple, float], set[tuple]]:
+    """A batch's stored overrides as lookups by (entry id, label) — the entry
+    id a UUID, None for a standalone test."""
+    def key(item: dict) -> tuple:
+        entry = item.get("entry_id")
+        return (uuid.UUID(str(entry)) if entry else None, item["label"])
+    stored = stored or {}
+    return ({key(item): float(item["target"]) for item in stored.get("targets", [])},
+            {key(item) for item in stored.get("leave_out", [])})
 
 
 @dataclass(frozen=True)
@@ -311,14 +324,21 @@ def _no_verdict(reason: str, n: int) -> Statistic:
 
 def check_result(name: StatisticalEngine, parameters: dict[str, float], floor: int,
                  stopped: bool, assignment: TestTypeAssignment, row: TestTypesModel | None,
-                 runs: list[BatchRun], recorded_answer: bool = True) -> CheckResult:
-    confidence = parameters["confidence"]
+                 runs: list[BatchRun], recorded_answer: bool = True,
+                 target: float | None = None, left_out: bool = False) -> CheckResult:
+    """One check's result. `target` is its own target when the batch set one
+    (else the batch's); `left_out` marks a check the batch's runs skipped."""
+    confidence = parameters.get("confidence", 0.95)
     series, counts = fold(runs, assignment.label)
     decided = [p for p in series if p.passed is not None]
     passed = counts.passed
     is_gate = name == StatisticalEngine.binomial_gate
     is_stability = name == StatisticalEngine.judge_stability
-    target = parameters["target"] if is_gate or is_stability else None
+    if is_gate or is_stability:
+        target = target if target is not None else parameters["target"]
+        floor = stats_math.binomial_floor(target, confidence)
+    else:
+        target = None
 
     pass_rate = None
     if decided:
@@ -344,6 +364,8 @@ def check_result(name: StatisticalEngine, parameters: dict[str, float], floor: i
                                   median=r4(s.median), p75=r4(s.p75), p90=r4(s.p90))
 
     does_apply, why_not = applies(name, row, recorded_answer)
+    if left_out:
+        does_apply, why_not = False, LEFT_OUT
     statistic = agreement = None
     if does_apply:
         n = len(scores) if name == StatisticalEngine.one_sample_t else len(decided)
@@ -448,12 +470,17 @@ def failures_by_entry(entries: list[BatchEntry], confidence: float) -> FailuresB
 
 def compute(name: StatisticalEngine, parameters: dict[str, float], floor: int,
             stopped: bool, entries: list[BatchEntry], types: dict[str, TestTypesModel],
-            computed_at) -> BatchResult:
-    """The result of a batch none of whose runs is Pending or Running."""
+            computed_at, overrides: dict | None = None) -> BatchResult:
+    """The result of a batch none of whose runs is Pending or Running.
+    `overrides` is the batch's per-check targets and left-out checks, as
+    stored."""
+    targets, left_out = read_overrides(overrides)
     results = []
     for entry in entries:
         checks = [check_result(name, parameters, floor, stopped, assignment,
-                               types.get(assignment.name), entry.runs, entry.recorded_answer)
+                               types.get(assignment.name), entry.runs, entry.recorded_answer,
+                               target=targets.get((entry.entry_id, assignment.label)),
+                               left_out=(entry.entry_id, assignment.label) in left_out)
                   for assignment in entry.assignments]
         results.append(EntryResult(
             entry_id=entry.entry_id, test_id=entry.test_id, test_set_id=entry.test_set_id,

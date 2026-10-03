@@ -244,6 +244,21 @@ class StatisticalTestCatalogue(BaseModel):
 # ── the estimate ─────────────────────────────────────────────────────────────
 
 
+class CheckRef(BaseModel):
+    """One check of the scope: its entry (null for a standalone test) and its
+    label."""
+    model_config = ConfigDict(extra="forbid")
+
+    entry_id: uuid.UUID | None = Field(
+        default=None, description="The test set entry; null for a standalone test.")
+    label: str = Field(description="The check's label within its test.")
+
+
+class CheckTarget(CheckRef):
+    """A check's own target, instead of the batch's."""
+    target: float = Field(description="The check's target, within the parameter's range.")
+
+
 class EstimateRequest(ScopeRequest):
     """POST /statistics/estimate: what a batch would need and cost. Nothing is
     created."""
@@ -273,6 +288,18 @@ class EstimateRequest(ScopeRequest):
         description="How many times to run the scope. Left out: the suggestion marked "
                     "`default`.",
     )
+    targets: list[CheckTarget] = Field(
+        default_factory=list,
+        description="Checks with their own target instead of the batch's (\"Relevance at 8 "
+                    "in 10\"), for a test with a target. Each must name a check of the scope, "
+                    "once.",
+    )
+    leave_out: list[CheckRef] = Field(
+        default_factory=list,
+        description="Checks to leave out of the batch: its runs skip them (their judge "
+                    "calls aren't made) and they get no verdict. Each entry keeps at least "
+                    "one check.",
+    )
 
 
 class SuggestionKind(StrEnum):
@@ -285,14 +312,6 @@ class SuggestionKind(StrEnum):
     worth_its_cost = "worth_its_cost"
     best_chance = "best_chance"
     trial = "trial"
-
-
-class CheckRef(BaseModel):
-    """One check of the scope: its entry (null for a standalone test) and its
-    label."""
-    entry_id: uuid.UUID | None = Field(
-        default=None, description="The test set entry; null for a standalone test.")
-    label: str = Field(description="The check's label within its test.")
 
 
 class OutcomeSplit(BaseModel):
@@ -405,13 +424,24 @@ class CheaperOption(BaseModel):
     )
     label: str = Field(description="The option in plain words, to show as it is.")
     check: CheckRef | None = Field(
-        default=None, description="The check it changes; null for `less_sure`.")
+        default=None,
+        description="The check it changes; null for `less_sure` and for a leave-out of "
+                    "several checks (see `checks`).")
+    checks: list[CheckRef] = Field(
+        default_factory=list,
+        description="For a batch-level `leave_out`: the checks left out together — the "
+                    "fewest that reach the goal when no single change does. Empty otherwise.")
     target: float | None = Field(default=None, description="For `lower_target`: the target.")
     confidence: float | None = Field(
         default=None, description="For `less_sure`: the confidence level.")
     times: int = Field(description="The size the batch would then default to.")
     chance: float = Field(description="Its chance that every check gets an answer.")
     reaches_goal: bool = Field(description="Whether that chance reaches the goal.")
+    best_chance: float = Field(
+        default=0.0,
+        description="The best chance the change can get within one batch — the ceiling, "
+                    "when it doesn't reach the goal.")
+    best_times: int = Field(default=0, description="The size with `best_chance`.")
     judge_calls_saved_per_time: int = Field(
         default=0, description="For `leave_out`: judge calls one time no longer makes.")
 
@@ -942,6 +972,10 @@ class BatchSummary(BaseModel):
     completed_at: datetime | None = Field(
         description="When the result was computed: every run had finished.",
     )
+    targets: list[CheckTarget] = Field(
+        default_factory=list, description="Checks run with their own target, as requested.")
+    leave_out: list[CheckRef] = Field(
+        default_factory=list, description="Checks left out of the batch, as requested.")
 
 
 class BatchDetails(BatchSummary):

@@ -77,7 +77,57 @@ async def estimate_batch(request: EstimateRequest, session: AsyncSession) -> Est
     chosen = await load_entry(request.statistical_test, StatisticalTestKind.batch, session)
     parameters = resolve_parameters(chosen, request.parameters)
     scope = await resolve_scope(request, session)
-    return await build_estimate(chosen, parameters, request.times, scope, session)
+    targets, leave_out = resolve_overrides(request, chosen, scope)
+    return await build_estimate(chosen, parameters, request.times, scope, session,
+                                targets=targets, leave_out=leave_out)
+
+
+def resolve_overrides(request: EstimateRequest, chosen: CatalogueEntry, scope: ResolvedScope
+                      ) -> tuple[dict[CheckKey, float], set[CheckKey]]:
+    """The request's per-check targets and left-out checks, each checked
+    against the scope: every problem reported together as a 422, in
+    FastAPI's list shape."""
+    checks = {(entry.entry_id, a.label): entry for entry in scope.entries
+              for a in entry.assignments}
+    target = next((p for p in chosen.parameters if p.key == "target"), None)
+    problems: list[tuple[tuple, str]] = []
+    targets: dict[CheckKey, float] = {}
+    for index, item in enumerate(request.targets):
+        key = (item.entry_id, item.label)
+        if target is None:
+            problems.append((("targets", index),
+                             f"{chosen.name} has no target to set per check"))
+        elif key not in checks:
+            problems.append((("targets", index, "label"), _no_such_check(item, scope)))
+        elif key in targets:
+            problems.append((("targets", index), f"'{item.label}' has its target set twice"))
+        elif not target.min <= item.target <= target.max:
+            problems.append((("targets", index, "target"),
+                             f"Must be between {target.min:g} and {target.max:g}"))
+        else:
+            targets[key] = item.target
+    leave_out: set[CheckKey] = set()
+    for index, item in enumerate(request.leave_out):
+        key = (item.entry_id, item.label)
+        if key not in checks:
+            problems.append((("leave_out", index, "label"), _no_such_check(item, scope)))
+        else:
+            leave_out.add(key)
+    for entry in scope.entries:
+        if entry.assignments and all((entry.entry_id, a.label) in leave_out
+                                     for a in entry.assignments):
+            problems.append((("leave_out",),
+                             f"Every check of '{entry.name}' is left out: keep at least one"))
+    if problems:
+        raise _invalid(problems)
+    return targets, leave_out
+
+
+def _no_such_check(item, scope: ResolvedScope) -> str:
+    if item.entry_id is not None and not any(e.entry_id == item.entry_id
+                                             for e in scope.entries):
+        return f"No entry {item.entry_id} in this scope"
+    return f"No check '{item.label}' in this scope"
 
 
 async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
@@ -122,6 +172,11 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
         raise _invalid([(("statistical_test",), _NOTHING_APPLIES.get(
             engine, "Every check is left out: keep at least one"))])
 
+    floor = size.floor
+    if batch_target is not None:
+        # the targets in play decide: a check's own target has its own floor
+        floor = max(stats_math.binomial_floor(check.target, confidence)
+                    for check in checks.values())
     found = (odds.plan(list(checks.values()), limit)
              if all(check.known for check in checks.values()) else None)
     capped_from = None
@@ -131,16 +186,16 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
         if times > most:
             # a default the scope can't run: the most it can, if that still
             # reaches the floor (said in a warning), else the scope is too big
-            if most < size.floor:
+            if most < floor:
                 field = {"test": "test_id", "test_set": "test_set_id",
                          "test_plan": "test_plan_id"}[scope.scope.kind.value]
                 raise _invalid([((field,),
                                  f"This scope runs {scope.runs_per_time} entries each time: "
-                                 f"the {size.floor} times this test needs would be "
-                                 f"{size.floor * scope.runs_per_time} runs, more than the "
+                                 f"the {floor} times this test needs would be "
+                                 f"{floor * scope.runs_per_time} runs, more than the "
                                  f"{MAX_RUNS} a batch can create. Run it on a smaller set")])
             capped_from, times = times, most
-    check_times(times, scope.runs_per_time, size.floor, chosen, parameters)
+    check_times(times, scope.runs_per_time, floor, chosen, parameters)
 
     application_per_time = sum(not entry.recorded_answer for entry in scope.entries)
     judge_per_time = sum(scope.is_judge(a) for entry in scope.entries for a in entry.assignments
@@ -153,7 +208,7 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
 
     estimate = Estimate(
         scope=scope.scope, statistical_test=chosen.id, engine=engine, parameters=parameters,
-        floor=size.floor, floor_explanation=size.explanation, suggestions=size.suggestions,
+        floor=floor, floor_explanation=size.explanation, suggestions=size.suggestions,
         times=times, rule=rule, runs_per_time=scope.runs_per_time,
         runs_total=times * scope.runs_per_time,
         calls=Calls(
@@ -166,7 +221,7 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
                                  capped_from),
         goal=odds.GOAL,
     )
-    _with_odds(estimate, chosen, checks, found, limit, size.floor)
+    _with_odds(estimate, chosen, checks, found, limit, floor)
     return estimate
 
 
@@ -229,6 +284,8 @@ def _with_odds(estimate: Estimate, chosen: CatalogueEntry,
 
     minimum = {p.key: p.min for p in chosen.parameters}
     everyone = list(checks.values())
+    if all(check.certain for check in everyone):
+        return  # nothing can vary: run it once, nothing is cheaper
     for entry in estimate.entries:
         for plan in entry.checks:
             check = checks.get((entry.entry_id, plan.label))
@@ -255,6 +312,16 @@ def _with_odds(estimate: Estimate, chosen: CatalogueEntry,
                     CheaperKind.leave_out, f"Leave {plan.label} out: "
                     f"{odds.option_words(without)}", without, check=check.ref,
                     judge_calls_saved_per_time=int(check.is_judge)))
+    single = [o for e in estimate.entries for c in e.checks for o in c.cheaper]
+    if not any(o.reaches_goal for o in single) and found.reaches is None:
+        combination = odds.fewest_left_out(everyone, limit)
+        if combination is not None and len(combination[0]) > 1:
+            left, without = combination
+            names = " and ".join(c.label for c in left)
+            estimate.cheaper.append(odds.option(
+                CheaperKind.leave_out, f"Leave {names} out: {odds.option_words(without)}",
+                without, checks=[c.ref for c in left],
+                judge_calls_saved_per_time=sum(c.is_judge for c in left)))
     lower = odds.less_sure(everyone[0].confidence, minimum.get("confidence", 0.0))
     if lower is not None:
         relaxed = [c.with_(confidence=lower, floor=stats_math.binomial_floor(c.target, lower)

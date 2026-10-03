@@ -83,8 +83,8 @@ def test_the_cheaper_options_for_the_check_that_drives_the_size(db, state_a):
     left_out = by_kind[("leave_out", None)]
     assert left_out["judge_calls_saved_per_time"] == 1
     assert left_out["reaches_goal"] is False
-    less_sure = estimate["cheaper"][0]
-    assert (less_sure["kind"], less_sure["confidence"]) == ("less_sure", 0.9)
+    less_sure = next(o for o in estimate["cheaper"] if o["kind"] == "less_sure")
+    assert less_sure["confidence"] == 0.9
 
 
 def test_the_curve_peaks_where_one_more_failure_is_allowed(db, state_a):
@@ -122,3 +122,31 @@ def test_one_check_without_history_keeps_the_plain_sizes(db):
     outlooks = {e["name"]: e["checks"][0]["outlook"] for e in estimate["entries"]}
     assert outlooks == {"known": "likely_pass", "new": "unknown"}
     assert estimate["suggestions"][0]["kind"] == "floor"
+
+
+def test_when_no_single_change_reaches_the_goal_the_fewest_left_out_together_do(db, state_a):
+    estimate = _estimate(db, state_a)
+
+    together = next(o for o in estimate["cheaper"] if o["kind"] == "leave_out")
+    assert sorted(c["label"] for c in together["checks"]) == ["Correctness", "Relevance"]
+    assert (together["times"], together["chance"], together["reaches_goal"]) == (
+        286, 0.9023, True)
+    assert together["judge_calls_saved_per_time"] == 2
+    eight = next(o for c in estimate["entries"][0]["checks"] for o in c["cheaper"]
+                 if o["kind"] == "lower_target" and o["target"] == 0.8)
+    # the ceiling, beside the size it would default to
+    assert (eight["best_chance"], eight["best_times"]) == (0.8604, 999)
+
+
+def test_nothing_is_cheaper_when_nothing_can_vary(db):
+    test = db.test(checks=[CONTAINS])
+    for _ in range(3):
+        run = db.client.post(f"/runs/standalone/{test['id']}").json()
+        db.execute([uuid.UUID(run["id"])])
+
+    estimate = db.client.post("/statistics/estimate", json={
+        "test_id": test["id"], "statistical_test": "binomial_gate"}).json()
+
+    assert estimate["cheaper"] == []
+    assert estimate["entries"][0]["checks"][0]["cheaper"] == []
+    assert estimate["entries"][0]["checks"][0]["certain_result"] == "pass"

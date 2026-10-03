@@ -743,6 +743,9 @@ class TestRunModel(Base):
         ForeignKey("statistical_batches.id"), nullable=True, index=True
     )
     batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Labels this run doesn't evaluate: the checks a statistical batch left out,
+    # so their judge calls aren't made. Null for every ordinary run.
+    skip_labels: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     test: Mapped["TestModel | None"] = relationship(
         back_populates="runs",

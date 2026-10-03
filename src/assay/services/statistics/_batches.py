@@ -152,8 +152,10 @@ async def load_progress(batch: StatisticalBatchModel, session: AsyncSession,
                                        session)
     if types is None:
         types = await load_types(entries, session)
+    _, left_out = compute.read_overrides(batch.overrides)
     judge_checks = {
         entry.entry_id: sum(types.get(a.name) is not None and types[a.name].engine == JUDGE_ENGINE
+                            and (entry.entry_id, a.label) not in left_out
                             for a in entry.assignments)
         for entry in entries
     }
@@ -262,7 +264,7 @@ async def refresh(batch: StatisticalBatchModel, session: AsyncSession) -> None:
     now = datetime.now().astimezone()
     engine = StatisticalEngine(batch.engine)
     result = compute.compute(engine, batch.parameters, batch.plan["floor"], stopped, entries,
-                             types, now)
+                             types, now, batch.overrides)
     final = compute.roll_up(result, stopped, runs)
     done = await load_progress(batch, session, entries, types)
     result.summary = compute.summary(final, result,
@@ -339,6 +341,8 @@ async def describe(batch: StatisticalBatchModel, session: AsyncSession, *, serie
         verdicts=stored["result"]["verdicts"] if stored else None,
         created_at=batch.created_at, stopped_at=batch.stopped_at,
         completed_at=batch.completed_at,
+        targets=(batch.overrides or {}).get("targets", []),
+        leave_out=(batch.overrides or {}).get("leave_out", []),
     )
     if not with_result:
         return BatchSummary(**fields)

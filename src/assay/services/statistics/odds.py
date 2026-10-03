@@ -344,8 +344,28 @@ def helps(changed: Plan, found: Plan) -> bool:
 def option(kind: CheaperKind, label: str, found: Plan, **fields) -> CheaperOption:
     times = found.default
     chance = found.chances.get(times, 0.0) if times is not None else 0.0
+    points = curve(found)
+    best = max(points, key=lambda p: (p.chance, -p.times)) if points else None
     return CheaperOption(kind=kind, label=label, times=times or 0, chance=round(chance, 4),
-                         reaches_goal=found.reaches is not None, **fields)
+                         reaches_goal=found.reaches is not None,
+                         best_chance=best.chance if best else 0.0,
+                         best_times=best.times if best else 0, **fields)
+
+
+def fewest_left_out(checks: list[CheckOdds], limit: int) -> tuple[list[CheckOdds], Plan] | None:
+    """The fewest checks to leave out together for the rest to reach the
+    goal: the hardest first (lowest chance alone), until it's reached, always
+    keeping one. None when even that doesn't reach it."""
+    varying = sorted((c for c in checks if not c.certain),
+                     key=lambda c: max((p.chance for p in curve(plan([c], limit))), default=0))
+    left: list[CheckOdds] = []
+    for check in varying[:-1] if len(varying) == len(checks) else varying:
+        left.append(check)
+        rest = [c for c in checks if c not in left]
+        found = plan(rest, limit)
+        if found.reaches is not None:
+            return left, found
+    return None
 
 
 def option_words(found: Plan) -> str:
