@@ -1,9 +1,9 @@
 """Run with statistics: the catalogue of statistical tests, the estimate shown
 before a batch is created, batches and their results, and comparisons of two
-batches (docs/statistics/).
+batches (docs/version_1/statistics/).
 
 Conventions every response here follows, so a chart never has to guess
-(docs/statistics/dev_notes.md note 15): numbers are JSON numbers rounded to
+(docs/version_1/statistics/dev_notes.md note 15): numbers are JSON numbers rounded to
 four decimals, never strings; `null` where a value doesn't exist (no score on
 a pass/fail check, no result for a run that wasn't evaluated), never a
 sentinel; every series is in the same order with the same `index`; every
@@ -959,7 +959,7 @@ class EntryFailures(BaseModel):
 class FailuresByEntry(BaseModel):
     """Do failures concentrate in some entries, or spread evenly? Pearson's
     chi-square on entries × (passed, failed) runs — a diagnostic beside the
-    verdicts, for a set or plan batch (docs/statistics/dev_notes.md note 24)."""
+    verdicts, for a set or plan batch (docs/version_1/statistics/dev_notes.md note 24)."""
     verdict: str | None = Field(
         description="`concentrated`: some entries fail significantly more than others — "
                     "look at them first. `no_evidence`: nothing says the failures cluster. "

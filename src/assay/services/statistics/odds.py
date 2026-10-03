@@ -1,5 +1,5 @@
 """Planning a batch from what the checks have already shown
-(docs/statistics/dev_notes.md notes 30–32): each check's chance of an answer
+(docs/version_1/statistics/dev_notes.md notes 30–32): each check's chance of an answer
 at each size, the batch's chance that every check gets one, the size worth
 running, how each check looks against its target, and what would make the
 answer more likely or the batch cheaper.

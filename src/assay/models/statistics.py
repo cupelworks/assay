@@ -10,7 +10,7 @@ from assay.models.base import Base
 
 
 class BatchStatus(StrEnum):
-    """A batch's lifecycle and outcome (docs/statistics/dev_notes.md note 17).
+    """A batch's lifecycle and outcome (docs/version_1/statistics/dev_notes.md note 17).
 
     Its own enum, not an extension of TestStatus, so a run's status and a
     batch's can't be mixed up in a query. The words a run uses mean the same
@@ -74,7 +74,7 @@ class StatisticalBatchModel(Base):
     """
     One "run with statistics": a scope run N times as one batch, and the
     statistical test computed over those runs once they've all finished
-    (docs/statistics/).
+    (docs/version_1/statistics/).
 
     The scope is exactly one of test_id, test_set_id, test_plan_id. The runs
     and executions it created carry this batch's id and their 1-based
@@ -139,7 +139,7 @@ class StatisticalBatchModel(Base):
 class StatisticalComparisonModel(Base):
     """
     Two finished batches of the same scope compared check by check: "did my
-    change help?" (docs/statistics/ notes 8, 18, 22). Computed when created,
+    change help?" (docs/version_1/statistics/ notes 8, 18, 22). Computed when created,
     stored, and read back as is — like a batch's result, the record of what
     was compared, with what, when.
 

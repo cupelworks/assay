@@ -1,7 +1,7 @@
 """The statistics maths against published values. Every reference value
 below was produced by scipy 1.x / statsmodels (exact binomial, Clopper–Pearson,
 Wilson, Student's t, chi-square, Fisher, Newcombe) or is quoted in
-docs/statistics/dev_notes.md; neither library is a dependency of Assay."""
+docs/version_1/statistics/dev_notes.md; neither library is a dependency of Assay."""
 import ast
 from pathlib import Path
 

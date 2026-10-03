@@ -4,7 +4,7 @@ Revision ID: 90b64c0a5c27
 Revises: 8409d407d9dc
 Create Date: 2026-10-02 09:00:00.000000
 
-Run with statistics (docs/statistics/ note 8): a `statistical_batches` row per
+Run with statistics (docs/version_1/statistics/ note 8): a `statistical_batches` row per
 batch — the scope (exactly one of a test, a test set, a test plan), the
 statistical test and its parameters, the times requested, the plan (floor and
 calls per time), the status (its own enum, note 17) and, once every run has

@@ -1,4 +1,4 @@
-"""Stop a batch midway (docs/statistics/dev_notes.md note 16): every run
+"""Stop a batch midway (docs/version_1/statistics/dev_notes.md note 16): every run
 still Pending becomes Not Ran, in one statement; runs already executing
 finish and count. The batch is then Incomplete once none is running."""
 import logging

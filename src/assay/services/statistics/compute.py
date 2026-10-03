@@ -1,4 +1,4 @@
-"""A finished batch's statistics, computed from its runs (docs/statistics/
+"""A finished batch's statistics, computed from its runs (docs/version_1/statistics/
 dev_notes.md notes 3, 7, 15–17, 21). Pure: the caller loads the runs and the
 entries they ran; nothing here touches the database, so every rule is tested
 on plain data.

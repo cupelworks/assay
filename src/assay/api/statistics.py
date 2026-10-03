@@ -1,4 +1,4 @@
-"""Run with statistics (docs/statistics/): the catalogue of statistical tests,
+"""Run with statistics (docs/version_1/statistics/): the catalogue of statistical tests,
 the estimate shown before a batch is created, batches, and comparisons."""
 import inspect
 import uuid

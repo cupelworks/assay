@@ -1,4 +1,4 @@
-"""Run a scope N times as one batch (docs/statistics/dev_notes.md notes 2, 3,
+"""Run a scope N times as one batch (docs/version_1/statistics/dev_notes.md notes 2, 3,
 21): N standalone runs of a test, or N live executions of a set or plan, all
 created in one transaction with the batch, then dispatched to the workers as
 any runs are."""

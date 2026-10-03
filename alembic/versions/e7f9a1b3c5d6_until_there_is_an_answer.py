@@ -5,7 +5,7 @@ Revises: d6e8f0a2c4b5
 Create Date: 2026-10-03 15:00:00.000000
 
 A batch can run in waves and stop as soon as every check has an answer
-(docs/statistics/dev_notes.md notes 30-32): two catalogue rows on two new
+(docs/version_1/statistics/dev_notes.md notes 30-32): two catalogue rows on two new
 engines, "Passes reliably — until there's an answer" (sequential_gate) and
 "The judge is consistent — until there's an answer"
 (sequential_judge_stability), with the same parameters as their fixed

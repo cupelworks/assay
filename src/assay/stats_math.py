@@ -1,5 +1,5 @@
 """The arithmetic behind "run with statistics": pure functions on the
-standard library, no numpy or scipy (docs/statistics/dev_notes.md note 9 —
+standard library, no numpy or scipy (docs/version_1/statistics/dev_notes.md note 9 —
 scipy would add some 30 MB plus NumPy to an API image of about 48 MB, for
 functions this short).
 
@@ -727,7 +727,7 @@ def runs_needed_for_proportions(rate_a: float, rate_b: float, confidence: float,
     return max(2, math.ceil(numerator ** 2 / (rate_a - rate_b) ** 2))
 
 
-# ── the second wave (docs/statistics/dev_notes.md note 24) ───────────────────
+# ── the second wave (docs/version_1/statistics/dev_notes.md note 24) ───────────────────
 
 
 def regularized_upper_gamma(a: float, x: float) -> float:

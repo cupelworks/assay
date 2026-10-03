@@ -4,7 +4,7 @@ Revision ID: 3b7e2d9c41f6
 Revises: 90b64c0a5c27
 Create Date: 2026-10-02 12:00:00.000000
 
-Did my change help? (docs/statistics/ notes 8, 18, 22): a
+Did my change help? (docs/version_1/statistics/ notes 8, 18, 22): a
 `statistical_comparisons` row per comparison — the two batches (A the
 baseline, B the change), their shared scope, the statistical test and its
 parameters, an optional note, and the result, computed when the comparison is

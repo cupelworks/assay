@@ -1,4 +1,4 @@
-"""Run until there's an answer (docs/statistics/dev_notes.md notes 30–32): a
+"""Run until there's an answer (docs/version_1/statistics/dev_notes.md notes 30–32): a
 batch that runs in waves and stops as soon as every check has one.
 
 The test is the fixed gate's, applied at each wave's end ("a look") at a

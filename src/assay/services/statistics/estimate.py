@@ -1,5 +1,5 @@
 """What a batch would need and cost, before anything is created
-(docs/statistics/dev_notes.md note 6): the floor, the sizes worth
+(docs/version_1/statistics/dev_notes.md note 6): the floor, the sizes worth
 suggesting, the gate's rule at the chosen size, the calls it will pay for,
 which checks get a verdict, and what to know before confirming."""
 import uuid

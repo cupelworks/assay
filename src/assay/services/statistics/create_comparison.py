@@ -1,5 +1,5 @@
 """Compare two finished batches of the same scope, check by check
-(docs/statistics/dev_notes.md notes 18, 22). Computed at once and stored."""
+(docs/version_1/statistics/dev_notes.md notes 18, 22). Computed at once and stored."""
 import logging
 import uuid
 
