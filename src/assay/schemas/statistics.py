@@ -188,7 +188,7 @@ class FloorDescriptor(BaseModel):
 
 
 class StatisticalTestDescriptor(BaseModel):
-    """One entry of the catalogue: everything the "run with statistics" dialog
+    """One entry of the catalogue: everything the Run with statistics page
     needs to offer a test and explain it."""
     id: str = Field(description="What to send as `statistical_test`: the catalogue row's id.")
     name: str = Field(description="Its name, e.g. \"Binomial gate\".")

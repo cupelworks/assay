@@ -9,7 +9,7 @@ history (stats_math.gate_answer_chance), and the checks are taken as
 independent — checks of one run aren't quite, an approximation the API says
 so. The goal is a 90% chance that every check gets an answer; when no size
 within one batch reaches it, the default is the smallest size within 5
-points of the best chance, and the dialog says so.
+points of the best chance, and the Run with statistics page says so.
 """
 import math
 import statistics
