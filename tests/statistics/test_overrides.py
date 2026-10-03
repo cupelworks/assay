@@ -104,3 +104,21 @@ def test_a_set_batch_skips_a_check_only_for_its_entry(db):
         skips[str(entry_id)] = skip
     assert skips[entry_a] == ["Misses"]
     assert [skip for entry, skip in skips.items() if entry != entry_a] == [None]
+
+
+def test_a_left_out_check_still_shows_what_it_did(db):
+    import uuid
+    test = db.test(model_output=None, checks=[CONTAINS, MISSES])
+    for index in range(5):
+        run = db.client.post(f"/runs/standalone/{test['id']}").json()
+        db.finish(uuid.UUID(run["id"]), {"Contains": {"passed": True},
+                                         "Misses": {"passed": index > 0}})
+
+    estimate = _post(db, "/statistics/estimate", test_id=test["id"],
+                     leave_out=[{"label": "Misses"}]).json()
+
+    misses = next(c for c in estimate["entries"][0]["checks"] if c["label"] == "Misses")
+    assert (misses["left_out"], misses["applies"]) == (True, False)
+    assert misses["history"] == {"runs": 5, "passed": 4, "rate": 0.8, "mean": None, "sd": None}
+    assert misses["outlook"] is not None
+    assert (misses["size_needed"], misses["cheaper"]) == (None, [])

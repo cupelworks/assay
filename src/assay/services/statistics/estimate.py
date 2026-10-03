@@ -152,7 +152,7 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
     histories = await load_history(scope.entries, session)
     limit = odds.limit_for(scope.runs_per_time, MAX_RUNS)
 
-    entries, total, applicable, checks = [], 0, 0, {}
+    entries, total, applicable, checks, left = [], 0, 0, {}, {}
     for entry in scope.entries:
         plans = []
         for assignment in entry.assignments:
@@ -160,6 +160,11 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
             does_apply, reason = applies(engine, scope, entry, assignment)
             left_out = key in leave_out
             if left_out:
+                if does_apply:  # shown for what it would have been: its history, its outlook
+                    left[key] = _odds_of(engine, scope, entry, assignment,
+                                         targets.get(key, batch_target)
+                                         if batch_target is not None else None,
+                                         confidence, size.floor, histories.get(key))
                 does_apply, reason = False, "Left out of this batch"
             target = targets.get(key, batch_target) if batch_target is not None else None
             plans.append(CheckPlan(label=assignment.label, test_type=assignment.name,
@@ -252,6 +257,13 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
         goal=odds.GOAL,
     )
     _with_odds(estimate, chosen, checks, found, limit, floor)
+    for entry in estimate.entries:
+        for plan in entry.checks:
+            check = left.get((entry.entry_id, plan.label))
+            if check is not None:
+                plan.history = odds.history_out(check)
+                plan.outlook, plan.outlook_reason = odds.outlook(check)
+                plan.certain_result = check.certain_result
     if until_pick is not None:
         asked = (until_pick if until_pick.maximum == times else
                  odds.until(list(checks.values()), times, batch_target, confidence))

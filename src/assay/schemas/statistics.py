@@ -470,7 +470,9 @@ class CheckPlan(BaseModel):
                     "`likely_fail` (each at least 9 chances in 10, from its history), "
                     "`too_close` (neither: expensive to tell either way), `unknown` (no "
                     "history), `certain` (it can't vary: a recorded answer read by a fixed "
-                    "check). Null when the test doesn't apply to it.",
+                    "check). Null when the test doesn't apply to it; a check left out of the "
+                    "batch keeps its outlook and `history`, so the user sees what they leave "
+                    "out.",
     )
     outlook_reason: str | None = Field(
         default=None, description="The outlook in one sentence, to show as it is.")
