@@ -597,6 +597,22 @@ def test_row_exist_no_test_type_assignments():
     assert mock_session.add_all.call_args_list[1][0][0] == []
 
 
+def test_a_blank_model_output_makes_a_test_with_no_recorded_answer():
+    mock_request, _ = _get_mock_request_with_id()
+    mock_request.test_type_assignments = []
+    rows = [MagicMock(input=text, expected_output="y", model_output=answer, id=uuid.uuid4())
+            for text, answer in (("empty", ""), ("spaces", "  \n "), ("recorded", " z "),
+                                 ("none", None))]
+    mock_session = AsyncMock()
+
+    with _patch_rows(*rows), _patch_next_new_test_number():
+        asyncio.run(create_new_test_from_dataset(mock_request, mock_session))
+
+    tests = mock_session.add_all.call_args_list[0][0][0]
+    assert [(t.input, t.model_output) for t in tests] == [
+        ("empty", None), ("spaces", None), ("recorded", " z "), ("none", None)]
+
+
 def test_correct_number_of_test_type_assignments():
     mock_request, mock_request_id = _get_mock_request_with_id()
     # 2 test types will be assigned to each test

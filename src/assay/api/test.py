@@ -771,6 +771,11 @@ async def create_test_from_dataset(
     at 1 and duplicating a name already in use. All created tests share the same
     optional list of evaluation strategies (`test_type_assignments`).
 
+    Each test copies its row's prompt, expected output and model output. A row whose
+    `model_output` is blank (empty or only whitespace) makes a test with no recorded
+    answer (`model_output` null), so its runs ask the application under test; any other
+    `model_output` is the test's recorded answer, kept exactly as written.
+
     `test_type_assignments` is an optional list of evaluation strategies to assign, each with
     any config it needs. Each name must exist in the test types catalogue and satisfy that
     type's required config fields — a 422 is returned otherwise. A type with a required

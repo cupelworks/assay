@@ -230,7 +230,7 @@ tests/                   # Pytest suite mirroring src/assay/services/
 | `GET` | `/tests` | List all test cases (paginated, includes total count) |
 | `GET` | `/tests/{test_case_id}` | Retrieve a single test case by ID |
 | `POST` | `/tests` | Create a single test case manually; a type may be assigned more than once, each assignment told apart by its `label` (defaults to the type's name, numbered when taken) |
-| `POST` | `/tests/from-dataset` | Bulk-create test cases from all rows in a dataset |
+| `POST` | `/tests/from-dataset` | Bulk-create test cases from all rows in a dataset; a row with a blank `model_output` makes a test with no recorded answer, whose runs ask the application |
 | `PATCH` | `/tests/{test_case_id}` | Partially update a test case — only sent fields are changed; `expected_output`/`model_output` sent as `null` are cleared, `name`/`input` sent as `null` are left as they are; unknown fields are rejected |
 | `DELETE` | `/tests` | Delete test cases by ID (guards against linked test sets and test runs) |
 

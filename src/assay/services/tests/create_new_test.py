@@ -121,10 +121,20 @@ async def create_new_test(
     )
 
 
+def _recorded_answer(model_output: str | None) -> str | None:
+    """A dataset row's `model_output` as the test's recorded answer: a blank one (empty or
+    only whitespace) is no recorded answer, so the test's runs ask the application under
+    test."""
+    return model_output if model_output and model_output.strip() else None
+
+
 async def create_new_test_from_dataset(
         request: CreateTestCaseFromDatasetRequest,
         session: AsyncSession) -> CreateTestCaseFromDatasetResponse:
     """Create test cases in bulk from all rows of an existing dataset.
+
+    A row whose `model_output` is blank (empty or only whitespace) makes a
+    test with no recorded answer, so its runs ask the application under test.
 
     Each created test is named "New Test <n>", numbered globally across the
     whole tests table (see _next_new_test_number) — dataset rows have no
@@ -168,7 +178,7 @@ async def create_new_test_from_dataset(
             dataset_row_id=row.id,
             name=f"New Test {next_number + offset}",
             input=row.input,
-            model_output=row.model_output,
+            model_output=_recorded_answer(row.model_output),
             expected_output=row.expected_output,
         )
         for offset, row in enumerate(rows)
