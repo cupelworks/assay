@@ -14,7 +14,7 @@ _EXAMPLE_BROKER_OK = {"reachable": True, "error": None}
 
 
 def _example_worker(name: str, fingerprint: str | None = _EXAMPLE_FINGERPRINT,
-                    version: str | None = "0.11.0", missing: list[str] | None = None,
+                    version: str | None = "1.0.0", missing: list[str] | None = None,
                     problem: str | None = None) -> dict:
     return {"name": name, "version": version, "code_fingerprint": fingerprint,
             "current_code": fingerprint == _EXAMPLE_FINGERPRINT, "missing_tasks": missing or [],
@@ -23,7 +23,7 @@ def _example_worker(name: str, fingerprint: str | None = _EXAMPLE_FINGERPRINT,
 
 def _example_health(status: str, workers: list[dict],
                     broker: dict = _EXAMPLE_BROKER_OK) -> dict:
-    return {"status": status, "broker": broker, "workers": workers, "version": "0.11.0",
+    return {"status": status, "broker": broker, "workers": workers, "version": "1.0.0",
             "code_fingerprint": _EXAMPLE_FINGERPRINT, "checked_at": _EXAMPLE_CHECKED_AT}
 
 
