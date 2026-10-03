@@ -33,6 +33,7 @@ class StatisticalEngine(StrEnum):
     mean_scores = "mean_scores"
     score_ranks = "score_ranks"
     paired_entries = "paired_entries"
+    trial = "trial"
 
 
 class StatisticalTestKind(StrEnum):
@@ -603,6 +604,7 @@ class BatchStatusName(StrEnum):
     inconclusive = "Inconclusive"
     incomplete = "Incomplete"
     not_ran = "NotRan"
+    done = "Done"
 
 
 class BatchRequest(EstimateRequest):
@@ -957,7 +959,8 @@ class BatchSummary(BaseModel):
                     "`Inconclusive` (finished, neither proven at this size), `Incomplete` "
                     "(stopped before every run ran) or `NotRan` (nothing could be decided: "
                     "every run Not Ran, or every check errored in every run — fix the cause, "
-                    "a bigger batch wouldn't help).",
+                    "a bigger batch wouldn't help). A trial (`engine: trial`) ends `Done`: it "
+                    "asked no question, and shows how each check behaved.",
     )
     floor: int = Field(description="The fewest times the test can conclude at.")
     progress: BatchProgress

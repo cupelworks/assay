@@ -75,8 +75,7 @@ _NO_HISTORY = {"left_out": False, "history": None, "outlook": "unknown",
                "outlook_reason": "No runs yet: nothing to plan from.", "certain_result": None,
                "size_needed": None, "best_chance": None, "cheaper": []}
 _NO_ODDS = {"goal": 0.9, "goal_reachable": None, "best_chance": None, "best_times": None,
-            "odds_summary": None, "driving_check": None, "odds": [], "cheaper": [],
-            "trial": None}
+            "odds_summary": None, "driving_check": None, "odds": [], "cheaper": []}
 _SIZE_ONLY = {"chance": None, "failures_allowed": None, "outcome": None,
               "likely_undecided": None}
 
@@ -130,6 +129,11 @@ _ESTIMATE_GATE = {
     ],
     "warnings": [],
     **_NO_ODDS,
+    # nothing has run yet: learn first
+    "trial": {"statistical_test": "trial", "times": 10, "application_calls": 20,
+              "judge_calls": 10,
+              "reason": "3 checks have never run: a trial of 10 times shows how they behave, "
+                        "so the batch can be planned from it."},
 }
 
 _ESTIMATE_T = {

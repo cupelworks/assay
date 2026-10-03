@@ -1666,3 +1666,32 @@ def test_overrides_and_skipped_labels_come_and_go(scratch):
 
     assert "overrides" not in _table_columns(db_path, "statistical_batches")
     assert "skip_labels" not in _table_columns(db_path, "test_runs")
+
+
+# --- d6e8f0a2c4b5: the trial and the status Done ---
+
+
+def test_the_trial_row_and_done_come_and_go(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "d6e8f0a2c4b5")
+
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute("SELECT id FROM statistical_tests ORDER BY created_at").fetchall()
+        constraint = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'statistical_batches'").fetchone()[0]
+    assert rows[-1] == ("trial",)
+    assert "'done'" in constraint
+    batch_id = _insert_batch(db_path, 40, "trial", engine="trial")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("UPDATE statistical_batches SET status = 'done' WHERE id = ?",
+                           (batch_id,))
+        connection.execute("DELETE FROM statistical_batches WHERE id = ?", (batch_id,))
+
+    command.downgrade(config, "c5d7e9a1b3f4")
+
+    with sqlite3.connect(db_path) as connection:
+        ids = [r[0] for r in connection.execute("SELECT id FROM statistical_tests")]
+        constraint = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'statistical_batches'").fetchone()[0]
+    assert "trial" not in ids
+    assert "'done'" not in constraint

@@ -7,8 +7,8 @@ from sqlalchemy import delete, insert, select, update
 from assay.models import StatisticalTestModel
 from assay.services.statistics.catalogue import CatalogueError, entry_of
 
-ENGINES = ["binomial_gate", "one_sample_t", "judge_stability", "pass_rates", "no_worse",
-           "mean_scores", "score_ranks", "paired_entries"]
+ENGINES = ["binomial_gate", "one_sample_t", "judge_stability", "trial", "pass_rates",
+           "no_worse", "mean_scores", "score_ranks", "paired_entries"]
 
 
 def _row(db, test_id: str) -> StatisticalTestModel:
@@ -43,12 +43,12 @@ def _items(db) -> list[dict]:
 # --- the seed ---
 
 
-def test_the_seed_is_the_eight_tests_each_on_its_own_engine(db):
+def test_the_seed_is_one_test_on_each_engine(db):
     items = _items(db)
 
     assert [item["id"] for item in items] == ENGINES
     assert [item["engine"] for item in items] == ENGINES
-    assert [item["kind"] for item in items] == ["batch"] * 3 + ["comparison"] * 5
+    assert [item["kind"] for item in items] == ["batch"] * 4 + ["comparison"] * 5
     t_test = items[1]
     assert t_test["engine_settings"] == {"floor": 10, "recommended_times": 30}
     assert t_test["recommended_times"] == 30
@@ -91,7 +91,7 @@ def test_a_new_row_on_an_existing_engine_is_a_new_test(db):
     finished = db.client.get(f"/statistics/batches/{batch['id']}").json()
 
     # batch tests first, the new row last among them
-    assert ids == ["binomial_gate", "one_sample_t", "judge_stability", "strict_gate"] + ENGINES[3:]
+    assert ids == ENGINES[:4] + ["strict_gate"] + ENGINES[4:]
     assert (estimate["statistical_test"], estimate["engine"]) == ("strict_gate", "binomial_gate")
     assert estimate["parameters"] == {"target": 0.95, "confidence": 0.99}
     assert estimate["floor"] == 90  # ln(0.01) / ln(0.95) = 89.8, rounded up

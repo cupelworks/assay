@@ -22,6 +22,7 @@ from assay.schemas.statistics import (
     GateRuleSchema,
     StatisticalEngine,
     StatisticalTestKind,
+    TrialOffer,
     Warning_,
 )
 from assay.services.statistics import compute, odds
@@ -31,6 +32,7 @@ from assay.services.statistics.catalogue import (
     CatalogueEntry,
     _invalid,
     check_times,
+    find_trial,
     load_entry,
     often,
     percent,
@@ -168,7 +170,7 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
             test_set_name=entry.test_set_name, name=entry.name,
             recorded_answer=entry.recorded_answer, checks=plans,
         ))
-    if applicable == 0:
+    if applicable == 0 and engine != StatisticalEngine.trial:
         raise _invalid([(("statistical_test",), _NOTHING_APPLIES.get(
             engine, "Every check is left out: keep at least one"))])
 
@@ -217,12 +219,33 @@ async def build_estimate(chosen: CatalogueEntry, parameters: dict[str, float],
             judge=CallCount(per_time=judge_per_time, total=judge_per_time * times),
         ),
         checks_total=total, checks_applicable=applicable, entries=entries,
-        warnings=await _warnings(scope, total - applicable - len(leave_out), session, times,
-                                 capped_from),
+        warnings=await _warnings(
+            scope, 0 if engine == StatisticalEngine.trial else total - applicable - len(leave_out),
+            session, times, capped_from),
         goal=odds.GOAL,
     )
     _with_odds(estimate, chosen, checks, found, limit, floor)
+    if found is None and engine != StatisticalEngine.trial:
+        estimate.trial = await _trial_offer(checks, application_per_time, judge_per_time,
+                                            session)
     return estimate
+
+
+async def _trial_offer(checks: dict[CheckKey, odds.CheckOdds], application_per_time: int,
+                       judge_per_time: int, session: AsyncSession) -> TrialOffer | None:
+    """A trial to run first, when some checks have never run: what it costs
+    and why. None when the catalogue has no trial."""
+    trial = await find_trial(session)
+    if trial is None:
+        return None
+    times = trial.settings["default_times"]
+    unknown = sum(not check.known for check in checks.values())
+    which = "1 check has" if unknown == 1 else f"{unknown} checks have"
+    return TrialOffer(
+        statistical_test=trial.id, times=times,
+        application_calls=application_per_time * times, judge_calls=judge_per_time * times,
+        reason=f"{which} never run: a trial of {times} times shows how they behave, so the "
+               "batch can be planned from it.")
 
 
 def _odds_of(engine: StatisticalEngine, scope: ResolvedScope, entry: compute.BatchEntry,

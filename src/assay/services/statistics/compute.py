@@ -43,6 +43,7 @@ from assay.services.statistics.catalogue import MAX_TIMES, POWER, often, sure
 
 NO_RESULT = "No result for this check in this run"
 LEFT_OUT = "Left out of this batch"
+TRIAL_REASON = "A trial gives no verdict: it shows how often the check passes"
 
 
 def read_overrides(stored: dict | None) -> tuple[dict[tuple, float], set[tuple]]:
@@ -140,6 +141,8 @@ def applies(name: StatisticalEngine, row: TestTypesModel | None,
             recorded_answer: bool = True) -> tuple[bool, str | None]:
     """Whether a batch test gives a check of this type a verdict, and why not
     (the estimate and the result use this one rule)."""
+    if name == StatisticalEngine.trial:
+        return False, TRIAL_REASON
     if name == StatisticalEngine.one_sample_t and (row is None or row.comparison is None):
         return False, "It only passes or fails: an average needs a check that gives a score"
     if name == StatisticalEngine.judge_stability:
@@ -500,11 +503,12 @@ def compute(name: StatisticalEngine, parameters: dict[str, float], floor: int,
         computed_at=computed_at, checks_total=checks_total,
         checks_applicable=sum(verdicts.values()), verdicts=verdicts, summary="",
         entries=results,
-        failures_by_entry=failures_by_entry(entries, parameters["confidence"]),
+        failures_by_entry=failures_by_entry(entries, parameters.get("confidence", 0.95)),
     )
 
 
-def roll_up(result: BatchResult, stopped: bool, runs: list[BatchRun]) -> BatchStatus:
+def roll_up(result: BatchResult, stopped: bool, runs: list[BatchRun],
+            engine: StatisticalEngine | None = None) -> BatchStatus:
     """The batch's outcome (note 17): stopped → Incomplete; nothing evaluated —
     every run Not Ran, or every applicable check errored in every run (no
     judge chosen, an engine not installed), so not one verdict could be drawn
@@ -514,6 +518,8 @@ def roll_up(result: BatchResult, stopped: bool, runs: list[BatchRun]) -> BatchSt
         return BatchStatus.incomplete
     if all(run.status == TestStatus.not_ran for run in runs):
         return BatchStatus.not_ran
+    if engine == StatisticalEngine.trial:
+        return BatchStatus.done  # it asked no question
     if result.checks_applicable and result.verdicts["none"] == result.checks_applicable:
         return BatchStatus.not_ran
     if result.verdicts["fail"]:
@@ -528,6 +534,12 @@ def summary(status: BatchStatus, result: BatchResult, times_ran: int, times_requ
     """The outcome in one sentence, for lists and the batch page's header.
     `times_ran`: the times not wholly cancelled by a stop."""
     verdicts, applicable = result.verdicts, result.checks_applicable
+    if status == BatchStatus.done:
+        rates = [f"{c.label} {c.counts.passed} of {c.counts.evaluated}"
+                 for e in result.entries for c in e.checks if c.counts.evaluated]
+        shown = "; ".join(rates[:4]) + ("; …" if len(rates) > 4 else "")
+        return (f"Done: ran {times_ran} {'time' if times_ran == 1 else 'times'}"
+                + (f" — passed: {shown}." if shown else "."))
     if status == BatchStatus.passed:
         if applicable == 1:
             return "Passed: the check met the goal."

@@ -265,7 +265,7 @@ async def refresh(batch: StatisticalBatchModel, session: AsyncSession) -> None:
     engine = StatisticalEngine(batch.engine)
     result = compute.compute(engine, batch.parameters, batch.plan["floor"], stopped, entries,
                              types, now, batch.overrides)
-    final = compute.roll_up(result, stopped, runs)
+    final = compute.roll_up(result, stopped, runs, engine)
     done = await load_progress(batch, session, entries, types)
     result.summary = compute.summary(final, result,
                                      batch.times_requested - done.times_cancelled,

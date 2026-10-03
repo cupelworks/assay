@@ -117,6 +117,12 @@ ENGINES: dict[StatisticalEngine, Engine] = {engine.id: engine for engine in (
         settings={"recommended_times": False},
     ),
     Engine(
+        id=StatisticalEngine.trial, kind=StatisticalTestKind.batch, wave=3,
+        reads=Reads.pass_fail, applies_to=AppliesTo.every_check, verdicts=(),
+        parameters={}, floor_kind=FloorKind.none, floor_formula=None,
+        settings={"default_times": True, "max_times": True},
+    ),
+    Engine(
         id=StatisticalEngine.paired_entries, kind=StatisticalTestKind.comparison, wave=2,
         reads=Reads.pass_fail, applies_to=AppliesTo.every_check, verdicts=_DIFFERENCE,
         parameters={"confidence": ParameterKind.level},
@@ -241,6 +247,16 @@ async def load_entry(test_id: str, kind: StatisticalTestKind,
     return entry
 
 
+async def find_trial(session: AsyncSession) -> CatalogueEntry | None:
+    """The catalogue's trial, the first row on the trial engine; None when
+    there is none."""
+    row = await session.scalar(
+        select(StatisticalTestModel)
+        .where(StatisticalTestModel.engine == StatisticalEngine.trial.value)
+        .order_by(StatisticalTestModel.created_at).limit(1))
+    return entry_of(row) if row is not None else None
+
+
 def catalogue(entries: list[CatalogueEntry]) -> StatisticalTestCatalogue:
     return StatisticalTestCatalogue(
         items=[entry.descriptor() for entry in entries],
@@ -321,7 +337,7 @@ class Sizing:
 
 def sizing(entry: CatalogueEntry, parameters: dict[str, float]) -> Sizing:
     engine = entry.engine.id
-    confidence = parameters["confidence"]
+    confidence = parameters.get("confidence", 0.95)
     if engine in (StatisticalEngine.binomial_gate, StatisticalEngine.judge_stability):
         target = parameters["target"]
         floor = stats_math.binomial_floor(target, confidence)
@@ -379,6 +395,12 @@ def sizing(entry: CatalogueEntry, parameters: dict[str, float]) -> Sizing:
             if suggestion.times not in by_times or suggestion.default:
                 by_times[suggestion.times] = suggestion
         return Sizing(floor, explanation, [by_times[times] for times in sorted(by_times)])
+    if engine == StatisticalEngine.trial:
+        times = entry.settings["default_times"]
+        return Sizing(1, (f"No minimum: a trial answers no question. {times} times show "
+                          "roughly how often each check passes."), [
+            Suggestion(times=times, kind=SuggestionKind.trial,
+                       label=f"{times} times · to learn how it behaves", default=True)])
     raise ValueError(f"{entry.id} has no batch sizing")  # comparisons aren't sized here
 
 
@@ -396,8 +418,10 @@ def check_times(times: int, runs_per_time: int, floor: int, entry: CatalogueEntr
         problems.append((("times",),
                          f"{entry.name} needs at least {floor} times with these settings: "
                          f"with fewer, no result could give an answer"))
-    elif times > MAX_TIMES:
-        problems.append((("times",), f"At most {MAX_TIMES} times per batch"))
+    elif times > entry.settings.get("max_times", MAX_TIMES):
+        most = entry.settings.get("max_times", MAX_TIMES)
+        what = "for a trial" if entry.engine.id == StatisticalEngine.trial else "per batch"
+        problems.append((("times",), f"At most {most} times {what}"))
     elif times * runs_per_time > MAX_RUNS:
         problems.append((("times",),
                          f"{times} times × {runs_per_time} runs each is "

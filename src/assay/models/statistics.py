@@ -25,6 +25,7 @@ class BatchStatus(StrEnum):
     incomplete = "Incomplete"      # stopped by the user before every run ran
     not_ran = "NotRan"             # finished; nothing could be decided: every run Not Ran,
                                    # or every applicable check errored in every run
+    done = "Done"                  # a trial finished: it asked no question, no verdict
 
 
 IN_PROGRESS_BATCH_STATUSES = frozenset({BatchStatus.pending, BatchStatus.running})
