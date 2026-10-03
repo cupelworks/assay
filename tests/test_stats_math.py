@@ -275,7 +275,7 @@ def test_the_module_imports_nothing_outside_the_standard_library():
                 if isinstance(node, ast.Import) for alias in node.names}
     imported |= {node.module.split(".")[0] for node in ast.walk(tree)
                  if isinstance(node, ast.ImportFrom) and node.module}
-    assert imported <= {"math", "dataclasses", "enum", "statistics"}
+    assert imported <= {"math", "dataclasses", "enum", "functools", "statistics"}
 
 
 # --- the second wave: reference values from scipy 1.x / statsmodels ---

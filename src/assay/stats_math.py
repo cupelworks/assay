@@ -23,6 +23,7 @@ Conventions:
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 from statistics import NormalDist
 
 _STANDARD_NORMAL = NormalDist()
@@ -214,35 +215,36 @@ class GateRule:
     fail_at_most: int | None
 
 
+@lru_cache(maxsize=65536)
 def binomial_gate_rule(n: int, target: float, confidence: float) -> GateRule:
-    """Binary searches over the count: P(X >= k) falls as k grows and
-    P(X <= k) rises, so each threshold takes about log₂ n tail evaluations."""
+    """The exact counts, found by a short walk from the normal approximation's
+    guess: P(X >= k) falls as k grows and P(X <= k) rises, so a few exact tail
+    evaluations either side of the guess settle each threshold."""
     _check_target(target)
     if n <= 0:
         return GateRule(n=n, pass_at_least=None, fail_at_most=None)
     alpha = 1 - confidence
+    spread = math.sqrt(n * target * (1 - target))
+    z = z_quantile(confidence)
+
     pass_at_least = None
     if binomial_sf(n, n, target) <= alpha:
-        # P(X >= 0) = 1 > alpha: the smallest k with P(X >= k) <= alpha is in (0, n]
-        low, high = 0, n
-        while high - low > 1:
-            middle = (low + high) // 2
-            if binomial_sf(middle, n, target) <= alpha:
-                high = middle
-            else:
-                low = middle
-        pass_at_least = high
+        # the smallest k with P(X >= k) <= alpha, in (0, n]
+        k = min(n, max(1, math.ceil(n * target + z * spread)))
+        while k > 1 and binomial_sf(k - 1, n, target) <= alpha:
+            k -= 1
+        while binomial_sf(k, n, target) > alpha:
+            k += 1
+        pass_at_least = k
     fail_at_most = None
     if binomial_cdf(0, n, target) <= alpha:
-        # P(X <= n) = 1 > alpha: the largest k with P(X <= k) <= alpha is in [0, n)
-        low, high = 0, n
-        while high - low > 1:
-            middle = (low + high) // 2
-            if binomial_cdf(middle, n, target) <= alpha:
-                low = middle
-            else:
-                high = middle
-        fail_at_most = low
+        # the largest k with P(X <= k) <= alpha, in [0, n)
+        k = max(0, min(n - 1, math.floor(n * target - z * spread)))
+        while k < n - 1 and binomial_cdf(k + 1, n, target) <= alpha:
+            k += 1
+        while binomial_cdf(k, n, target) > alpha:
+            k -= 1
+        fail_at_most = k
     return GateRule(n=n, pass_at_least=pass_at_least, fail_at_most=fail_at_most)
 
 
@@ -1051,12 +1053,18 @@ def runs_needed_for_means(spread: float, difference: float, confidence: float,
 
 def beta_binomial_pmf(n: int, a: float, b: float) -> list[float]:
     """P(X = k) for k = 0..n, X ~ BetaBinomial(n, a, b): the number of passes
-    in n runs when the pass rate is Beta(a, b)."""
+    in n runs when the pass rate is Beta(a, b). By its recurrence, in logs —
+    one logarithm a term, and no underflow when a long history makes the
+    first terms vanishingly small."""
     if n < 0 or a <= 0 or b <= 0:
         raise ValueError("n must be non-negative and a, b positive")
-    log_beta_ab = math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
-    return [math.exp(_log_comb(n, k) + math.lgamma(k + a) + math.lgamma(n - k + b)
-                     - math.lgamma(n + a + b) - log_beta_ab) for k in range(n + 1)]
+    log_p = (math.lgamma(n + b) + math.lgamma(a + b) - math.lgamma(b)
+             - math.lgamma(n + a + b))
+    logs = [log_p]
+    for k in range(n):
+        log_p += math.log((n - k) * (a + k) / ((k + 1) * (b + n - k - 1)))
+        logs.append(log_p)
+    return [math.exp(value) for value in logs]
 
 
 @dataclass(frozen=True)

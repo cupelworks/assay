@@ -54,11 +54,21 @@ def _gate_chance(n: int, target: float, confidence: float, passed: int,
 @lru_cache(maxsize=4096)
 def _peaks(target: float, confidence: float, limit: int) -> tuple[int, ...]:
     """The sizes where one more failure becomes allowed — where the chance of
-    an answer peaks before dipping — up to `limit`."""
+    an answer peaks before dipping — up to `limit`: stats_math's
+    binomial_runs_allowing for 0, 1, 2… failures, each search going on from
+    the previous peak (a size allowing m + 1 failures is beyond the one
+    allowing m) rather than from the floor again."""
+    alpha = 1 - confidence
     sizes, misses = [], 0
-    while (n := stats_math.binomial_runs_allowing(misses, target, confidence)) <= limit:
+    n = stats_math.binomial_floor(target, confidence)
+    while n <= limit:
+        while stats_math.binomial_sf(n - misses, n, target) > alpha:
+            n += 1
+        if n > limit:
+            break
         sizes.append(n)
         misses += 1
+        n += 1
     return tuple(sizes)
 
 
