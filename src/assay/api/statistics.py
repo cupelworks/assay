@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.api import _statistics_examples as computed
 from assay.api._estimate_example import WITH_HISTORY as _ESTIMATE_WITH_HISTORY
+from assay.api._filters import Ids, Limit, Offset
 from assay.db import get_session
+from assay.schemas import BatchFacets, ComparisonFacets
 from assay.schemas.statistics import (
     BatchDetails,
     BatchList,
@@ -17,6 +19,7 @@ from assay.schemas.statistics import (
     BatchStatusName,
     ComparisonDetails,
     ComparisonList,
+    ComparisonOutcome,
     ComparisonRequest,
     Estimate,
     EstimateRequest,
@@ -24,12 +27,16 @@ from assay.schemas.statistics import (
     StatisticalTestCatalogue,
 )
 from assay.services.statistics import (
+    BatchFilters,
+    ComparisonFilters,
     catalogue,
     create_batch,
     create_comparison,
     estimate_batch,
     get_batch,
+    get_batch_facets,
     get_comparison,
+    get_comparison_facets,
     list_batches,
     list_comparisons,
     load_catalogue,
@@ -774,6 +781,37 @@ async def create_statistical_batch(
     return await create_batch(request, session)
 
 
+def batch_filters(
+        test_id: Annotated[Ids, Query(
+            description="Only batches of one of these standalone tests.")] = None,
+        test_set_id: Annotated[Ids, Query(
+            description="Only batches of one of these test sets.")] = None,
+        test_plan_id: Annotated[Ids, Query(
+            description="Only batches of one of these test plans.")] = None,
+        batch_status: Annotated[list[BatchStatusName] | None, Query(
+            alias="status", description="Only batches with one of these statuses.")] = None,
+) -> BatchFilters:
+    return BatchFilters(test_id=test_id, test_set_id=test_set_id, test_plan_id=test_plan_id,
+                        status=batch_status)
+
+
+def comparison_filters(
+        batch_id: Annotated[uuid.UUID | None, Query(
+            description="Only comparisons that read this batch, as A or as B.")] = None,
+        test_id: Annotated[Ids, Query(
+            description="Only comparisons of one of these standalone tests.")] = None,
+        test_set_id: Annotated[Ids, Query(
+            description="Only comparisons of one of these test sets.")] = None,
+        test_plan_id: Annotated[Ids, Query(
+            description="Only comparisons of one of these test plans.")] = None,
+        outcome: Annotated[list[ComparisonOutcome] | None, Query(
+            description="Only comparisons with one of these outcomes (each comparison's "
+                        "`outcome`).")] = None,
+) -> ComparisonFilters:
+    return ComparisonFilters(batch_id=batch_id, test_id=test_id, test_set_id=test_set_id,
+                             test_plan_id=test_plan_id, outcome=outcome)
+
+
 @router.get(
     path="/statistics/batches",
     summary="List batches",
@@ -793,27 +831,43 @@ async def create_statistical_batch(
 )
 async def list_statistical_batches(
         session: SessionDep,
-        test_id: Annotated[uuid.UUID | None, Query(
-            description="Only batches of this standalone test.")] = None,
-        test_set_id: Annotated[uuid.UUID | None, Query(
-            description="Only batches of this test set.")] = None,
-        test_plan_id: Annotated[uuid.UUID | None, Query(
-            description="Only batches of this test plan.")] = None,
-        batch_status: Annotated[BatchStatusName | None, Query(
-            alias="status", description="Only batches with this status.")] = None,
-        offset: Annotated[int, Query(ge=0, description="Batches to skip.")] = 0,
-        limit: Annotated[int, Query(ge=1, le=500, description="Batches to return.")] = 100,
+        filters: Annotated[BatchFilters, Depends(batch_filters)],
+        offset: Offset = 0,
+        limit: Limit = 100,
 ) -> BatchList:  # pragma: no cover
     """The batches of a scope — the **Statistics** panel of a test, set or plan page — or
-    of every scope. Filters combine.
+    of every scope. A filter given several times means any of its values; different
+    filters narrow together.
 
-    Any batch still `Pending` or `Running` is brought up to date before the list is
-    answered, so `?status=Running` is the truth now, and a batch that finished since it
-    was last read gets its result computed here (then shows its `summary`).
+    Any batch still `Pending` or `Running` in the scopes asked for is brought up to date
+    before the list is answered, so `?status=Running` is the truth now, and a batch that
+    finished since it was last read gets its result computed here (then shows its
+    `summary`).
     """
-    return await list_batches(session, offset=offset, limit=limit, test_id=test_id,
-                              test_set_id=test_set_id, test_plan_id=test_plan_id,
-                              status=batch_status)
+    return await list_batches(session, offset=offset, limit=limit, filters=filters)
+
+
+@router.get(
+    path="/statistics/batches/facets",
+    summary="Count the batches within the filters by status and by scope",
+    responses={200: {"content": {"application/json": {"example": {
+        "status": {"Pending": 0, "Running": 1, "Passed": 4, "Failed": 2, "Inconclusive": 1,
+                   "Incomplete": 0, "NotRan": 0, "Done": 1},
+        "test_id": {"a1b2c3d4-e5f6-7890-abcd-ef1234567890": 3},
+        "test_set_id": {_SET_ID: 6},
+        "test_plan_id": {},
+    }}}}},
+    response_model=BatchFacets,
+)
+async def get_statistical_batches_facets(
+        session: SessionDep,
+        filters: Annotated[BatchFilters, Depends(batch_filters)],
+) -> BatchFacets:  # pragma: no cover
+    """The batches `GET /statistics/batches` would list with the same filters, counted by
+    `status` (every status present, 0 when none) and by the test, set or plan they ran
+    (only those with some): each facet within every other filter chosen, never its own.
+    In-progress batches are brought up to date first, as the list does."""
+    return await get_batch_facets(session, filters)
 
 
 _GET_STATISTICAL_BATCH_DOC = inspect.cleandoc("""
@@ -1264,24 +1318,39 @@ async def create_statistical_comparison(
 )
 async def list_statistical_comparisons(
         session: SessionDep,
-        batch_id: Annotated[uuid.UUID | None, Query(
-            description="Only comparisons that read this batch, as A or as B.")] = None,
-        test_id: Annotated[uuid.UUID | None, Query(
-            description="Only comparisons of this standalone test's batches.")] = None,
-        test_set_id: Annotated[uuid.UUID | None, Query(
-            description="Only comparisons of this test set's batches.")] = None,
-        test_plan_id: Annotated[uuid.UUID | None, Query(
-            description="Only comparisons of this test plan's batches.")] = None,
-        offset: Annotated[int, Query(ge=0, description="Comparisons to skip.")] = 0,
-        limit: Annotated[int, Query(ge=1, le=500,
-                                    description="Comparisons to return.")] = 100,
+        filters: Annotated[ComparisonFilters, Depends(comparison_filters)],
+        offset: Offset = 0,
+        limit: Limit = 100,
 ) -> ComparisonList:  # pragma: no cover
-    """The comparisons of a scope (the Statistics panel's history) or of one batch (what it
-    was compared with). Filters combine. Each item names both batches with their notes and
-    says the outcome in `summary`; open one for the per-check detail."""
-    return await list_comparisons(session, offset=offset, limit=limit, batch_id=batch_id,
-                                  test_id=test_id, test_set_id=test_set_id,
-                                  test_plan_id=test_plan_id)
+    """The comparisons of a scope (the Statistics panel's history), of one batch (what it
+    was compared with), or of every scope, by outcome. A filter given several times means
+    any of its values; different filters narrow together. Each item names both batches
+    with their notes and says the outcome in `summary`; open one for the per-check
+    detail."""
+    return await list_comparisons(session, offset=offset, limit=limit, filters=filters)
+
+
+@router.get(
+    path="/statistics/comparisons/facets",
+    summary="Count the comparisons within the filters by outcome and by scope",
+    responses={200: {"content": {"application/json": {"example": {
+        "outcome": {"better": 2, "worse": 1, "no_difference": 3, "no_worse": 0,
+                    "inconclusive": 1, "none": 0},
+        "test_id": {"a1b2c3d4-e5f6-7890-abcd-ef1234567890": 2},
+        "test_set_id": {_SET_ID: 5},
+        "test_plan_id": {},
+    }}}}},
+    response_model=ComparisonFacets,
+)
+async def get_statistical_comparisons_facets(
+        session: SessionDep,
+        filters: Annotated[ComparisonFilters, Depends(comparison_filters)],
+) -> ComparisonFacets:  # pragma: no cover
+    """The comparisons `GET /statistics/comparisons` would list with the same filters,
+    counted by `outcome` (every outcome present, 0 when none) and by the test, set or plan
+    they compared (only those with some): each facet within every other filter chosen,
+    never its own."""
+    return await get_comparison_facets(session, filters)
 
 
 @router.get(

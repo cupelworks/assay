@@ -1818,3 +1818,43 @@ def test_downgrade_drops_the_check_types_the_positions_and_the_indexes(scratch):
     assert "test_run_check_types" not in names
     assert "position" not in _table_columns(db_path, "dataset_rows")
     assert "ix_tests_created_at" not in names
+
+
+# --- b8d4f2a6c1e3: a comparison's outcome stored ---
+
+
+def test_upgrade_stores_each_comparisons_outcome_from_its_verdicts(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "a7c3e1f5b9d2")
+    a = _insert_batch(db_path, 30, "binomial_gate", engine="binomial_gate")
+    b = _insert_batch(db_path, 31, "binomial_gate", engine="binomial_gate")
+    verdicts = {40: {"better": 1, "worse": 1}, 41: {"no_worse": 2},
+                42: {"no_worse": 1, "no_difference": 1}, 43: {}}
+    with sqlite3.connect(db_path) as connection:
+        for n, counts in verdicts.items():
+            connection.execute(
+                "INSERT INTO statistical_comparisons (id, batch_a_id, batch_b_id, "
+                "statistical_test, engine, parameters, result, created_at) "
+                "VALUES (?, ?, ?, 'pass_rates', 'pass_rates', '{}', ?, '2026-10-01')",
+                (f"{n:032x}", a, b, json.dumps({"verdicts": counts})))
+
+    command.upgrade(config, "b8d4f2a6c1e3")
+
+    with sqlite3.connect(db_path) as connection:
+        outcomes = dict(connection.execute(
+            "SELECT id, outcome FROM statistical_comparisons").fetchall())
+        indexes = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'")}
+    # worse before better; every check no_worse; some no_worse; nothing compared
+    assert outcomes == {f"{40:032x}": "worse", f"{41:032x}": "no_worse",
+                        f"{42:032x}": "inconclusive", f"{43:032x}": "none"}
+    assert "ix_statistical_comparisons_outcome" in indexes
+
+
+def test_downgrade_drops_the_outcome(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "b8d4f2a6c1e3")
+
+    command.downgrade(config, "a7c3e1f5b9d2")
+
+    assert "outcome" not in _table_columns(db_path, "statistical_comparisons")
