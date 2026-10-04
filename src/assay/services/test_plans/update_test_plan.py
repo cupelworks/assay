@@ -1,13 +1,12 @@
 import logging
 import uuid
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import TestPlanEntryModel
 from assay.schemas import ModifyTestPlanRequest, TestPlanMetadata, TestPlanName
 from assay.services.test_plans._common import (
     _check_unique_test_plan_name_or_409,
+    _describe_test_plans,
     _find_test_plan_by_id_or_404,
 )
 
@@ -57,14 +56,5 @@ async def update_test_plan_by_id(
             extra={"test_plan_id": test_plan_id},
         )
 
-    linked_set_count = await session.scalar(
-        select(func.count(TestPlanEntryModel.id))
-        .where(TestPlanEntryModel.test_plan_id == found.id)
-    ) or 0
-
-    return TestPlanMetadata(
-        id=found.id,
-        name=found.name,
-        created_at=found.created_at,
-        linked_set_count=linked_set_count,
-    )
+    (described,) = await _describe_test_plans([found], session)
+    return described

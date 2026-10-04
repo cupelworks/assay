@@ -1733,3 +1733,88 @@ def test_the_average_until_row_comes_and_goes(scratch):
     with sqlite3.connect(db_path) as connection:
         ids = [r[0] for r in connection.execute("SELECT id FROM statistical_tests")]
     assert "sequential_t" not in ids
+
+
+# --- a7c3e1f5b9d2: version 2 foundations ---
+
+
+def _seed_for_version_2(db_path: Path) -> None:
+    """A dataset of three rows, a test with a set entry, and three runs: a
+    standalone one, an entry's, and a batch's with a left-out check."""
+    entry, copy, test = f"{2:032x}", f"{3:032x}", _TEST
+    checks = [{"name": "Contains", "label": "Contains"},
+              {"name": "Contains", "label": "Contains 2"},
+              {"name": "Toxicity", "label": "Toxicity"}]
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("INSERT INTO datasets (id, name, created_at) "
+                           "VALUES (?, 'd', '2026-01-01')", (f"{9:032x}",))
+        for n, prompt in ((7, "first"), (5, "second"), (6, "third")):
+            connection.execute("INSERT INTO dataset_rows (id, dataset_id, input, "
+                               "expected_output, model_output) VALUES (?, ?, ?, 'e', 'm')",
+                               (f"{n:032x}", f"{9:032x}", prompt))
+        connection.execute("INSERT INTO tests (id, name, input, created_at) "
+                           "VALUES (?, 't', 'q', '2026-01-01')", (test,))
+        connection.execute("INSERT INTO test_set_entries (id, test_id, name, input, "
+                           "snapshot_at, test_type_assignments) "
+                           "VALUES (?, ?, 'e', 'q', '2026-01-01', ?)",
+                           (entry, test, json.dumps(checks)))
+        for run, entry_id, skip in ((f"{20:032x}", entry, None),
+                                    (f"{21:032x}", entry, json.dumps(["Toxicity"]))):
+            connection.execute("INSERT INTO test_runs (id, status, created_at, "
+                               "test_set_entry_id, skip_labels) "
+                               "VALUES (?, 'pending', '2026-01-01', ?, ?)", (run, entry_id, skip))
+        connection.execute("INSERT INTO test_runs (id, status, created_at, test_id) "
+                           "VALUES (?, 'pending', '2026-01-01', ?)", (copy, test))
+        connection.execute("INSERT INTO standalone_runs (id, name, input, snapshot_at, "
+                           "test_type_assignments) VALUES (?, 's', 'q', '2026-01-01', ?)",
+                           (copy, json.dumps([{"name": "ROUGE", "label": "ROUGE"}])))
+
+
+def test_upgrade_numbers_rows_and_fills_every_runs_check_types(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "f8a0b2c4d6e7")
+    _seed_for_version_2(db_path)
+
+    command.upgrade(config, "a7c3e1f5b9d2")
+
+    with sqlite3.connect(db_path) as connection:
+        numbered = connection.execute(
+            "SELECT input, position FROM dataset_rows ORDER BY position").fetchall()
+        types = connection.execute(
+            "SELECT run_id, test_type_name FROM test_run_check_types "
+            "ORDER BY run_id, test_type_name").fetchall()
+        indexes = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'")}
+    # numbered in the order the rows were inserted, not by id
+    assert numbered == [("first", 1), ("second", 2), ("third", 3)]
+    assert types == [
+        (f"{3:032x}", "ROUGE"),
+        (f"{20:032x}", "Contains"), (f"{20:032x}", "Toxicity"),
+        (f"{21:032x}", "Contains"),  # Toxicity was left out of this batch run
+    ]
+    assert {"ix_test_set_entries_test_id", "ix_tests_dataset_row_id", "ix_tests_created_at",
+            "ix_test_type_assignments_test_type_name",
+            "ix_test_run_check_types_test_type_name"} <= indexes
+
+
+def test_a_row_number_is_unique_within_its_dataset(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "f8a0b2c4d6e7")
+    _seed_for_version_2(db_path)
+    command.upgrade(config, "a7c3e1f5b9d2")
+
+    with sqlite3.connect(db_path) as connection, pytest.raises(sqlite3.IntegrityError):
+        connection.execute("UPDATE dataset_rows SET position = 1 WHERE input = 'second'")
+
+
+def test_downgrade_drops_the_check_types_the_positions_and_the_indexes(scratch):
+    config, db_path = scratch
+    command.upgrade(config, "a7c3e1f5b9d2")
+
+    command.downgrade(config, "f8a0b2c4d6e7")
+
+    with sqlite3.connect(db_path) as connection:
+        names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
+    assert "test_run_check_types" not in names
+    assert "position" not in _table_columns(db_path, "dataset_rows")
+    assert "ix_tests_created_at" not in names

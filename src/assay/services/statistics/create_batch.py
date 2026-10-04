@@ -15,7 +15,7 @@ from assay.schemas.statistics import (
     StatisticalEngine,
     StatisticalTestKind,
 )
-from assay.services.runs._common import _dispatch_runs
+from assay.services.runs._common import _add_runs, _dispatch_runs
 from assay.services.runs.create_new_run import (
     _new_standalone_run,
     _new_test_plan_execution,
@@ -105,8 +105,7 @@ async def create_batch(request: BatchRequest, session: AsyncSession) -> BatchDet
             runs.extend(time_runs)
     for run in runs:
         run.skip_labels = sorted(skips.get(run.test_set_entry_id, [])) or None
-    session.add_all(executions)
-    session.add_all(runs)
+    await _add_runs(session, runs, executions)
     await session.commit()
 
     logger.info(

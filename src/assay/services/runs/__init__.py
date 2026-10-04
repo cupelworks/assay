@@ -12,13 +12,15 @@ from assay.services.runs.get_run_details import (
 )
 from assay.services.runs.get_run_metadata import (
     get_execution_metadata_all_executions,
-    get_run_metadata_all_runs,
     get_standalone_run_metadata_all_test_runs,
+    get_test_plan_execution_details,
     get_test_plan_execution_metadata_all_executions,
     get_test_plan_execution_run_metadata_all_runs,
+    get_test_set_execution_details,
     get_test_set_execution_metadata_all_executions,
     get_test_set_execution_run_metadata_all_runs,
 )
+from assay.services.runs.list_runs import RunFilters, get_run_facets, get_run_metadata_all_runs
 
 __all__ = [
     "create_new_live_test_plan_run",
@@ -30,7 +32,11 @@ __all__ = [
     "get_run_details_by_test_and_run_id",
     "get_run_details_by_test_plan_execution_and_run_id",
     "get_run_details_by_test_set_execution_and_run_id",
+    "RunFilters",
+    "get_run_facets",
     "get_run_metadata_all_runs",
+    "get_test_plan_execution_details",
+    "get_test_set_execution_details",
     "get_standalone_run_metadata_all_test_runs",
     "get_test_plan_execution_metadata_all_executions",
     "get_test_plan_execution_run_metadata_all_runs",

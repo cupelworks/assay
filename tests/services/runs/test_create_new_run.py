@@ -25,6 +25,23 @@ from assay.services import (
 
 # --- create_new_standalone_run() ---
 
+@pytest.fixture(autouse=True)
+def added():
+    """_add_runs, recorded: each flow hands it the runs it built and their
+    executions (tested on its own in test_add_runs.py)."""
+    with patch("assay.services.runs.create_new_run._add_runs", new=AsyncMock()) as mock:
+        yield mock
+
+
+def _runs(added) -> list:
+    return added.call_args.args[1]
+
+
+def _execution(added):
+    (execution,) = added.call_args.args[2]
+    return execution
+
+
 def test_standalone_test_not_found():
     test_id = uuid.uuid4()
     
@@ -66,7 +83,7 @@ def test_standalone_empty_test_type_assignment():
     assert f"No test types assigned to Tests with ids {[str(test_id)]}" in str(e.value.detail)
     
     
-def test_standalone_happy_path():
+def test_standalone_happy_path(added):
     test_id = uuid.uuid4()
     
     session = AsyncMock()
@@ -96,10 +113,10 @@ def test_standalone_happy_path():
     ) as mock_dispatch:
         response = asyncio.run(create_new_standalone_run(test_id, session))
 
-    test_run_model = session.add.call_args.args[0]
+    (test_run_model,) = _runs(added)
 
     session.scalars.assert_called_once()
-    session.add.assert_called_once()
+    added.assert_awaited_once()
     session.commit.assert_called_once()
     mock_dispatch.assert_called_once_with([test_run_model.id])
     # Dispatch must happen only after the creating transaction has
@@ -189,7 +206,7 @@ def test_new_live_test_set_run_entries_missing_test_types():
             in str(e.value.detail))
 
 
-def test_new_live_test_set_run_happy_path():
+def test_new_live_test_set_run_happy_path(added):
     test_set_id = uuid.uuid4()
 
     session = AsyncMock()
@@ -221,15 +238,14 @@ def test_new_live_test_set_run_happy_path():
     session.scalar.assert_called_once()
     session.scalars.assert_called_once()
     session.execute.assert_called_once()
-    session.add.assert_called_once()
-    session.add_all.assert_called_once()
+    added.assert_awaited_once()
     session.commit.assert_called_once()
     assert order == ["commit", "dispatch"]
 
-    test_set_execution_model = session.add.call_args.args[0]
+    test_set_execution_model = _execution(added)
     assert test_set_execution_model.test_set_id == test_set_id
 
-    test_runs_models = session.add_all.call_args.args[0]
+    test_runs_models = _runs(added)
     assert len(test_runs_models) == len(available_test_set_entry_models)
 
     # Every entry must have gotten exactly one run, and every run must point
@@ -336,7 +352,7 @@ def test_new_replay_test_set_run_execution_entries_not_found():
             f"test set entries") in str(e.value.detail)
 
 
-def test_new_replay_test_set_run_happy_path():
+def test_new_replay_test_set_run_happy_path(added):
     test_set_id = uuid.uuid4()
     test_set_execution_id = uuid.uuid4()
 
@@ -367,12 +383,11 @@ def test_new_replay_test_set_run_happy_path():
 
     assert session.scalar.call_count == 3
     session.scalars.assert_called_once()
-    session.add.assert_called_once()
-    session.add_all.assert_called_once()
+    added.assert_awaited_once()
     session.commit.assert_called_once()
     assert order == ["commit", "dispatch"]
 
-    test_set_execution_model = session.add.call_args.args[0]
+    test_set_execution_model = _execution(added)
     assert isinstance(test_set_execution_model, TestSetExecutionModel)
     assert test_set_execution_model.test_set_id == test_set_id
     assert test_set_execution_model.replayed_execution_id == test_set_execution_id
@@ -381,7 +396,7 @@ def test_new_replay_test_set_run_happy_path():
     # execution instead of the new one.
     assert test_set_execution_model.id != test_set_execution_id
 
-    test_runs_models = session.add_all.call_args.args[0]
+    test_runs_models = _runs(added)
     assert len(test_runs_models) == len(available_test_set_entry_models)
 
     # Every replayed entry must have gotten exactly one new run, and every
@@ -499,7 +514,7 @@ def test_new_live_test_plan_run_entries_missing_test_types():
             in str(e.value.detail))
 
 
-def test_new_live_test_plan_run_happy_path():
+def test_new_live_test_plan_run_happy_path(added):
     test_plan_id = uuid.uuid4()
     test_set_ids = [uuid.uuid4(), uuid.uuid4()]
     available_entry_ids = [uuid.uuid4() for _ in range(3)]
@@ -530,15 +545,14 @@ def test_new_live_test_plan_run_happy_path():
     session.scalar.assert_called_once()
     session.scalars.assert_called_once()
     assert session.execute.call_count == 2
-    session.add.assert_called_once()
-    session.add_all.assert_called_once()
+    added.assert_awaited_once()
     session.commit.assert_called_once()
     assert order == ["commit", "dispatch"]
 
-    test_plan_execution_model = session.add.call_args.args[0]
+    test_plan_execution_model = _execution(added)
     assert test_plan_execution_model.test_plan_id == test_plan_id
 
-    test_runs_models = session.add_all.call_args.args[0]
+    test_runs_models = _runs(added)
     assert len(test_runs_models) == len(available_entry_ids)
 
     # Every entry must have gotten exactly one run, and every run must point
@@ -661,7 +675,7 @@ def test_new_replay_test_plan_execution_id_entries_not_found():
     assert str(test_plan_id) not in str(e.value.detail)
 
 
-def test_new_replay_test_plan_happy_path():
+def test_new_replay_test_plan_happy_path(added):
     test_plan_id = uuid.uuid4()
     test_plan_execution_id = uuid.uuid4()
 
@@ -689,16 +703,15 @@ def test_new_replay_test_plan_happy_path():
         ))
 
     session.scalars.assert_called_once()
-    session.add.assert_called_once()
-    session.add_all.assert_called_once()
+    added.assert_awaited_once()
     assert session.scalar.call_count == 3
     assert order == ["commit", "dispatch"]
 
-    test_plan_execution_model = session.add.call_args.args[0]
+    test_plan_execution_model = _execution(added)
     assert test_plan_execution_model.test_plan_id == test_plan_id
     assert test_plan_execution_model.replayed_execution_id == test_plan_execution_id
 
-    test_run_models = session.add_all.call_args.args[0]
+    test_run_models = _runs(added)
     assert len(test_run_models) == 1
 
     test_run_model = next(iter(test_run_models))

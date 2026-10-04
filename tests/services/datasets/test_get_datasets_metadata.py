@@ -10,6 +10,7 @@ from assay.services import (
     get_dataset_metadata_by_id,
     get_datasets_metadata,
 )
+from tests.services.standing_fakes import neutral_standing
 
 
 def _make_dataset(dataset_id: uuid.UUID = None, name: str = "My Dataset") -> MagicMock:
@@ -23,9 +24,7 @@ def _make_dataset(dataset_id: uuid.UUID = None, name: str = "My Dataset") -> Mag
 def _make_session(total: int, datasets: list) -> AsyncMock:
     session = AsyncMock()
     session.scalar.return_value = total
-    scalars_result = MagicMock()
-    scalars_result.__iter__ = MagicMock(return_value=iter(datasets))
-    session.scalars.return_value = scalars_result
+    session.scalars.return_value = MagicMock(all=MagicMock(return_value=datasets))
     return session
 
 
@@ -34,9 +33,11 @@ def test_get_datasets_metadata_returns_correct_items():
     ds2 = _make_dataset(name="Dataset B")
     session = _make_session(total=2, datasets=[ds1, ds2])
 
-    result = asyncio.run(get_datasets_metadata(offset=0, limit=10, session=session))
+    with neutral_standing({ds1.id: 4}):
+        result = asyncio.run(get_datasets_metadata(offset=0, limit=10, session=session))
 
     assert len(result.items) == 2
+    assert (result.items[0].row_count, result.items[0].first_prompt) == (4, None)
     assert result.items[0].id == ds1.id
     assert result.items[0].name == ds1.name
     assert result.items[0].created_at == ds1.created_at
@@ -76,7 +77,7 @@ def test_get_dataset_metadata_by_id_returns_correct_metadata():
     session = AsyncMock()
 
     with patch("assay.services.datasets.get_datasets_metadata._get_dataset_or_404",
-               new=AsyncMock(return_value=dataset)):
+               new=AsyncMock(return_value=dataset)), neutral_standing():
         result = asyncio.run(get_dataset_metadata_by_id(dataset.id, session))
 
     assert result.id == dataset.id

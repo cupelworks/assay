@@ -4,39 +4,44 @@ from sqlalchemy import func, select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import TestPlanExecutionModel, TestRunModel, TestSetExecutionModel, TestStatus
+from assay.models import (
+    TestPlanExecutionModel,
+    TestPlanModel,
+    TestRunModel,
+    TestSetExecutionModel,
+    TestSetModel,
+)
 from assay.schemas import (
     ExecutionMetadata,
     ExecutionOrigin,
+    ExecutionRunSort,
     PaginatedExecutionMetadata,
-    PaginatedRunMetadata,
     PaginatedStandaloneRunCreationMetadata,
     PaginatedTestPlanExecutionMetadata,
     PaginatedTestPlanExecutionRunMetadata,
     PaginatedTestSetExecutionMetadata,
     PaginatedTestSetExecutionRunMetadata,
-    RunMetadata,
-    RunOrigin,
+    RunCounts,
     StandaloneRunCreationMetadata,
     TestCaseID,
+    TestPlanExecutionDetails,
     TestPlanExecutionMetadata,
-    TestPlanExecutionRunMetadata,
     TestPlanID,
     TestPlanReplayedExecutionID,
-    TestSetEntryID,
-    TestSetExecutionID,
+    TestSetExecutionDetails,
     TestSetExecutionMetadata,
-    TestSetExecutionRunMetadata,
     TestSetID,
     TestSetReplayedExecutionID,
 )
-from assay.schemas.runs import TestPlanExecutionID
+from assay.services._standing import run_counts_by
 from assay.services.runs._common import (
     _batch_clause,
-    _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404,
-    _check_test_plan_execution_or_404,
-    _check_test_set_execution_id_linked_to_specific_test_set_id_or_404,
-    _check_test_set_execution_or_404,
+)
+from assay.services.runs.executions import (
+    TEST_PLAN,
+    TEST_SET,
+    get_execution,
+    list_execution_runs,
 )
 from assay.services.test_plans._common import _find_test_plan_by_id_or_404
 from assay.services.test_sets._common import _find_test_set_or_404
@@ -102,179 +107,6 @@ async def get_standalone_run_metadata_all_test_runs(
     )
 
 
-_ORIGIN_FK_COLUMN = {
-    RunOrigin.standalone: TestRunModel.test_id,
-    RunOrigin.test_set: TestRunModel.test_set_execution_id,
-    RunOrigin.test_plan: TestRunModel.test_plan_execution_id,
-}
-
-
-async def get_run_metadata_all_runs(
-        session: AsyncSession,
-        offset: int = 0,
-        limit: int = 100,
-        status: TestStatus | None = None,
-        origin: RunOrigin | None = None,
-        batch: str | None = None,
-) -> PaginatedRunMetadata:
-    """Orchestrates run listing across the entire system, regardless of
-    origin: counts every TestRunModel row in scope, fetches the requested
-    page, and returns a paginated response with each row's origin resolved
-    from TestRunModel's own mode invariant.
-
-    Unlike every other listing in this module, this has no parent resource
-    to validate — no guard runs first. With neither `status` nor `origin`
-    given, every run is in scope, whether it was created standalone, via a
-    test set execution, or via a test plan execution. A single query over
-    TestRunModel covers all three, since which mode a row belongs to is
-    already fully determined by which of its own FK columns is set (see
-    TestRunModel's docstring) — no join needed to tell them apart, and
-    filtering by `origin` is just an IS NOT NULL check on the one FK column
-    that mode implies, same reasoning. The one place this does join:
-    resolving `test_set_id`/`test_plan_id` (so a caller can deep-link a row
-    without first resolving its execution ID) needs two LEFT OUTER JOINs
-    against TestSetExecutionModel/TestPlanExecutionModel, since neither ID
-    lives on TestRunModel itself — harmless per row since at most one side
-    ever matches, same mode invariant.
-
-    Args:
-        session: Async SQLAlchemy session injected by FastAPI.
-        offset: Number of records to skip.
-        limit: Maximum number of records to return.
-        status: If given, restricts both the count and the page to runs
-            currently at this status (e.g. `Pending`, to see what's still
-            queued). `None` (the default) returns every run regardless of
-            status, the original unfiltered behavior.
-        origin: If given, restricts both the count and the page to runs
-            created this way (`Standalone`, `TestSet`, or `TestPlan`).
-            `None` (the default) returns every run regardless of origin.
-            Combines with `status` — both filters apply together when both
-            are given.
-
-    Returns:
-        A paginated response with each run's ID, status, created_at,
-        origin, and the origin-specific ID(s) that follow from it (exactly
-        one of `test_case_id`, or the `test_set_entry_id` +
-        `test_set_execution_id`/`test_set_id` pair, or the
-        `test_set_entry_id` + `test_plan_execution_id`/`test_plan_id`
-        pair, is non-null per item), plus total count, offset, and limit.
-    """
-    count_stmt = select(func.count(TestRunModel.id))
-    found_stmt = select(
-        TestRunModel.id,
-        TestRunModel.status,
-        TestRunModel.created_at,
-        TestRunModel.test_id,
-        TestRunModel.test_set_entry_id,
-        TestRunModel.test_set_execution_id,
-        TestRunModel.test_plan_execution_id,
-        TestRunModel.batch_id,
-        TestRunModel.batch_index,
-        TestSetExecutionModel.test_set_id,
-        TestPlanExecutionModel.test_plan_id,
-    ).outerjoin(
-        TestSetExecutionModel,
-        TestRunModel.test_set_execution_id == TestSetExecutionModel.id,
-    ).outerjoin(
-        TestPlanExecutionModel,
-        TestRunModel.test_plan_execution_id == TestPlanExecutionModel.id,
-    )
-    if status is not None:
-        count_stmt = count_stmt.where(TestRunModel.status == status)
-        found_stmt = found_stmt.where(TestRunModel.status == status)
-    if origin is not None:
-        fk_column = _ORIGIN_FK_COLUMN[origin]
-        count_stmt = count_stmt.where(fk_column.is_not(None))
-        found_stmt = found_stmt.where(fk_column.is_not(None))
-    if (clause := _batch_clause(TestRunModel.batch_id, batch)) is not None:
-        count_stmt = count_stmt.where(clause)
-        found_stmt = found_stmt.where(clause)
-
-    total = await session.scalar(count_stmt) or 0
-
-    found = (await session.execute(
-        found_stmt
-        .order_by(TestRunModel.created_at.desc(), TestRunModel.id.desc())
-        .offset(offset)
-        .limit(limit)
-    )).all()
-
-    return PaginatedRunMetadata(
-        total=total,
-        offset=offset,
-        limit=limit,
-        items=[_run_metadata_from_row(item) for item in found],
-    )
-
-
-def _run_metadata_from_row(row: Row) -> RunMetadata:
-    """Resolve a single TestRunModel row's origin from its own FK columns.
-
-    Mirrors TestRunModel's documented mode invariant exactly: `test_id` set
-    means standalone, `test_set_execution_id` set means test-set-triggered,
-    `test_plan_execution_id` set means test-plan-triggered — the three
-    patterns are mutually exclusive by construction, so checking them in
-    this order is enough to classify every row.
-
-    Args:
-        row: A result row carrying id, status, created_at, test_id,
-            test_set_entry_id, test_set_execution_id,
-            test_plan_execution_id, test_set_id (from the
-            TestSetExecutionModel join), and test_plan_id (from the
-            TestPlanExecutionModel join).
-
-    Returns:
-        The row's RunMetadata, with `origin` and only the ID field(s) that
-        origin implies populated — the rest left null.
-    """
-    if row.test_id is not None:
-        return RunMetadata(
-            id=row.id,
-            batch_id=row.batch_id,
-            batch_index=row.batch_index,
-            status=row.status,
-            created_at=row.created_at,
-            origin=RunOrigin.standalone,
-            test_case_id=TestCaseID(id=row.test_id),
-            test_set_entry_id=None,
-            test_set_execution_id=None,
-            test_plan_execution_id=None,
-            test_set_id=None,
-            test_plan_id=None,
-        )
-
-    if row.test_set_execution_id is not None:
-        return RunMetadata(
-            id=row.id,
-            batch_id=row.batch_id,
-            batch_index=row.batch_index,
-            status=row.status,
-            created_at=row.created_at,
-            origin=RunOrigin.test_set,
-            test_case_id=None,
-            test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
-            test_set_execution_id=TestSetExecutionID(id=row.test_set_execution_id),
-            test_plan_execution_id=None,
-            test_set_id=TestSetID(id=row.test_set_id),
-            test_plan_id=None,
-        )
-
-    return RunMetadata(
-        id=row.id,
-        batch_id=row.batch_id,
-        batch_index=row.batch_index,
-        status=row.status,
-        created_at=row.created_at,
-        origin=RunOrigin.test_plan,
-        test_case_id=None,
-        test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
-        test_set_execution_id=None,
-        test_plan_execution_id=TestPlanExecutionID(id=row.test_plan_execution_id),
-        test_set_id=None,
-        test_plan_id=TestPlanID(id=row.test_plan_id),
-    )
-
-
 async def get_test_set_execution_metadata_all_executions(
         test_set_id: uuid.UUID,
         session: AsyncSession,
@@ -332,6 +164,9 @@ async def get_test_set_execution_metadata_all_executions(
         .limit(limit)
     )).all()
     
+    runs = await run_counts_by(session, TestRunModel.test_set_execution_id,
+                               [item.id for item in found])
+
     return PaginatedTestSetExecutionMetadata(
         total=total,
         offset=offset,
@@ -339,6 +174,7 @@ async def get_test_set_execution_metadata_all_executions(
         items=[
             TestSetExecutionMetadata(
                 id=item.id,
+                runs=runs[item.id],
                 created_at=item.created_at,
                 test_set_id=TestSetID(id=test_set_id),
                 run_count=item.run_count,
@@ -409,6 +245,9 @@ async def get_test_plan_execution_metadata_all_executions(
         .limit(limit)
     )).all()
 
+    runs = await run_counts_by(session, TestRunModel.test_plan_execution_id,
+                               [item.id for item in found])
+
     return PaginatedTestPlanExecutionMetadata(
         total=total,
         offset=offset,
@@ -416,6 +255,7 @@ async def get_test_plan_execution_metadata_all_executions(
         items=[
             TestPlanExecutionMetadata(
                 id=item.id,
+                runs=runs[item.id],
                 created_at=item.created_at,
                 test_plan_id=TestPlanID(id=test_plan_id),
                 run_count=item.run_count,
@@ -497,15 +337,17 @@ async def get_execution_metadata_all_executions(
             TestSetExecutionModel.replayed_execution_id,
             TestSetExecutionModel.batch_id,
             TestSetExecutionModel.batch_index,
+            TestSetModel.name,
             func.count(TestRunModel.id).label("run_count"),
         )
+        .join(TestSetModel, TestSetModel.id == TestSetExecutionModel.test_set_id)
         .join(
             TestRunModel,
             TestSetExecutionModel.id == TestRunModel.test_set_execution_id,
             isouter=True,
         )
         .where(*set_filters)
-        .group_by(TestSetExecutionModel.id)
+        .group_by(TestSetExecutionModel.id, TestSetModel.name)
         .order_by(TestSetExecutionModel.created_at.desc(), TestSetExecutionModel.id.desc())
         .limit(fetch_count)
     )).all()
@@ -518,35 +360,44 @@ async def get_execution_metadata_all_executions(
             TestPlanExecutionModel.replayed_execution_id,
             TestPlanExecutionModel.batch_id,
             TestPlanExecutionModel.batch_index,
+            TestPlanModel.name,
             func.count(TestRunModel.id).label("run_count"),
         )
+        .join(TestPlanModel, TestPlanModel.id == TestPlanExecutionModel.test_plan_id)
         .join(
             TestRunModel,
             TestPlanExecutionModel.id == TestRunModel.test_plan_execution_id,
             isouter=True,
         )
         .where(*plan_filters)
-        .group_by(TestPlanExecutionModel.id)
+        .group_by(TestPlanExecutionModel.id, TestPlanModel.name)
         .order_by(TestPlanExecutionModel.created_at.desc(), TestPlanExecutionModel.id.desc())
         .limit(fetch_count)
     )).all()
 
-    merged = sorted(
-        [_execution_metadata_from_test_set_row(row) for row in test_set_rows]
-        + [_execution_metadata_from_test_plan_row(row) for row in test_plan_rows],
-        key=lambda item: (item.created_at, item.id),
+    page = sorted(
+        [(row, _execution_metadata_from_test_set_row) for row in test_set_rows]
+        + [(row, _execution_metadata_from_test_plan_row) for row in test_plan_rows],
+        key=lambda found: (found[0].created_at, found[0].id),
         reverse=True,
-    )
+    )[offset:offset + limit]
+    set_runs = await run_counts_by(session, TestRunModel.test_set_execution_id,
+                                   [row.id for row, build in page
+                                    if build is _execution_metadata_from_test_set_row])
+    plan_runs = await run_counts_by(session, TestRunModel.test_plan_execution_id,
+                                    [row.id for row, build in page
+                                     if build is _execution_metadata_from_test_plan_row])
+    runs = set_runs | plan_runs
 
     return PaginatedExecutionMetadata(
         total=total,
         offset=offset,
         limit=limit,
-        items=merged[offset:offset + limit],
+        items=[build(row, runs[row.id]) for row, build in page],
     )
 
 
-def _execution_metadata_from_test_set_row(row: Row) -> ExecutionMetadata:
+def _execution_metadata_from_test_set_row(row: Row, runs: RunCounts) -> ExecutionMetadata:
     """Build a `TestSet`-origin ExecutionMetadata from a TestSetExecutionModel row.
 
     Args:
@@ -563,6 +414,8 @@ def _execution_metadata_from_test_set_row(row: Row) -> ExecutionMetadata:
         batch_index=row.batch_index,
         created_at=row.created_at,
         origin=ExecutionOrigin.test_set,
+        name=row.name,
+        runs=runs,
         run_count=row.run_count,
         test_set_id=TestSetID(id=row.test_set_id),
         test_plan_id=None,
@@ -572,7 +425,7 @@ def _execution_metadata_from_test_set_row(row: Row) -> ExecutionMetadata:
     )
 
 
-def _execution_metadata_from_test_plan_row(row: Row) -> ExecutionMetadata:
+def _execution_metadata_from_test_plan_row(row: Row, runs: RunCounts) -> ExecutionMetadata:
     """Build a `TestPlan`-origin ExecutionMetadata from a TestPlanExecutionModel row.
 
     Args:
@@ -589,6 +442,8 @@ def _execution_metadata_from_test_plan_row(row: Row) -> ExecutionMetadata:
         batch_index=row.batch_index,
         created_at=row.created_at,
         origin=ExecutionOrigin.test_plan,
+        name=row.name,
+        runs=runs,
         run_count=row.run_count,
         test_set_id=None,
         test_plan_id=TestPlanID(id=row.test_plan_id),
@@ -599,149 +454,46 @@ def _execution_metadata_from_test_plan_row(row: Row) -> ExecutionMetadata:
 
 
 async def get_test_set_execution_run_metadata_all_runs(
-        test_set_id: uuid.UUID,
-        test_set_execution_id: uuid.UUID,
-        session: AsyncSession,
-        offset: int = 0,
-        limit: int = 100,
+        test_set_id: uuid.UUID, test_set_execution_id: uuid.UUID, session: AsyncSession,
+        offset: int = 0, limit: int = 100, sort: ExecutionRunSort = ExecutionRunSort.newest,
 ) -> PaginatedTestSetExecutionRunMetadata:
-    """Orchestrates run listing for a single test set execution: validates the
-    test set ID, the execution ID, and that the execution belongs to this
-    test set, counts total runs the execution produced, fetches the
-    requested page, and returns a paginated response.
-
-    Args:
-        test_set_id: The UUID of the test set the execution must belong to.
-        test_set_execution_id: The UUID of the execution whose runs are being listed.
-        session: Async SQLAlchemy session injected by FastAPI.
-        offset: Number of records to skip.
-        limit: Maximum number of records to return.
-
-    Returns:
-        A paginated response with each run's ID, status, created_at,
-        batch_id and batch_index (null outside a statistical batch),
-        test_set_entry_id, and test_set_execution_id, plus total count,
-        offset, and limit.
+    """A test set execution's runs, sorted and paged (`executions.list_execution_runs`).
 
     Raises:
         HTTPException 404: No test set exists with the given ID, no
             execution exists with the given ID, or the execution exists
             but doesn't belong to this test set.
     """
-    await _find_test_set_or_404(test_set_id, session)
-    await _check_test_set_execution_or_404(test_set_execution_id, session)
-    await _check_test_set_execution_id_linked_to_specific_test_set_id_or_404(
-        test_set_id, test_set_execution_id, session)
-
-    total = await session.scalar(
-        select(func.count(TestRunModel.id))
-        .where(TestRunModel.test_set_execution_id == test_set_execution_id)
-    ) or 0
-
-    found = (await session.execute(
-        select(
-            TestRunModel.id,
-            TestRunModel.status,
-            TestRunModel.created_at,
-            TestRunModel.batch_id,
-            TestRunModel.batch_index,
-            TestRunModel.test_set_entry_id,
-        )
-        .where(TestRunModel.test_set_execution_id == test_set_execution_id)
-        .order_by(TestRunModel.created_at.desc(), TestRunModel.id.desc())
-        .offset(offset)
-        .limit(limit)
-    )).all()
-
-    return PaginatedTestSetExecutionRunMetadata(
-        total=total,
-        offset=offset,
-        limit=limit,
-        items=[
-            TestSetExecutionRunMetadata(
-                id=item.id,
-                status=item.status,
-                created_at=item.created_at,
-                batch_id=item.batch_id,
-                batch_index=item.batch_index,
-                test_set_entry_id=TestSetEntryID(id=item.test_set_entry_id),
-                test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
-            )
-            for item in found
-        ]
-    )
+    return await list_execution_runs(TEST_SET, test_set_id, test_set_execution_id, session,
+                                     sort, offset, limit)
 
 
 async def get_test_plan_execution_run_metadata_all_runs(
-        test_plan_id: uuid.UUID,
-        test_plan_execution_id: uuid.UUID,
-        session: AsyncSession,
-        offset: int = 0,
-        limit: int = 100,
+        test_plan_id: uuid.UUID, test_plan_execution_id: uuid.UUID, session: AsyncSession,
+        offset: int = 0, limit: int = 100, sort: ExecutionRunSort = ExecutionRunSort.newest,
 ) -> PaginatedTestPlanExecutionRunMetadata:
-    """Orchestrates run listing for a single test plan execution: validates the
-    test plan ID, the execution ID, and that the execution belongs to this
-    test plan, counts total runs the execution produced, fetches the
-    requested page, and returns a paginated response.
-
-    Args:
-        test_plan_id: The UUID of the test plan the execution must belong to.
-        test_plan_execution_id: The UUID of the execution whose runs are being listed.
-        session: Async SQLAlchemy session injected by FastAPI.
-        offset: Number of records to skip.
-        limit: Maximum number of records to return.
-
-    Returns:
-        A paginated response with each run's ID, status, created_at,
-        batch_id and batch_index (null outside a statistical batch),
-        test_set_entry_id, and test_plan_execution_id, plus total count,
-        offset, and limit.
+    """A test plan execution's runs, sorted and paged (`executions.list_execution_runs`).
 
     Raises:
         HTTPException 404: No test plan exists with the given ID, no
             execution exists with the given ID, or the execution exists
             but doesn't belong to this test plan.
     """
-    await _find_test_plan_by_id_or_404(test_plan_id, session)
-    await _check_test_plan_execution_or_404(test_plan_execution_id, session)
-    await _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404(
-        test_plan_id, test_plan_execution_id, session
-    )
+    return await list_execution_runs(TEST_PLAN, test_plan_id, test_plan_execution_id, session,
+                                     sort, offset, limit)
 
-    total = await session.scalar(
-        select(func.count(TestRunModel.id))
-        .where(TestRunModel.test_plan_execution_id == test_plan_execution_id)
-    ) or 0
-    
-    found = (await session.execute(
-        select(
-            TestRunModel.id,
-            TestRunModel.status,
-            TestRunModel.created_at,
-            TestRunModel.batch_id,
-            TestRunModel.batch_index,
-            TestRunModel.test_set_entry_id,
-        )
-        .where(TestRunModel.test_plan_execution_id == test_plan_execution_id)
-        .order_by(TestRunModel.created_at.desc(), TestRunModel.id.desc())
-        .offset(offset)
-        .limit(limit)
-    )).all()
-    
-    return PaginatedTestPlanExecutionRunMetadata(
-        total=total,
-        offset=offset,
-        limit=limit,
-        items=[
-            TestPlanExecutionRunMetadata(
-                id=item.id,
-                status=item.status,
-                created_at=item.created_at,
-                batch_id=item.batch_id,
-                batch_index=item.batch_index,
-                test_set_entry_id=TestSetEntryID(id=item.test_set_entry_id),
-                test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
-            )
-            for item in found
-        ]
-    )
+
+async def get_test_set_execution_details(test_set_id: uuid.UUID, test_set_execution_id: uuid.UUID,
+                                         session: AsyncSession) -> TestSetExecutionDetails:
+    """One test set execution, read whole (`executions.get_execution`): 404 as the
+    execution's runs list."""
+    return await get_execution(TEST_SET, test_set_id, test_set_execution_id, session)
+
+
+async def get_test_plan_execution_details(test_plan_id: uuid.UUID,
+                                          test_plan_execution_id: uuid.UUID,
+                                          session: AsyncSession) -> TestPlanExecutionDetails:
+    """One test plan execution, read whole (`executions.get_execution`): 404 as the
+    execution's runs list."""
+    return await get_execution(TEST_PLAN, test_plan_id, test_plan_execution_id, session)
+

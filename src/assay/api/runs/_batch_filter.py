@@ -3,8 +3,10 @@ from typing import Annotated
 
 from fastapi import Query
 
+from assay.api._filters import UUID_PATTERN
+
 BatchFilter = Annotated[str | None, Query(
-    pattern=r"^(none|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+    pattern=rf"^(none|{UUID_PATTERN})$",
     description=(
         "Runs and executions created by a statistical batch (`POST /statistics/batches`) are "
         "listed with everything else, each with its `batch_id`. `none` keeps only what no "

@@ -26,6 +26,7 @@ from assay.models import (
     TestStatus,
     TestTypesModel,
 )
+from assay.run_check_types import with_check_types
 from assay.schemas import TestTypeAssignment
 
 SEQUENTIAL_ENGINES = frozenset({"sequential_gate", "sequential_judge_stability",
@@ -148,7 +149,8 @@ def next_wave(batch: StatisticalBatchModel, session: Session, first: int, last: 
               ) -> tuple[list, list[TestRunModel]]:
     """The executions and runs of times first..last, the same content as the
     batch's first wave: a standalone test's frozen copy copied (the test may
-    have been edited since), a set's or plan's entries run again."""
+    have been edited since), a set's or plan's entries run again; each run
+    with its check types."""
     _, left_out = read_overrides(batch.overrides)
     skips: dict = defaultdict(list)
     for entry_id, label in left_out:
@@ -168,6 +170,7 @@ def next_wave(batch: StatisticalBatchModel, session: Session, first: int, last: 
                 expected_output=copy.expected_output, model_output=copy.model_output,
                 test_type_assignments=copy.test_type_assignments, snapshot_at=copy.snapshot_at)
             runs.append(run)
+        with_check_types(runs)
         return executions, runs
     entry_ids = sorted(set(session.scalars(
         select(TestRunModel.test_set_entry_id).where(TestRunModel.batch_id == batch.id))),
@@ -189,6 +192,9 @@ def next_wave(batch: StatisticalBatchModel, session: Session, first: int, last: 
                                  batch_index=index, skip_labels=sorted(skips[entry_id]) or None,
                                  **link)
                     for entry_id in entry_ids)
+    with_check_types(runs, dict(session.execute(
+        select(TestSetEntryModel.id, TestSetEntryModel.test_type_assignments)
+        .where(TestSetEntryModel.id.in_(entry_ids))).tuples().all()))
     return executions, runs
 
 

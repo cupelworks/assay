@@ -17,6 +17,10 @@ class TestSetEntryDetails(TestSetEntryID, CreateTestCaseRequest):
         ...,
         description='The unique identifier of the test this entry was created from',
     )
+    has_runs: bool = Field(
+        description="Whether the entry has ever run, a batch included: then it's frozen, and "
+                    "can't be edited or deleted.",
+    )
 
 
 class PaginatedTestSetEntriesDetails(Pagination):

@@ -1,36 +1,38 @@
 import asyncio
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
 
 from assay.schemas import TestCaseID
 from assay.services import delete_test_by_id
-from assay.services.tests.delete_test import _assert_not_referenced
+from assay.services.tests.delete_test import _raise_if_referenced
 
-# --- _assert_not_referenced ---
+# --- _raise_if_referenced ---
 
-def test_assert_not_referenced_passes_when_no_ids_found():
-    session = AsyncMock()
-    session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
-
-    with patch("assay.services.tests.delete_test.select"):
-        asyncio.run(_assert_not_referenced(session, MagicMock(), [], ""))
+def test_nothing_referenced_raises_nothing():
+    _raise_if_referenced([uuid.uuid4()], set(), "test sets")
 
 
-def test_assert_is_referenced_raises_409_for_single_id():
-    found_id = uuid.uuid4()
+def test_a_referenced_test_is_a_409_naming_it_and_the_reason():
+    asked, referenced = uuid.uuid4(), uuid.uuid4()
 
-    session = AsyncMock()
-    session.scalars.return_value = MagicMock(all=MagicMock(return_value=[found_id]))
-
-    with patch("assay.services.tests.delete_test.select"), \
-            pytest.raises(HTTPException) as e:
-        asyncio.run(_assert_not_referenced(session, MagicMock(), [found_id], ""))
+    with pytest.raises(HTTPException) as e:
+        _raise_if_referenced([asked, referenced], {referenced}, "test runs")
 
     assert e.value.status_code == 409
-    assert str(e.value.detail).__contains__(str(found_id))
+    assert str(referenced) in str(e.value.detail) and str(asked) not in str(e.value.detail)
+    assert "test runs" in str(e.value.detail)
+
+
+def test_several_referenced_tests_are_named_once_each_in_the_order_asked():
+    first, second = uuid.uuid4(), uuid.uuid4()
+
+    with pytest.raises(HTTPException) as e:
+        _raise_if_referenced([second, first], {first, second}, "test sets")
+
+    assert str(e.value.detail).index(str(second)) < str(e.value.detail).index(str(first))
 
 
 def _get_two_ids():
@@ -39,18 +41,6 @@ def _get_two_ids():
     return first_found_id, second_found_id
 
 
-def test_assert_not_referenced_raises_409_for_multiple_ids():
-    ids = list(_get_two_ids())
-
-    session = AsyncMock()
-    session.scalars.return_value = MagicMock(all=MagicMock(return_value=ids))
-
-    with patch("assay.services.tests.delete_test.select"), \
-        pytest.raises(HTTPException) as e:
-        asyncio.run(_assert_not_referenced(session, MagicMock(), ids, ""))
-
-    assert e.value.status_code == 409
-    assert all(str(_id) in str(e.value.detail) for _id in ids)
 
 
 # --- delete_test_by_id ---
@@ -79,7 +69,7 @@ def test_delete_raises_409_if_linked_to_test_set():
     # side_effect as a list makes the mock return a different value on each successive call.
     # session.scalars is called twice before the 409 is raised:
     #   1st call — _find_all_tests_or_404: returns both ids so the 404 check passes
-    #   2nd call — _assert_not_referenced (test sets): returns ids[0] as referenced, triggering 409
+    #   2nd call — the test sets holding a copy: returns ids[0] as referenced, triggering 409
     session.scalars.side_effect = [
         MagicMock(all=MagicMock(return_value=ids)),
         MagicMock(all=MagicMock(return_value=[ids[0]])),

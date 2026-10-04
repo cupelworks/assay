@@ -9,7 +9,14 @@ from fastapi import HTTPException
 from assay.models import TestSetModel
 from assay.schemas import ModifyTestSetMetadataRequest
 from assay.services import update_test_set_metadata_by_id
+from tests.services.standing_fakes import neutral_standing
 
+
+@pytest.fixture(autouse=True)
+def _neutral_standing():
+    """How items stand is tested on a real database (tests/test_standing.py)."""
+    with neutral_standing(default=4):
+        yield
 
 def test_update_test_set_not_found():
     test_set_id = uuid.uuid4()
@@ -81,7 +88,7 @@ def test_update_test_set_name_none_is_noop():
     )
 
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 2
+    assert session.scalar.call_count == 1
     assert response.id == test_set_id
     assert response.name == test_set_name
     assert response.created_at == created_at
@@ -111,7 +118,7 @@ def test_update_test_set_name_unchanged_is_noop():
     )
 
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 2
+    assert session.scalar.call_count == 1
     assert response.id == test_set_id
     assert response.name == test_set_name
     assert response.created_at == created_at
@@ -142,7 +149,7 @@ def test_update_test_set_name_happy_path():
     )
 
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 3
+    assert session.scalar.call_count == 2
     assert response.id == test_set_id
     assert response.name == test_set_name
     assert response.created_at == created_at

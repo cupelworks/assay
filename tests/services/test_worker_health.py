@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from kombu.exceptions import OperationalError
 
-from assay.code_fingerprint import CODE_FINGERPRINT
+from assay.code_fingerprint import CODE_FINGERPRINT, CODE_VERSION
 from assay.schemas import WorkerHealthStatus
 from assay.services import worker_health
 from assay.services.worker_health import expected_tasks, get_worker_health
@@ -28,7 +28,7 @@ def _app(replies=None, connect_error=None, transport_options=None, codes=None):
         connection.ensure_connection.side_effect = connect_error
     app.control.inspect.return_value.registered.return_value = replies
     if codes is None:
-        codes = {name: {"fingerprint": CODE_FINGERPRINT, "version": "1.2.0"}
+        codes = {name: {"fingerprint": CODE_FINGERPRINT, "version": CODE_VERSION}
                  for name in (replies or {})}
     app.control.broadcast.return_value = [{name: code} for name, code in codes.items()]
     return app
@@ -116,15 +116,15 @@ def test_a_worker_on_the_apis_code_is_current_with_its_version():
 
     (worker,) = health.workers
     assert (worker.current_code, worker.code_fingerprint, worker.version, worker.problem) == (
-        True, CODE_FINGERPRINT, "1.2.0", None)
-    assert (health.code_fingerprint, health.version) == (CODE_FINGERPRINT, "1.2.0")
+        True, CODE_FINGERPRINT, CODE_VERSION, None)
+    assert (health.code_fingerprint, health.version) == (CODE_FINGERPRINT, CODE_VERSION)
 
 
 def test_a_worker_on_older_code_is_outdated_even_with_every_task():
     health = _health(_app(
         {"celery@new": ALL_TASKS, "celery@old": ALL_TASKS},
-        codes={"celery@new": {"fingerprint": CODE_FINGERPRINT, "version": "1.2.0"},
-               "celery@old": {"fingerprint": "0123456789ab", "version": "1.2.0"}},
+        codes={"celery@new": {"fingerprint": CODE_FINGERPRINT, "version": CODE_VERSION},
+               "celery@old": {"fingerprint": "0123456789ab", "version": CODE_VERSION}},
     ))
 
     assert health.status == WorkerHealthStatus.outdated

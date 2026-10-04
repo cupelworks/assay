@@ -4,8 +4,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestSetEntryModel
-from assay.schemas import PaginatedTestSetEntriesDetails, TestCaseID, TestSetEntryDetails
+from assay.schemas import PaginatedTestSetEntriesDetails, TestSetEntryDetails
 from assay.services.test_sets._common import (
+    _describe_entries,
     _find_test_set_entry_in_specific_test_set_or_404,
     _find_test_set_or_404,
 )
@@ -54,20 +55,7 @@ async def get_test_sets_linked_tests(
         offset=offset,
         limit=limit,
         total=total,
-        items=[
-            TestSetEntryDetails(
-                id=test.id,
-                # test_id is the FK back to the live TestModel this entry was
-                # snapshotted from — not this entry's own id.
-                test_case_id=TestCaseID(id=test.test_id),
-                name=test.name,
-                input=test.input,
-                expected_output=test.expected_output,
-                model_output=test.model_output,
-                test_type_assignments=test.test_type_assignments,
-            )
-            for test in found
-        ]
+        items=await _describe_entries(list(found), session),
     )
 
 
@@ -92,12 +80,5 @@ async def get_test_set_linked_test_by_entry_id(
     await _find_test_set_or_404(test_set_id, session)
     found = await _find_test_set_entry_in_specific_test_set_or_404(test_set_id, entry_id, session)
 
-    return TestSetEntryDetails(
-        id=found.id,
-        test_case_id=TestCaseID(id=found.test_id),
-        name=found.name,
-        input=found.input,
-        expected_output=found.expected_output,
-        model_output=found.model_output,
-        test_type_assignments=found.test_type_assignments,
-    )
+    (described,) = await _describe_entries([found], session)
+    return described

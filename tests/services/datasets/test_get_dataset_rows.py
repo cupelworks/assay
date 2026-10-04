@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from assay.services.datasets.get_dataset_rows import get_dataset_rows_by_id
+from tests.services.standing_fakes import neutral_standing
 
 
 def _make_row(row_id: uuid.UUID = None) -> MagicMock:
@@ -14,6 +15,7 @@ def _make_row(row_id: uuid.UUID = None) -> MagicMock:
     row.input = "prompt"
     row.expected_output = "expected"
     row.model_output = "output"
+    row.position = 1
     return row
 
 
@@ -33,10 +35,12 @@ def test_get_dataset_rows_returns_correct_items():
     session = _make_session(total=2, rows=[row1, row2])
 
     with patch("assay.services.datasets.get_dataset_rows._get_dataset_or_404",
-               new=AsyncMock(return_value=MagicMock())):
+               new=AsyncMock(return_value=MagicMock())), neutral_standing({row1.id: 3}):
         result = asyncio.run(get_dataset_rows_by_id(dataset_id, session, offset=0, limit=10))
 
     assert len(result.items) == 2
+    assert (result.items[0].number, result.items[0].test_count) == (1, 3)
+    assert result.items[1].test_count == 0
     assert result.items[0].id == row1.id
     assert result.items[0].row_info.prompt == row1.input
     assert result.items[0].row_info.expected_output == row1.expected_output

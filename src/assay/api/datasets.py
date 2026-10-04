@@ -4,10 +4,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api._filters import CreatedEdges, CreatedFrom, CreatedTo, Limit, Offset, search
 from assay.db import get_session
 from assay.schemas import (
     DataSetDeletedData,
     DataSetDeletingData,
+    DatasetFacets,
     DataSetID,
     DataSetImportedData,
     DataSetImportingData,
@@ -17,8 +19,10 @@ from assay.schemas import (
     DataSetMetadata,
     DataSetRow,
     DataSetRowUpdatedData,
+    DatasetSort,
     PaginatedDataSetResponse,
     PaginatedDataSetRowResponse,
+    RowRange,
 )
 from assay.services import (
     delete_dataset_by_id,
@@ -32,10 +36,47 @@ from assay.services import (
     upload_dataset_via_path,
     upload_new_rows_in_existing_dataset,
 )
+from assay.services.datasets.get_datasets_metadata import DatasetFilters, get_dataset_facets
 
 router = APIRouter(tags=["dataset"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def dataset_filters(
+        made_into_tests: Annotated[bool | None, Query(
+            description="Only datasets some tests were (true) or no test was (false) made "
+                        "from.")] = None,
+        rows: Annotated[list[RowRange] | None, Query(
+            description="Only datasets of one of these sizes, by their rows: `0`, `1-10`, "
+                        "`11-100`, `101+` (the `rows` facet's keys). Repeatable.")] = None,
+        created_from: CreatedFrom = None,
+        created_to: CreatedTo = None,
+        q: Annotated[list[str] | None, search("the dataset's name and first prompt")] = None,
+) -> DatasetFilters:
+    return DatasetFilters(made_into_tests=made_into_tests, rows=rows,
+                          created_from=created_from, created_to=created_to, q=q)
+
+
+@router.get(
+    path="/datasets/facets",
+    summary="Count the datasets within the filters by each filter's values",
+    responses={200: {"content": {"application/json": {"example": {
+        "made_into_tests": {"true": 2, "false": 1},
+        "rows": {"0": 0, "1-10": 2, "11-100": 1, "101+": 0},
+        "created": None,
+    }}}}},
+    response_model=DatasetFacets,
+)
+async def get_datasets_facets(
+        session: SessionDep,
+        filters: Annotated[DatasetFilters, Depends(dataset_filters)],
+        created_edges: CreatedEdges = None,
+) -> DatasetFacets:  # pragma: no cover
+    """The datasets `GET /datasets` would list with the same filters, counted by
+    each filter's values: each facet within every other filter chosen. `rows`
+    counts by row count: `0`, `1-10`, `11-100`, `101+`."""
+    return await get_dataset_facets(session, filters, created_edges)
 
 
 @router.get(
@@ -45,17 +86,17 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 )
 async def get_all_datasets_metadata(
         session: SessionDep,
-        offset: int = Query(default=0, description="Number of records to skip for pagination."),
-        limit: int = Query(default=100, description="Maximum number of records to "
-                                                    "return for pagination.")
+        filters: Annotated[DatasetFilters, Depends(dataset_filters)],
+        sort: Annotated[DatasetSort, Query(
+            description="`newest` (the default), `oldest` or `name` (ignoring case).")
+        ] = DatasetSort.newest,
+        offset: Offset = 0,
+        limit: Limit = 100,
 ) -> PaginatedDataSetResponse:  # pragma: no cover
-    """List all datasets with their metadata, paginated.
-
-    Use `offset` and `limit` to page through results. The response includes the total
-    number of datasets so the client can calculate the number of pages.
-    """
-
-    return await get_datasets_metadata(offset, limit, session)
+    """List the datasets within the filters, sorted and paged, each with its rows
+    counted and its first prompt. `total` counts every dataset within the
+    filters."""
+    return await get_datasets_metadata(offset, limit, session, filters, sort)
 
 
 @router.get(
@@ -110,16 +151,14 @@ async def get_dataset_metadata(
 async def get_dataset_rows(
     dataset_id: uuid.UUID,
     session: SessionDep,
-    offset: int = Query(description="Number of records to skip for pagination."),
-    limit: int = Query(description="Maximum number of records to return."),
+    offset: Offset = 0,
+    limit: Limit = 100,
+    q: Annotated[list[str] | None, search("the row's prompt, expected output and model "
+                                           "output")] = None,
 ) -> PaginatedDataSetRowResponse:  # pragma: no cover
-    """List all rows in a dataset, paginated.
-
-    Use `offset` and `limit` to page through results. The response includes the total
-    number of rows so the client can calculate the number of pages.
-    """
-
-    return await get_dataset_rows_by_id(dataset_id, session, offset, limit)
+    """List a dataset's rows by number, each with its number and how many tests
+    were made from it; `q` narrows them. `total` counts the rows within `q`."""
+    return await get_dataset_rows_by_id(dataset_id, session, offset, limit, q)
 
 
 @router.post(

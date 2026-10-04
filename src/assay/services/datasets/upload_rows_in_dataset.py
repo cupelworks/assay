@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import DatasetModel, DatasetRowModel
 from assay.schemas import DataRowInfo, DataSetImportedData, DataSetImportingData, DataSetInfo
-from assay.services.datasets._common import _get_dataset_or_404
+from assay.services.datasets._common import _get_dataset_or_404, _new_rows, _next_position
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 async def upload_new_rows_in_existing_dataset(
         request: DataSetImportingData,
         session: AsyncSession) -> DataSetImportedData:
-    """Orchestrates row upload: fetches dataset, appends rows, persists, and returns the result.
+    """Orchestrates row upload: fetches dataset, appends rows numbered after its highest,
+    persists, and returns the result.
 
     Args:
         request: Request containing the dataset ID and the list of rows to add.
@@ -26,18 +27,9 @@ async def upload_new_rows_in_existing_dataset(
     """
     dataset = await _get_dataset_or_404(request.id, session)
 
-    new_rows = [
-        DatasetRowModel(
-            input=row.prompt,
-            expected_output=row.expected_output,
-            model_output=row.model_output,
-        )
-        for row in request.rows
-    ]
-
-    # Load existing rows before extending to avoid MissingGreenlet on the relationship.
-    await session.refresh(dataset, attribute_names=['rows'])
-    dataset.rows.extend(new_rows)
+    new_rows = _new_rows(request.rows, first=await _next_position(dataset.id, session),
+                         dataset_id=dataset.id)
+    session.add_all(new_rows)
     # flush() sends INSERTs and populates DB-generated IDs without committing.
     await session.flush()
     result = _build_uploaded_dataset_info(dataset, new_rows)

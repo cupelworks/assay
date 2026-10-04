@@ -104,7 +104,7 @@ def r4(value: float | None) -> float | None:
 def run_counts(runs: list[BatchRun]) -> RunCounts:
     counts = RunCounts()
     for run in runs:
-        setattr(counts, run.status.value, getattr(counts, run.status.value) + 1)
+        counts.add(run.status.value)
     return counts
 
 

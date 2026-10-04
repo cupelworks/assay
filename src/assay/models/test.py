@@ -327,7 +327,7 @@ class TestModel(Base):
     # deleting the source row has nothing to protect — the pointer is simply
     # cleared instead of blocking the delete.
     dataset_row_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("dataset_rows.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("dataset_rows.id", ondelete="SET NULL"), nullable=True, index=True
     )
     dataset_row: Mapped["DatasetRowModel | None"] = relationship()
 
@@ -354,7 +354,7 @@ class TestModel(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
+        DateTime, default=lambda: datetime.now().astimezone(), index=True
     )
 
     # All snapshots of this test across every test set it has been added to.
@@ -396,7 +396,8 @@ class TestTypeAssignmentModel(Base):
     # name, numbered when taken ("Contains 2").
     label: Mapped[str] = mapped_column(Text, primary_key=True)
     # References TestTypesModel.name — stable, human-readable, unique.
-    test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), nullable=False)
+    test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), nullable=False,
+                                                index=True)
     # Per-assignment config values, keyed by the test type's config_fields[].key.
     # Null if the type has no non-reference config fields. A "reference"-kind
     # field is never stored here — it always resolves to the live test's own
@@ -525,7 +526,7 @@ class TestSetEntryModel(Base):
     # Traceability FK — points back to the live test this snapshot was taken from.
     # Never used to sync or refresh snapshot data.
     test_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("tests.id"), nullable=False
+        ForeignKey("tests.id"), nullable=False, index=True
     )
 
     # Snapshot fields — copied from TestModel at inclusion time, and directly
@@ -767,6 +768,12 @@ class TestRunModel(Base):
         back_populates="test_run",
         passive_deletes=True,
     )
+    # The check types this run asks, one row each: written when the run is
+    # created (run_check_types.with_check_types), read only through queries.
+    check_types: Mapped[list["TestRunCheckTypeModel"]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     status: Mapped[TestStatus] = mapped_column(
         SAEnum(TestStatus, create_constraint=True), default=TestStatus.pending, index=True
@@ -801,6 +808,21 @@ class TestRunModel(Base):
     # fields (stop_reason, token counts, model). A check with an answer_path
     # reads its part of it. Null for a recorded answer and for NotRan.
     application_reply: Mapped[Any] = mapped_column(JSON, nullable=True)
+
+
+class TestRunCheckTypeModel(Base):
+    """One check type a run asks: its frozen copy's checks, without the labels
+    a statistical batch left out. One row per type, however many checks of it
+    the run has, so runs can be filtered by check type with a plain join on
+    every database. The name is kept as written, with no foreign key to the
+    catalogue: a run's record outlives catalogue changes."""
+
+    __tablename__ = "test_run_check_types"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("test_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    test_type_name: Mapped[str] = mapped_column(Text, primary_key=True, index=True)
 
 
 class StandaloneRunModel(Base):

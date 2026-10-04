@@ -167,7 +167,7 @@ async def load_progress(batch: StatisticalBatchModel, session: AsyncSession,
     judge = {"finished": 0, "in_flight": 0}
     runs_cancelled = 0
     for row in by_entry:
-        setattr(counts, row.status.value, getattr(counts, row.status.value) + row.runs)
+        counts.add(row.status.value, row.runs)
         runs_cancelled += row.cancelled or 0
         asks, judges = asks_application.get(row.test_set_entry_id, False), judge_checks.get(
             row.test_set_entry_id, 0)
@@ -237,6 +237,16 @@ async def _live_status(batch: StatisticalBatchModel, session: AsyncSession) -> B
     if set(statuses) == {TestStatus.pending}:
         return BatchStatus.pending
     return BatchStatus.running
+
+
+async def refresh_in_progress(session: AsyncSession, *where) -> None:
+    """Bring every in-progress batch matching `where` up to date (`refresh`):
+    one small count each, so what reads their status next sees the truth."""
+    batches = (await session.scalars(
+        select(StatisticalBatchModel)
+        .where(StatisticalBatchModel.status.in_(IN_PROGRESS_BATCH_STATUSES), *where))).all()
+    for batch in batches:
+        await refresh(batch, session)
 
 
 async def refresh(batch: StatisticalBatchModel, session: AsyncSession) -> None:

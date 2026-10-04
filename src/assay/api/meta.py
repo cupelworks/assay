@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from assay import __version__
 from assay.schemas import WorkerHealth
 from assay.services import get_worker_health
 
@@ -14,7 +15,7 @@ _EXAMPLE_BROKER_OK = {"reachable": True, "error": None}
 
 
 def _example_worker(name: str, fingerprint: str | None = _EXAMPLE_FINGERPRINT,
-                    version: str | None = "1.2.0", missing: list[str] | None = None,
+                    version: str | None = __version__, missing: list[str] | None = None,
                     problem: str | None = None) -> dict:
     return {"name": name, "version": version, "code_fingerprint": fingerprint,
             "current_code": fingerprint == _EXAMPLE_FINGERPRINT, "missing_tasks": missing or [],
@@ -23,7 +24,7 @@ def _example_worker(name: str, fingerprint: str | None = _EXAMPLE_FINGERPRINT,
 
 def _example_health(status: str, workers: list[dict],
                     broker: dict = _EXAMPLE_BROKER_OK) -> dict:
-    return {"status": status, "broker": broker, "workers": workers, "version": "1.2.0",
+    return {"status": status, "broker": broker, "workers": workers, "version": __version__,
             "code_fingerprint": _EXAMPLE_FINGERPRINT, "checked_at": _EXAMPLE_CHECKED_AT}
 
 

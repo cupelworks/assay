@@ -1,40 +1,31 @@
 import logging
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-from assay.models import TestModel, TestRunModel, TestSetEntryModel
+from assay.models import TestModel, TestSetEntryModel
 from assay.schemas import TestCaseID
+from assay.services._standing import keys_with, tests_with_runs
 from assay.services.tests._common import _find_all_tests_or_404
 
 logger = logging.getLogger(__name__)
 
 
-async def _assert_not_referenced(
-        session: AsyncSession,
-        column,
-        ids: list,
-        reason: str) -> None:
-    """Raise 409 if any of the given test IDs are referenced by another table.
+def _raise_if_referenced(ids: list, referenced: set, reason: str) -> None:
+    """Raise 409 if any of the given test ids is referenced, naming each once,
+    in the order they were asked for.
 
     Args:
-        session: Active async database session.
-        column: The FK column to check (e.g. TestSetEntryModel.test_id).
-        ids: List of test UUIDs to check.
+        ids: The test UUIDs asked to be deleted.
+        referenced: Those among them referenced elsewhere.
         reason: Human-readable label for the referencing entity (e.g. "test sets").
 
     Raises:
-        HTTPException: 409 if any ID is found in the referencing table.
+        HTTPException: 409 if any id is referenced.
     """
-    # select only the FK column — no need to load full model instances
-    found = list((await session.scalars(
-        select(column)
-        .where(column.in_(ids))
-        .distinct()  # a test may be referenced multiple times; report each ID once
-    )).all())
-
+    found = [test_id for test_id in ids if test_id in referenced]
     if found:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -65,10 +56,9 @@ async def delete_test_by_id(
     await _find_all_tests_or_404(ids, session)
 
     # raise 409 if any test is still referenced — deleting would break referential integrity
-    await _assert_not_referenced(
-        session, TestSetEntryModel.test_id, ids, "test sets"
-    )
-    await _assert_not_referenced(session, TestRunModel.test_id, ids, "test runs")
+    _raise_if_referenced(ids, await keys_with(session, TestSetEntryModel.test_id, ids),
+                         "test sets")
+    _raise_if_referenced(ids, await tests_with_runs(session, ids), "test runs")
 
     # single bulk statement instead of one DELETE per row
     await session.execute(

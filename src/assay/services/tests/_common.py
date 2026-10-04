@@ -12,15 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
 
-from assay.assignment_labels import label_key
+from assay.assignment_labels import in_label_order, label_key, labelled
 from assay.models import (
     ConfigFieldKind,
     DatasetRowModel,
     TestModel,
+    TestSetEntryModel,
     TestTypeAssignmentModel,
     TestTypesModel,
 )
-from assay.schemas import TestTypeAssignment
+from assay.schemas import TestCaseRead, TestTypeAssignment
+from assay.services._standing import test_standing
 
 
 def _frozen_test_type_assignments(test: TestModel) -> list[dict]:
@@ -437,3 +439,32 @@ async def _check_reference_required_types_have_expected_output_for_rows_or_422(
                    f"non-empty expected_output, but Dataset Rows with ids "
                    f"{[str(row_id) for row_id in rows_missing_expected_output]} have none",
         )
+
+
+async def _describe_tests(tests: list[TestModel], session: AsyncSession) -> list[TestCaseRead]:
+    """Tests as they're read: their content with their checks in label order,
+    and how each stands. Their assignments must be loaded."""
+    standing = await test_standing(session, tests)
+    return [TestCaseRead(id=test.id, name=test.name, input=test.input,
+                         model_output=test.model_output, expected_output=test.expected_output,
+                         test_type_assignments=in_label_order(
+                             [_assignment_schema(a) for a in test.test_type_assignments]),
+                         **standing[test.id].model_dump())
+            for test in tests]
+
+
+def _comparable_checks(assignments) -> list[dict]:
+    """Checks as the API returns them (labelled, in label order, every field),
+    so two lists compare equal when they ask the same thing."""
+    return [assignment.model_dump() for assignment in in_label_order(labelled(list(assignments)))]
+
+
+def _copy_matches_test(entry: TestSetEntryModel, test: TestModel) -> bool:
+    """Whether a set entry still asks what its test asks now: the same input,
+    expected answer, recorded answer and checks. The name isn't compared.
+    The test's assignments must be loaded."""
+    copied = _comparable_checks(TestTypeAssignment(**a) for a in entry.test_type_assignments or [])
+    return ((entry.input, entry.expected_output, entry.model_output)
+            == (test.input, test.expected_output, test.model_output)
+            and copied == _comparable_checks(_assignment_schema(a)
+                                             for a in test.test_type_assignments))

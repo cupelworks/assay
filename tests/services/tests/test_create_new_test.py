@@ -13,6 +13,7 @@ from assay.services.tests._common import (
     _check_reference_required_types_have_expected_output_or_422,
     _validate_test_type_assignments,
 )
+from assay.services.tests.create_new_test import _name_from_prompt
 
 name = "Test Name"
 model_input = "My Input"
@@ -872,3 +873,26 @@ def test_create_saves_a_repeated_type_as_separate_labelled_assignments():
         ("Contains", "Contains 2", {"substring": "4471"}),
     ]
     assert [a.label for a in response.test_type_assignments] == ["Contains", "Contains 2"]
+
+
+# -- a test named after its prompt
+
+
+def test_a_short_prompt_is_the_name_with_its_spaces_made_one():
+    assert _name_from_prompt("  How do I\n\n reset   my password? ") == (
+        "How do I reset my password?")
+
+
+def test_a_long_prompt_is_cut_after_its_last_whole_word_within_59_and_marked():
+    name = _name_from_prompt("word " * 20)
+
+    assert name == "word " * 11 + "word…"
+    assert len(name) == 60
+
+
+def test_a_long_word_is_cut_at_59():
+    assert _name_from_prompt("x" * 80) == "x" * 59 + "…"
+
+
+def test_a_word_running_past_59_is_left_out_whole():
+    assert _name_from_prompt("a" * 58 + " bcdefgh") == "a" * 58 + "…"

@@ -4,16 +4,32 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api._filters import (
+    CreatedEdges,
+    CreatedFrom,
+    CreatedTo,
+    Ids,
+    Limit,
+    Membership,
+    Offset,
+    Runs,
+    Verdicts,
+    search,
+)
+from assay.api._standing_examples import SCOPE_NEVER_RAN, SCOPE_RAN
 from assay.db import get_session
 from assay.schemas import (
     ModifyTestCaseRequest,
     ModifyTestSetMetadataRequest,
+    PaginatedTestPlanLinks,
     PaginatedTestSetEntriesDetails,
     PaginatedTestSetMetadataResponse,
+    ScopeSort,
     TestCaseID,
     TestSetCreationResponse,
     TestSetEntryDetails,
     TestSetEntryID,
+    TestSetFacets,
     TestSetMetadata,
     TestSetName,
 )
@@ -23,6 +39,7 @@ from assay.services import (
     delete_test_set_by_id,
     delete_test_set_entries_by_id,
     get_all_test_sets_metadata,
+    get_test_plans_linking_set,
     get_test_set_linked_test_by_entry_id,
     get_test_set_metadata_by_id,
     get_test_sets_linked_tests,
@@ -30,10 +47,54 @@ from assay.services import (
     unlink_test_set_entries_by_id,
     update_test_set_metadata_by_id,
 )
+from assay.services.test_sets.get_test_sets_metadata import TestSetFilters, get_test_set_facets
 
 router = APIRouter(tags=["test set / test set entry"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def test_set_filters(
+        latest_verdict: Verdicts = None,
+        latest_run: Runs = None,
+        in_test_plan: Annotated[Membership, Query(
+            description="`any`: sets a plan links; `none`: sets no plan links; a plan's id: "
+                        "sets that plan links. Repeatable.")] = None,
+        holds_test: Annotated[Ids, Query(
+            description="Only sets holding a copy of one of these tests.")] = None,
+        created_from: CreatedFrom = None,
+        created_to: CreatedTo = None,
+        q: Annotated[list[str] | None, search("the set's name")] = None,
+) -> TestSetFilters:
+    return TestSetFilters(latest_verdict=latest_verdict, latest_run=latest_run,
+                          in_test_plan=in_test_plan, holds_test=holds_test,
+                          created_from=created_from, created_to=created_to, q=q)
+
+
+@router.get(
+    path="/test-sets/facets",
+    summary="Count the test sets within the filters by each filter's values",
+    responses={200: {"content": {"application/json": {"example": {
+        "latest_verdict": {"Pending": 0, "Running": 0, "Passed": 1, "Failed": 0,
+                           "Inconclusive": 0, "Incomplete": 0, "NotRan": 0, "Done": 0,
+                           "none": 9},
+        "latest_run": {"Running": 0, "Green": 1, "Amber": 2, "Red": 1, "NotRan": 2, "never": 4},
+        "in_test_plan": {"any": 6, "none": 4, "b8c9d0e1-2345-6abc-def7-89012345cdef": 3},
+        "holds_test": {"a1b2c3d4-e5f6-7890-abcd-ef1234567890": 2},
+        "created": None,
+    }}}}},
+    response_model=TestSetFacets,
+)
+async def get_test_sets_facets(
+        session: SessionDep,
+        filters: Annotated[TestSetFilters, Depends(test_set_filters)],
+        created_edges: CreatedEdges = None,
+) -> TestSetFacets:  # pragma: no cover
+    """The test sets `GET /test-sets` would list with the same filters, counted by
+    each filter's values: each facet within every other filter chosen. A set's
+    `latest_run` is its newest execution's outcome: `Running` while any run is
+    Pending or Running, else the first of NotRan, Red, Amber, Green."""
+    return await get_test_set_facets(session, filters, created_edges)
 
 
 @router.patch(
@@ -125,6 +186,8 @@ async def unlink_test_set_entry_from_a_test_set(
                         "name": "Renamed regression suite",
                         "created_at": "2026-07-03T15:43:09.032480",
                         "entry_count": 12,
+                        "test_plan_count": 1,
+                        **SCOPE_RAN,
                     }
                 }
             },
@@ -375,6 +438,7 @@ async def delete_a_test_set(
                                 "config": {"rubric": "Flag anything that could read as rude."},
                             },
                         ],
+                        "has_runs": False,
                     }
                 }
             },
@@ -526,6 +590,7 @@ async def update_a_test_set_entry(
                                 "config": {"rubric": "Flag anything that could read as rude."},
                             },
                         ],
+                        "has_runs": True,
                     }
                 }
             },
@@ -605,6 +670,7 @@ async def get_single_test_set_entry(
                                         "config": {"rubric": "Flag anything rude."},
                                     },
                                 ],
+                                "has_runs": True,
                             },
                             {
                                 "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
@@ -620,6 +686,7 @@ async def get_single_test_set_entry(
                                 "test_type_assignments": [
                                     {"name": "Cosine Similarity", "config": {"threshold": "0.75"}},
                                 ],
+                                "has_runs": False,
                             },
                         ],
                     }
@@ -766,6 +833,8 @@ async def add_tests_to_test_set(
                         "name": "Regression suite",
                         "created_at": "2026-07-03T15:43:09.032480",
                         "entry_count": 12,
+                        "test_plan_count": 1,
+                        **SCOPE_RAN,
                     }
                 }
             },
@@ -815,12 +884,16 @@ async def get_single_test_set_metadata(
                                 "name": "Regression suite",
                                 "created_at": "2026-07-03T15:43:09.032480",
                                 "entry_count": 12,
+                                "test_plan_count": 1,
+                                **SCOPE_RAN,
                             },
                             {
                                 "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                 "name": "Smoke tests",
                                 "created_at": "2026-07-03T16:00:00.000000",
                                 "entry_count": 4,
+                                "test_plan_count": 0,
+                                **SCOPE_NEVER_RAN,
                             },
                         ],
                     }
@@ -832,21 +905,18 @@ async def get_single_test_set_metadata(
 )
 async def get_test_sets_metadata(
     session: SessionDep,
-    offset: int = Query(default=0, description="Number of records to skip for pagination."),
-    limit: int = Query(
-        default=100, description="Maximum number of records to return for pagination."
-    ),
-) -> PaginatedTestSetMetadataResponse: # pragma: no cover
-    """List all test sets with their metadata, paginated.
-
-    Returns each test set's `id`, `name`, `created_at` timestamp, and `entry_count`
-    (the number of entries currently in the set).
-    Use `offset` and `limit` to page through results. The response includes `total`
-    so the client can calculate the number of pages.
-    """
-    return await get_all_test_sets_metadata(
-        session, offset, limit
-    )
+    filters: Annotated[TestSetFilters, Depends(test_set_filters)],
+    sort: Annotated[ScopeSort, Query(
+        description="`latest_run` (the default: newest execution outside a batch first, never "
+                    "run last), `created` (newest first) or `name` (ignoring case).")
+    ] = ScopeSort.latest_run,
+    offset: Offset = 0,
+    limit: Limit = 100,
+) -> PaginatedTestSetMetadataResponse:  # pragma: no cover
+    """List the test sets within the filters, sorted and paged, each with its
+    entries counted, the plans linking it counted, and how it stands. `total`
+    counts every set within the filters."""
+    return await get_all_test_sets_metadata(session, filters, sort, offset, limit)
 
 
 @router.post(
@@ -887,3 +957,36 @@ async def create_test_set(
     Returns the created test set with its generated ID and name.
     """
     return await create_new_test_set(request, session)
+
+
+@router.get(
+    path="/test-sets/{test_set_id}/test-plans",
+    summary="List the test plans linking a test set",
+    responses={
+        200: {"content": {"application/json": {"example": {
+            "total": 1, "offset": 0, "limit": 100,
+            "items": [{
+                "test_plan": {
+                    "id": "b8c9d0e1-2345-6abc-def7-89012345cdef", "name": "Release check",
+                    "created_at": "2026-09-30T11:00:00", "linked_set_count": 3,
+                    "latest_batch": None, "latest_execution": None, "execution_count": 0,
+                    "has_runs": False},
+                "entry_id": "c9d0e1f2-3456-7abc-def8-9012345defab",
+            }],
+        }}}},
+        404: {"description": "No test set exists with the given ID.",
+              "content": {"application/json": {"example": {
+                  "detail": "Test set with ID '<test_set_id>' not found"}}}},
+    },
+    response_model=PaginatedTestPlanLinks,
+)
+async def get_test_plans_linking(
+        test_set_id: uuid.UUID,
+        session: SessionDep,
+        offset: Offset = 0,
+        limit: Limit = 100,
+) -> PaginatedTestPlanLinks:  # pragma: no cover
+    """The test plans linking this test set, by name, each as the plans list shows
+    it (its latest execution included), with `entry_id`: the plan's entry that
+    links the set, the id `DELETE /test-plans/{id}/entries` unlinks by."""
+    return await get_test_plans_linking_set(test_set_id, session, offset, limit)

@@ -119,6 +119,17 @@ class DataSetMetadata(DataSetID, DataSetName):
         ...,
         description="The creation date of the dataset.",
     )
+    row_count: int = Field(description="How many rows it has.")
+    first_prompt: str | None = Field(
+        description="Its first row's prompt (the lowest number), or null when it has no rows.")
+
+
+class DataSetRowRead(DataSetRow):
+    """A dataset row as it's read: its content, its number and its tests."""
+    number: int = Field(description="Its number within the dataset, from 1. A deleted row "
+                                    "leaves a gap, so a row keeps its number, and the tests "
+                                    "made from it show the same (`dataset_row_number`).")
+    test_count: int = Field(description="How many tests were made from it.")
 
 
 class PaginatedDataSetResponse(Pagination):
@@ -126,4 +137,4 @@ class PaginatedDataSetResponse(Pagination):
 
 
 class PaginatedDataSetRowResponse(DataSetID, Pagination):
-    items: list[DataSetRow]
+    items: list[DataSetRowRead]
