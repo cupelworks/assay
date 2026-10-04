@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +8,8 @@ from starlette import status
 from assay.models import TestModel, TestRunModel, TestSetEntryModel
 from assay.schemas import TestCaseID
 from assay.services.tests._common import _find_all_tests_or_404
+
+logger = logging.getLogger(__name__)
 
 
 async def _assert_not_referenced(
@@ -72,3 +76,5 @@ async def delete_test_by_id(
     )
 
     await session.commit()
+
+    logger.info("Deleted %d tests", len(ids), extra={"test_count": len(ids)})

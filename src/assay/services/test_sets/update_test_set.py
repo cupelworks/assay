@@ -1,12 +1,17 @@
+import logging
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.models import TestSetEntryModel
 from assay.schemas import ModifyTestSetMetadataRequest, TestSetMetadata, TestSetName
 from assay.services.test_sets._common import (
     _check_unique_test_set_name_or_409,
     _find_test_set_or_404,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def update_test_set_metadata_by_id(
@@ -35,8 +40,10 @@ async def update_test_set_metadata_by_id(
         HTTPException: 409 if another test set already has the requested name.
     """
     found = await _find_test_set_or_404(test_set_id, session)
-    
-    if request.name != found.name and request.name is not None:
+
+    previous_name = found.name
+    renamed = request.name != previous_name and request.name is not None
+    if renamed:
         await _check_unique_test_set_name_or_409(
             TestSetName(name=request.name), session
         )
@@ -44,8 +51,20 @@ async def update_test_set_metadata_by_id(
 
     await session.commit()
 
+    if renamed:
+        logger.info(
+            "Renamed test set %s from %r to %r", test_set_id, previous_name, request.name,
+            extra={"test_set_id": test_set_id},
+        )
+
+    entry_count = await session.scalar(
+        select(func.count(TestSetEntryModel.id))
+        .where(TestSetEntryModel.test_set_id == found.id)
+    ) or 0
+
     return TestSetMetadata(
         id=found.id,
         name=found.name,
         created_at=found.created_at,
+        entry_count=entry_count,
     )

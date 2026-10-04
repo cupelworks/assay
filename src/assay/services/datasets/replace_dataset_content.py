@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -5,6 +7,8 @@ from assay.models import DatasetRowModel
 from assay.schemas import DataSetImportedData, DataSetImportingData
 from assay.services.datasets._common import _get_dataset_or_404
 from assay.services.datasets.upload_rows_in_dataset import _build_uploaded_dataset_info
+
+logger = logging.getLogger(__name__)
 
 
 async def replace_dataset_content_by_dataset_id(
@@ -47,4 +51,9 @@ async def replace_dataset_content_by_dataset_id(
     session.add_all(new_rows)
     await session.commit()
 
+    logger.info(
+        "Replaced the content of dataset %s (%r) with %d rows",
+        dataset.id, dataset.name, len(new_rows),
+        extra={"dataset_id": dataset.id, "row_count": len(new_rows)},
+    )
     return _build_uploaded_dataset_info(dataset, new_rows)

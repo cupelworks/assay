@@ -1,9 +1,12 @@
+import logging
 import re
 import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.assignment_labels import in_label_order
+from assay.assignment_labels import labelled as _labelled
 from assay.models import TestModel, TestTypeAssignmentModel
 from assay.schemas import (
     CreateTestCaseFromDatasetRequest,
@@ -18,6 +21,8 @@ from assay.services.tests._common import (
     _check_reference_required_types_have_expected_output_or_422,
     _validate_test_type_assignments,
 )
+
+logger = logging.getLogger(__name__)
 
 _NEW_TEST_NAME_PATTERN = re.compile(r"^New Test (\d+)$")
 
@@ -76,6 +81,7 @@ async def create_new_test(
         await _check_reference_required_types_have_expected_output_or_422(
             session, request.test_type_assignments, request.expected_output
         )
+    assignments = in_label_order(_labelled(request.test_type_assignments))
 
     test = TestModel(
         id=uuid.uuid4(),
@@ -89,29 +95,46 @@ async def create_new_test(
         TestTypeAssignmentModel(
             test_id=test.id,
             test_type_name=assignment.name,
+            label=assignment.label,
             config=assignment.config,
+            answer_path=assignment.answer_path,
         )
-        for assignment in request.test_type_assignments
+        for assignment in assignments
     ]
 
     session.add(test)
     session.add_all(test_types)
     await session.commit()
 
+    logger.info(
+        "Created test %s (%r) with %d test type assignments",
+        test.id, test.name, len(test_types),
+        extra={"test_id": test.id, "test_type_count": len(test_types)},
+    )
     return CreateTestCaseResponse(
         id=test.id,
         name=test.name,
         input=test.input,
         model_output=test.model_output,
         expected_output=test.expected_output,
-        test_type_assignments=request.test_type_assignments,
+        test_type_assignments=assignments,
     )
+
+
+def _recorded_answer(model_output: str | None) -> str | None:
+    """A dataset row's `model_output` as the test's recorded answer: a blank one (empty or
+    only whitespace) is no recorded answer, so the test's runs ask the application under
+    test."""
+    return model_output if model_output and model_output.strip() else None
 
 
 async def create_new_test_from_dataset(
         request: CreateTestCaseFromDatasetRequest,
         session: AsyncSession) -> CreateTestCaseFromDatasetResponse:
     """Create test cases in bulk from all rows of an existing dataset.
+
+    A row whose `model_output` is blank (empty or only whitespace) makes a
+    test with no recorded answer, so its runs ask the application under test.
 
     Each created test is named "New Test <n>", numbered globally across the
     whole tests table (see _next_new_test_number) — dataset rows have no
@@ -145,6 +168,7 @@ async def create_new_test_from_dataset(
         await _check_reference_required_types_have_expected_output_for_rows_or_422(
             session, request.test_type_assignments, rows
         )
+    assignments = in_label_order(_labelled(request.test_type_assignments))
 
     next_number = await _next_new_test_number(session)
 
@@ -154,7 +178,7 @@ async def create_new_test_from_dataset(
             dataset_row_id=row.id,
             name=f"New Test {next_number + offset}",
             input=row.input,
-            model_output=row.model_output,
+            model_output=_recorded_answer(row.model_output),
             expected_output=row.expected_output,
         )
         for offset, row in enumerate(rows)
@@ -164,15 +188,21 @@ async def create_new_test_from_dataset(
         TestTypeAssignmentModel(
             test_id=test.id,
             test_type_name=assignment.name,
+            label=assignment.label,
             config=assignment.config,
+            answer_path=assignment.answer_path,
         )
-        for test in tests for assignment in request.test_type_assignments
+        for test in tests for assignment in assignments
     ]
 
     session.add_all(tests)
     session.add_all(test_types)
     await session.commit()
 
+    logger.info(
+        "Created %d tests from dataset %s", len(tests), request.id,
+        extra={"dataset_id": request.id, "test_count": len(tests)},
+    )
     return CreateTestCaseFromDatasetResponse(
         test_cases=[
             TestCaseID(

@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import contains_eager
 
-from assay.models import TestPlanEntryModel, TestSetModel
+from assay.models import TestPlanEntryModel, TestSetEntryModel, TestSetModel
 from assay.schemas import PaginatedTestPlanEntriesDetails, TestPlanEntryDetails, TestSetMetadata
 from assay.services.test_plans._common import _find_test_plan_by_id_or_404
 
@@ -51,7 +51,17 @@ async def get_all_test_plan_entries_metadata(
         .offset(offset)
         .limit(limit)
     )).all()
-    
+
+    entry_counts = dict(
+        (await session.execute(
+            select(TestSetEntryModel.test_set_id, func.count(TestSetEntryModel.id))
+            .where(TestSetEntryModel.test_set_id.in_(
+                [entry.test_set.id for entry in found_entries]
+            ))
+            .group_by(TestSetEntryModel.test_set_id)
+        )).tuples().all()
+    )
+
     return PaginatedTestPlanEntriesDetails(
         total=total,
         offset=offset,
@@ -63,6 +73,7 @@ async def get_all_test_plan_entries_metadata(
                     id=entry.test_set.id,
                     name=entry.test_set.name,
                     created_at=entry.test_set.created_at,
+                    entry_count=entry_counts.get(entry.test_set.id, 0),
                 )
             )
             for entry in found_entries

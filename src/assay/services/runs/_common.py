@@ -1,9 +1,12 @@
+import logging
 import uuid
 
 from fastapi import HTTPException
+from kombu.exceptions import KombuError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.logging_config import request_id_var
 from assay.models import (
     TestModel,
     TestPlanEntryModel,
@@ -13,6 +16,12 @@ from assay.models import (
     TestSetEntryModel,
     TestSetExecutionModel,
 )
+from assay.worker import app as _celery_app
+
+logger = logging.getLogger(__name__)
+
+# The worker's task that executes one run, published by name (_dispatch_runs)
+EXECUTE_RUN_TASK = "assay.worker.tasks.execute_run.execute_run"
 
 
 async def _find_test_set_entries_ids_or_409(
@@ -613,3 +622,69 @@ async def _check_test_plan_or_404(test_plan_id: uuid.UUID, session: AsyncSession
             status_code=404,
             detail=f"Test plan with ID '{test_plan_id}' not found"
         )
+
+
+def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:
+    """Publish an execute_run task for each given run id, best-effort.
+
+    Callers must only invoke this after the row(s) have already been
+    committed to the database — the worker picks up a run through its own,
+    separate database connection, which won't see an uncommitted row yet.
+
+    Publishes by task name (send_task) rather than calling execute_run.delay()
+    directly. .delay() requires importing the actual execute_run function,
+    which pulls in its whole dependency chain — the evaluator modules, and
+    eventually the anthropic/openai SDKs once the LLM-as-judge evaluator is
+    real — into this process just to send a message. send_task only needs a
+    Celery app configured with a broker URL, so the API can dispatch work
+    without importing anything the worker itself depends on.
+
+    Publishing is fire-and-forget: each run's send is wrapped in its own
+    try/except KombuError, so one run failing to publish (a broker outage, a
+    network blip, an encoding failure) never stops the rest of a batch from
+    being attempted. A run whose dispatch fails simply stays Pending, to be
+    re-published by the reconciliation scan. Anything that isn't a KombuError
+    is a bug, not a publish failure, and propagates.
+
+    ignore_result=True is passed explicitly: send_task doesn't read the app's
+    task_ignore_result setting, and without it send_task subscribes to the
+    result store before publishing — which fails with a generic RuntimeError
+    (and, per Celery, leaves the process needing a restart) whenever the
+    result store is unreachable, even though no result is ever read back.
+
+    Args:
+        run_ids: UUIDs of the already-committed TestRunModel rows to
+            dispatch execute_run for.
+    """
+    dispatched = 0
+    for run_id in run_ids:
+        try:
+            _celery_app.send_task(
+                EXECUTE_RUN_TASK,
+                args=[run_id],
+                ignore_result=True,
+                # travels in the task message, so the worker's log lines for
+                # this run carry the same request ID as this request's
+                headers={"request_id": request_id_var.get()},
+            )
+        except KombuError:
+            logger.exception("Failed to dispatch execute_run for run %s", run_id)
+        else:
+            dispatched += 1
+
+    if run_ids:
+        logger.info(
+            "Dispatched %d of %d runs to the worker", dispatched, len(run_ids),
+            extra={"dispatched": dispatched, "run_count": len(run_ids)},
+        )
+
+
+def _batch_clause(column, batch: str | None):
+    """The `?batch=` filter of a run or execution listing as a WHERE clause:
+    `none` keeps what no statistical batch created, a batch's id keeps that
+    batch's, None (left out) keeps everything — returned as None."""
+    if batch is None:
+        return None
+    if batch == "none":
+        return column.is_(None)
+    return column == uuid.UUID(batch)

@@ -16,7 +16,21 @@ from assay.schemas.datasets import (
     PaginatedDataSetResponse,
     PaginatedDataSetRowResponse,
 )
-from assay.schemas.stats import ZTestRequest, ZTestResult
+from assay.schemas.health import BrokerStatus, WorkerHealth, WorkerHealthStatus, WorkerStatus
+from assay.schemas.settings import (
+    JudgeCheck,
+    JudgeCheckRequest,
+    JudgeProvider,
+    JudgeSettings,
+    JudgeSettingsRead,
+    JudgeSettingsUpdate,
+    SettingsSource,
+    TargetCheck,
+    TargetCheckRequest,
+    TargetSettings,
+    TargetSettingsRead,
+    TargetSettingsUpdate,
+)
 from assay.schemas.test_plan_entries import (
     PaginatedTestPlanEntriesDetails,
     TestPlanEntryDetails,
@@ -64,8 +78,11 @@ from assay.schemas.test_set_entries import (
 # runs imports TestCaseID, TestPlanID, TestSetID, and TestSetEntryID from assay.schemas —
 # must load after tests, test_plans, test_sets, and test_set_entries
 from assay.schemas.runs import (
+    EvaluationInput,
     ExecutionMetadata,
     ExecutionOrigin,
+    JudgeIdentity,
+    JudgeRubric,
     PaginatedExecutionMetadata,
     PaginatedRunMetadata,
     PaginatedStandaloneRunCreationMetadata,
@@ -73,8 +90,10 @@ from assay.schemas.runs import (
     PaginatedTestPlanExecutionRunMetadata,
     PaginatedTestSetExecutionMetadata,
     PaginatedTestSetExecutionRunMetadata,
+    RubricSource,
     RunCreationDate,
     RunError,
+    RunEvaluatedOutput,
     RunExecutionDate,
     RunID,
     RunMetadata,
@@ -101,9 +120,27 @@ from assay.schemas.runs import (
     TestTypeResult,
 )
 
+# isort: split
+# statistics stands alone (it imports nothing from this package), kept last
+from assay.schemas.statistics import (
+    Estimate,
+    EstimateRequest,
+    Scope,
+    ScopeKind,
+    StatisticalEngine,
+    StatisticalTestCatalogue,
+)
+
 __all__ = [
-    "ZTestRequest",
-    "ZTestResult",
+    "JudgeCheck",
+    "JudgeCheckRequest",
+    "JudgeIdentity",
+    "JudgeProvider",
+    "JudgeRubric",
+    "JudgeSettings",
+    "JudgeSettingsRead",
+    "JudgeSettingsUpdate",
+    "RubricSource",
     "ConfigFieldDescriptor",
     "CreateTestCaseRequest",
     "CreateTestCaseResponse",
@@ -124,6 +161,7 @@ __all__ = [
     "DataSetImportingData",
     "DataSetRowUpdatedData",
     "DataSetMetadata",
+    "EvaluationInput",
     "ExecutionMetadata",
     "ExecutionOrigin",
     "ModifyTestCaseRequest",
@@ -146,13 +184,20 @@ __all__ = [
     "RunID",
     "RunCreationDate",
     "RunError",
+    "RunEvaluatedOutput",
     "RunExecutionDate",
     "RunMetadata",
     "RunOrigin",
     "RunResults",
     "RunStatus",
+    "SettingsSource",
     "StandaloneRunCreationMetadata",
     "StandaloneRunDetails",
+    "TargetCheck",
+    "TargetCheckRequest",
+    "TargetSettings",
+    "TargetSettingsRead",
+    "TargetSettingsUpdate",
     "TestCaseID",
     "TestCaseSnapshotDate",
     "TestPlanCreationResponse",
@@ -185,4 +230,14 @@ __all__ = [
     "TestTypeAssignment",
     "TestTypeResult",
     "TestTypesSchema",
+    "BrokerStatus",
+    "WorkerHealth",
+    "WorkerHealthStatus",
+    "WorkerStatus",
+    "Estimate",
+    "EstimateRequest",
+    "Scope",
+    "ScopeKind",
+    "StatisticalTestCatalogue",
+    "StatisticalEngine",
 ]

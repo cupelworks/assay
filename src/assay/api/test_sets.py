@@ -124,6 +124,7 @@ async def unlink_test_set_entry_from_a_test_set(
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Renamed regression suite",
                         "created_at": "2026-07-03T15:43:09.032480",
+                        "entry_count": 12,
                     }
                 }
             },
@@ -420,7 +421,10 @@ async def delete_a_test_set(
         422: {
             "description": (
                 "One or more test type names are not in the catalogue, an assignment "
-                "is missing a required config field, or a reference-required type "
+                "is missing a required config field, a config value isn't valid for "
+                "its field (a number out of range, a pattern that doesn't compile, "
+                "JSON, a JSONPath or a JSON Schema that doesn't parse) or an "
+                "`answer_path` doesn't parse, or a reference-required type "
                 "(e.g. Exact Match, ROUGE) is left with no `expected_output` once this "
                 "update is applied — considering both the request and whatever the "
                 "entry already had for any field this request doesn't touch."
@@ -431,6 +435,16 @@ async def delete_a_test_set(
                         "unknown_test_type": {
                             "summary": "Unknown test type name",
                             "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "unparseable_value": {
+                            "summary": "A config value or an answer_path that isn't valid",
+                            "value": {"detail": (
+                                "'ROUGE' config field 'threshold' must be between 0 and 1; "
+                                "'Regex Match' config field 'pattern' is not a valid regex "
+                                "pattern: unterminated character set at position 5; "
+                                "'Contains' answer_path is not a valid JSONPath: Parse "
+                                "error near the end of string!"
+                            )},
                         },
                         "missing_expected_output": {
                             "summary": "Reference-required type with no expected_output",
@@ -462,14 +476,25 @@ async def update_a_test_set_entry(
     the originating test's state at snapshot time; `test_case_id` keeps pointing
     at the live test regardless.
 
-    Only fields explicitly set in the request body are written — omitted fields are
-    left unchanged. For `test_type_assignments` specifically, omitting it leaves the
-    snapshot list untouched, while `[]` clears it. Each provided name must exist in
+    Only fields included in the request body are written — omitted fields are left
+    unchanged:
+
+    | Field | Sent with a value | Sent as `null` | Left out |
+    |---|---|---|---|
+    | `expected_output`, `model_output` | set | **cleared** | unchanged |
+    | `name`, `input` | set | unchanged (neither can be empty) | unchanged |
+    | `test_type_assignments` | replaces the list (`[]` clears it) | unchanged | unchanged |
+
+    Each provided name must exist in
     the test types catalogue and satisfy that type's required config fields — a 422
     is returned otherwise. Considering the effective state after this update, a type
     requiring a reference (e.g. Exact Match, ROUGE) also requires a non-empty
     `expected_output` — a 422 is returned if that's not the case, even if this
-    particular request doesn't touch either field directly.
+    particular request doesn't touch either field directly. An assignment's optional
+    `answer_path` (the part of the application's reply that check reads) must parse,
+    and every config value must be valid for its field — a number within its range, a
+    pattern that compiles, JSON, a JSONPath or a JSON Schema that parses: a 422
+    otherwise.
 
     Returns the full updated entry, so no follow-up GET is needed.
     """
@@ -740,6 +765,7 @@ async def add_tests_to_test_set(
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Regression suite",
                         "created_at": "2026-07-03T15:43:09.032480",
+                        "entry_count": 12,
                     }
                 }
             },
@@ -766,7 +792,8 @@ async def get_single_test_set_metadata(
 ) -> TestSetMetadata: # pragma: no cover
     """Retrieve metadata for a single test set by its ID.
 
-    Returns the test set's `id`, `name`, and `created_at` timestamp.
+    Returns the test set's `id`, `name`, `created_at` timestamp, and `entry_count`
+    (the number of entries currently in the set).
     """
     return await get_test_set_metadata_by_id(test_set_id, session)
 
@@ -787,11 +814,13 @@ async def get_single_test_set_metadata(
                                 "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                                 "name": "Regression suite",
                                 "created_at": "2026-07-03T15:43:09.032480",
+                                "entry_count": 12,
                             },
                             {
                                 "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                 "name": "Smoke tests",
                                 "created_at": "2026-07-03T16:00:00.000000",
+                                "entry_count": 4,
                             },
                         ],
                     }
@@ -810,7 +839,8 @@ async def get_test_sets_metadata(
 ) -> PaginatedTestSetMetadataResponse: # pragma: no cover
     """List all test sets with their metadata, paginated.
 
-    Returns each test set's `id`, `name`, and `created_at` timestamp.
+    Returns each test set's `id`, `name`, `created_at` timestamp, and `entry_count`
+    (the number of entries currently in the set).
     Use `offset` and `limit` to page through results. The response includes `total`
     so the client can calculate the number of pages.
     """

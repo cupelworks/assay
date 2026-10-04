@@ -34,7 +34,9 @@ def _make_test(
     for type_name in (type_names or []):
         assignment = MagicMock()
         assignment.test_type_name = type_name
+        assignment.label = type_name
         assignment.config = (type_configs or {}).get(type_name)
+        assignment.answer_path = None
         assignments.append(assignment)
     test.test_type_assignments = assignments
     return test
@@ -166,8 +168,11 @@ def test_type_assignments_extracted_correctly():
 
     entry = session.add_all.call_args[0][0][0]
     assert entry.test_type_assignments == [
-        {"name": "Regex Match", "config": {"pattern": "^\\d+$"}},
-        {"name": "Hallucination", "config": None},
+        # in label order, not the order the test lists them in
+        {"name": "Hallucination", "label": "Hallucination", "config": None,
+         "answer_path": None},
+        {"name": "Regex Match", "label": "Regex Match", "config": {"pattern": "^\\d+$"},
+         "answer_path": None},
     ]
 
 

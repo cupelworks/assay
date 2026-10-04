@@ -4,7 +4,7 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import select
 
-from assay.models import TestSetModel
+from assay.models import TestSetEntryModel, TestSetModel
 from assay.schemas import PaginatedTestSetMetadataResponse, TestSetMetadata
 from assay.services.test_sets._common import _find_test_set_or_404
 
@@ -29,7 +29,15 @@ async def get_all_test_sets_metadata(
     test_sets = (await session.scalars(
         select(TestSetModel).offset(offset).limit(limit)
     )).all()
-    
+
+    entry_counts = dict(
+        (await session.execute(
+            select(TestSetEntryModel.test_set_id, func.count(TestSetEntryModel.id))
+            .where(TestSetEntryModel.test_set_id.in_([test_set.id for test_set in test_sets]))
+            .group_by(TestSetEntryModel.test_set_id)
+        )).tuples().all()
+    )
+
     return PaginatedTestSetMetadataResponse(
         total=total,
         offset=offset,
@@ -39,6 +47,7 @@ async def get_all_test_sets_metadata(
                 id=test_set.id,
                 name=test_set.name,
                 created_at=test_set.created_at,
+                entry_count=entry_counts.get(test_set.id, 0),
             )
             for test_set in test_sets
         ]
@@ -56,15 +65,21 @@ async def get_test_set_metadata_by_id(
         session: Async SQLAlchemy session injected by FastAPI.
 
     Returns:
-        The test set metadata (id, name, created_at).
+        The test set metadata (id, name, created_at, entry_count).
 
     Raises:
         HTTPException 404: No test set exists with the given ID.
     """
     test_set = await _find_test_set_or_404(test_set_id, session)
 
+    entry_count = await session.scalar(
+        select(func.count(TestSetEntryModel.id))
+        .where(TestSetEntryModel.test_set_id == test_set_id)
+    ) or 0
+
     return TestSetMetadata(
         id=test_set.id,
         name=test_set.name,
         created_at=test_set.created_at,
+        entry_count=entry_count,
     )

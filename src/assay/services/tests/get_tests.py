@@ -5,9 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.expression import select
 
+from assay.assignment_labels import in_label_order
 from assay.models import TestModel
-from assay.schemas import CreateTestCaseResponse, PaginatedTestCases, TestTypeAssignment
-from assay.services.tests._common import _find_test_by_id_or_404
+from assay.schemas import CreateTestCaseResponse, PaginatedTestCases
+from assay.services.tests._common import _assignment_schema, _find_test_by_id_or_404
 
 
 async def get_all_created_tests(
@@ -46,10 +47,9 @@ async def get_all_created_tests(
                 input=test.input,
                 model_output=test.model_output,
                 expected_output=test.expected_output,
-                test_type_assignments=[
-                    TestTypeAssignment(name=ta.test_type_name, config=ta.config)
-                    for ta in test.test_type_assignments
-                ],
+                test_type_assignments=in_label_order(
+                    [_assignment_schema(ta) for ta in test.test_type_assignments]
+                    ),
             )
             for test in test_models
         ],
@@ -83,8 +83,7 @@ async def get_test_case_by_id(
         input=test.input,
         model_output=test.model_output,
         expected_output=test.expected_output,
-        test_type_assignments=[
-            TestTypeAssignment(name=ta.test_type_name, config=ta.config)
-            for ta in test.test_type_assignments
-        ],
+        test_type_assignments=in_label_order(
+            [_assignment_schema(ta) for ta in test.test_type_assignments]
+            ),
     )

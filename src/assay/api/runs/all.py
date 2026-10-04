@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api.runs._batch_filter import BatchFilter
 from assay.db import get_session
 from assay.models import TestStatus
 from assay.schemas import PaginatedExecutionMetadata, PaginatedRunMetadata, RunOrigin
@@ -114,6 +115,7 @@ async def get_all_run_metadata(
                 ),
             ),
         ] = None,
+        batch: BatchFilter = None,
 ) -> PaginatedRunMetadata: # pragma: no cover
     """List every run ever created, across every test, test set, and test
     plan, newest first.
@@ -144,14 +146,13 @@ async def get_all_run_metadata(
     Pass `status` to restrict the feed to one status at a time (`Pending`,
     `Running`, `Green`, `Amber`, `Red`, or `NotRan`) — both `total` and the
     returned page are scoped to it. Omit it to see every run regardless of
-    status, the endpoint's original behavior.
+    status.
 
     Pass `origin` to restrict the feed to one origin at a time (`Standalone`,
-    `TestSet`, or `TestPlan`) the same way — an IS NOT NULL check on
-    whichever FK column that origin implies, no join needed. Combines with
-    `status`: passing both filters on their intersection.
+    `TestSet`, or `TestPlan`) the same way. Combines with `status`: passing
+    both filters on their intersection.
     """
-    return await get_run_metadata_all_runs(session, offset, limit, status, origin)
+    return await get_run_metadata_all_runs(session, offset, limit, status, origin, batch)
 
 
 @router.get(
@@ -215,7 +216,8 @@ async def get_all_execution_metadata(
         session: SessionDep,
         offset: int = Query(default=0, description="Number of records to skip for pagination."),
         limit: int = Query(default=100, description="Maximum number of records to "
-                                                    "return for pagination.")
+                                                    "return for pagination."),
+        batch: BatchFilter = None,
 ) -> PaginatedExecutionMetadata: # pragma: no cover
     """List every execution ever triggered, across every test set and test
     plan, newest first. Does NOT include standalone runs — see below.
@@ -249,4 +251,4 @@ async def get_all_execution_metadata(
     `created_at` descending (ties broken by `id` descending), plus the
     usual `total`, `offset`, and `limit`.
     """
-    return await get_execution_metadata_all_executions(session, offset, limit)
+    return await get_execution_metadata_all_executions(session, offset, limit, batch)

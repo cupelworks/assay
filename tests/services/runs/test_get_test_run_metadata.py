@@ -145,6 +145,8 @@ def test_get_run_metadata_all_runs_happy_path():
 
     returned_rows = [
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             status=TestStatus.pending,
             created_at=datetime.now().astimezone(),
@@ -156,6 +158,8 @@ def test_get_run_metadata_all_runs_happy_path():
             test_plan_id=None,
         ),
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             status=TestStatus.green,
             created_at=datetime.now().astimezone(),
@@ -167,6 +171,8 @@ def test_get_run_metadata_all_runs_happy_path():
             test_plan_id=None,
         ),
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             status=TestStatus.not_ran,
             created_at=datetime.now().astimezone(),
@@ -360,12 +366,16 @@ def test_get_test_set_execution_metadata_all_executions_happy_path():
     replayed_execution_id = uuid.uuid4()
     returned_rows = [
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             created_at=datetime.now().astimezone(),
             replayed_execution_id=None,
             run_count=3,
         ),
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             created_at=datetime.now().astimezone(),
             replayed_execution_id=replayed_execution_id,
@@ -448,12 +458,16 @@ def test_get_test_plan_execution_metadata_all_executions_happy_path():
     replayed_execution_id = uuid.uuid4()
     returned_rows = [
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             created_at=datetime.now().astimezone(),
             replayed_execution_id=None,
             run_count=5,
         ),
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             created_at=datetime.now().astimezone(),
             replayed_execution_id=replayed_execution_id,
@@ -520,6 +534,8 @@ def test_get_execution_metadata_all_executions_happy_path_merges_and_sorts_by_cr
 
     test_set_rows = [
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             created_at=newest,
             test_set_id=test_set_id,
@@ -527,6 +543,8 @@ def test_get_execution_metadata_all_executions_happy_path_merges_and_sorts_by_cr
             run_count=3,
         ),
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             created_at=oldest,
             test_set_id=test_set_id,
@@ -536,6 +554,8 @@ def test_get_execution_metadata_all_executions_happy_path_merges_and_sorts_by_cr
     ]
     test_plan_rows = [
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             created_at=middle,
             test_plan_id=test_plan_id,
@@ -609,6 +629,8 @@ def test_get_execution_metadata_all_executions_respects_offset_and_limit_after_m
 
     test_set_rows = [
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             created_at=now - timedelta(minutes=i),
             test_set_id=test_set_id,
@@ -619,6 +641,8 @@ def test_get_execution_metadata_all_executions_respects_offset_and_limit_after_m
     ]
     test_plan_rows = [
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             created_at=now - timedelta(minutes=i),
             test_plan_id=test_plan_id,
@@ -761,12 +785,16 @@ def test_get_test_set_execution_run_metadata_all_runs_happy_path():
     ]
     returned_rows = [
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             status=TestStatus.green,
             created_at=datetime.now().astimezone(),
             test_set_entry_id=uuid.uuid4(),
         ),
         MagicMock(
+            batch_id=uuid.uuid4(),
+            batch_index=2,
             id=uuid.uuid4(),
             status=TestStatus.pending,
             created_at=datetime.now().astimezone(),
@@ -790,6 +818,8 @@ def test_get_test_set_execution_run_metadata_all_runs_happy_path():
             id=row.id,
             status=row.status,
             created_at=row.created_at,
+            batch_id=row.batch_id,
+            batch_index=row.batch_index,
             test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
             test_set_execution_id=TestSetExecutionID(id=test_set_execution_id),
         )
@@ -918,12 +948,16 @@ def test_get_test_plan_execution_run_metadata_all_runs_happy_path():
     ]
     returned_rows = [
         MagicMock(
+            batch_id=None,
+            batch_index=None,
             id=uuid.uuid4(),
             status=TestStatus.green,
             created_at=datetime.now().astimezone(),
             test_set_entry_id=uuid.uuid4(),
         ),
         MagicMock(
+            batch_id=uuid.uuid4(),
+            batch_index=2,
             id=uuid.uuid4(),
             status=TestStatus.pending,
             created_at=datetime.now().astimezone(),
@@ -949,6 +983,8 @@ def test_get_test_plan_execution_run_metadata_all_runs_happy_path():
             id=row.id,
             status=row.status,
             created_at=row.created_at,
+            batch_id=row.batch_id,
+            batch_index=row.batch_index,
             test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
             test_plan_execution_id=TestPlanExecutionID(id=test_plan_execution_id),
         )

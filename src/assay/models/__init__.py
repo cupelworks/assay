@@ -2,9 +2,27 @@
 # Without these imports, autogenerate would see an empty schema and drop all tables.
 from assay.models.base import Base
 from assay.models.datasets import DatasetModel, DatasetRowModel
-from assay.models.stats import StatisticalVerificationModel
+from assay.models.settings import (
+    JudgeCheckModel,
+    SettingsModel,
+    SettingsSection,
+    TargetCheckModel,
+    TargetCheckStatus,
+)
+from assay.models.statistics import (
+    IN_PROGRESS_BATCH_STATUSES,
+    BatchStatus,
+    StatisticalBatchModel,
+    StatisticalComparisonModel,
+    StatisticalTestModel,
+)
 from assay.models.test import (
+    JUDGE_ENGINE,
+    TERMINAL_STATUSES,
+    Comparison,
     ConfigFieldKind,
+    OutputSource,
+    StandaloneRunModel,
     TestModel,
     TestPlanEntryModel,
     TestPlanExecutionModel,
@@ -21,11 +39,25 @@ from assay.models.test import (
 )
 
 __all__ = [
+    "JUDGE_ENGINE",
+    "IN_PROGRESS_BATCH_STATUSES",
+    "TERMINAL_STATUSES",
+    "BatchStatus",
     "Base",
+    "Comparison",
     "ConfigFieldKind",
     "DatasetModel",
     "DatasetRowModel",
-    "StatisticalVerificationModel",
+    "OutputSource",
+    "SettingsModel",
+    "SettingsSection",
+    "StandaloneRunModel",
+    "StatisticalBatchModel",
+    "StatisticalComparisonModel",
+    "StatisticalTestModel",
+    "JudgeCheckModel",
+    "TargetCheckModel",
+    "TargetCheckStatus",
     "TestModel",
     "TestPlanEntryModel",
     "TestPlanExecutionModel",

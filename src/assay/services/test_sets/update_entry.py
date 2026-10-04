@@ -1,7 +1,10 @@
+import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.assignment_labels import in_label_order
+from assay.assignment_labels import labelled as _labelled
 from assay.schemas import ModifyTestCaseRequest, TestCaseID, TestSetEntryDetails, TestTypeAssignment
 from assay.services.test_sets._common import (
     _check_test_set_entry_has_no_runs_or_409,
@@ -12,7 +15,13 @@ from assay.services.tests._common import (
     _check_reference_required_types_have_expected_output_or_422,
     _validate_test_type_assignments,
 )
-from assay.services.tests.update_test import _apply_scalar_updates
+from assay.services.tests.update_test import (
+    _applied_fields,
+    _apply_scalar_updates,
+    _effective_expected_output,
+)
+
+logger = logging.getLogger(__name__)
 
 
 async def modify_entry_by_id(
@@ -29,9 +38,10 @@ async def modify_entry_by_id(
     entry means it no longer reflects the originating test's state at
     snapshot time; test_case_id keeps pointing at the live test regardless.
 
-    Only fields explicitly set in the request are written — omitted fields (None)
-    are left unchanged. For test_type_assignments specifically: None leaves the
-    snapshot list untouched, while [] clears it.
+    Only fields present in the body are written — omitted fields are left
+    unchanged. expected_output and model_output sent as null are cleared; name
+    and input sent as null are left as they are. For test_type_assignments:
+    null leaves the snapshot list untouched, while [] clears it.
 
     Args:
         test_set_id: UUID of the test set the entry belongs to.
@@ -60,10 +70,7 @@ async def modify_entry_by_id(
 
     # Computed from the pre-mutation state, before _apply_scalar_updates
     # touches `found` — see update_test.py's modify_test_by_id for why.
-    effective_expected_output = (
-        request.expected_output if request.expected_output is not None
-        else found.expected_output
-    )
+    effective_expected_output = _effective_expected_output(found, request)
     effective_assignments = (
         request.test_type_assignments if request.test_type_assignments is not None
         else [TestTypeAssignment(**item) for item in found.test_type_assignments]
@@ -77,12 +84,19 @@ async def modify_entry_by_id(
     if request.test_type_assignments is not None:
         await _validate_test_type_assignments(session, request.test_type_assignments)
         found.test_type_assignments = [
-            {"name": assignment.name, "config": assignment.config}
-            for assignment in request.test_type_assignments
+            {"name": assignment.name, "label": assignment.label,
+             "config": assignment.config, "answer_path": assignment.answer_path}
+            for assignment in in_label_order(_labelled(request.test_type_assignments))
         ]
 
     await session.commit()
 
+    changed_fields = _applied_fields(request)
+    logger.info(
+        "Updated entry %s in test set %s (fields: %s)",
+        entry_id, test_set_id, ", ".join(changed_fields),
+        extra={"test_set_id": test_set_id, "entry_id": entry_id, "fields": changed_fields},
+    )
     return TestSetEntryDetails(
         id=found.id,
         test_case_id=TestCaseID(id=found.test_id),

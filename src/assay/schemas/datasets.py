@@ -84,7 +84,9 @@ class DataSetRowSchema(BaseModel):
     )
     model_output: str = Field(
         ...,
-        description="The answer of the model.",
+        description="The answer your application gave for this prompt. Leave it empty "
+                    "for tests that ask the application under test instead: a test made "
+                    "from a row with a blank model_output has no recorded answer.",
     )
 
 
