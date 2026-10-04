@@ -14,8 +14,8 @@ Offset = Annotated[int, Query(ge=0, description="Number of records to skip.")]
 Limit = Annotated[int, Query(ge=1, le=500, description="Maximum number of records (1–500).")]
 
 CreatedFrom = Annotated[datetime | None, Query(
-    description="Only what was created at or after this moment (ISO 8601; with an offset, "
-                "it's converted to the server's time).")]
+    description="Only what was created at or after this moment (ISO 8601: with an offset, or "
+                "taken as UTC without one).")]
 CreatedTo = Annotated[datetime | None, Query(
     description="Only what was created before this moment.")]
 

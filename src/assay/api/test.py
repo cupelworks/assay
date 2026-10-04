@@ -90,7 +90,7 @@ TestFiltersDep = Annotated[TestFilters, Depends(test_filters)]
         "has_recorded_answer": {"true": 50, "false": 12},
         "in_test_set": {"any": 31, "none": 31, "a1b2c3d4-e5f6-7890-abcd-ef1234567890": 12},
         "from_dataset": {"28bec279-517a-42de-baf6-181041013202": 5},
-        "created": {"2026-10-04T00:00:00+02:00": 2, "2026-09-27T00:00:00+02:00": 10,
+        "created": {"2026-10-03T22:00:00Z": 2, "2026-09-26T22:00:00Z": 10,
                     "before": 52},
     }}}}},
     response_model=TestFacets,
@@ -126,7 +126,7 @@ async def get_tests_facets(session: SessionDep, filters: TestFiltersDep,
                                                    "the output shares with the expected "
                                                    "text, in order (ROUGE-L F1).",
                                     "is_active": True,
-                                    "created_at": "2026-05-27T19:36:01.272322",
+                                    "created_at": "2026-05-27T19:36:01.272322Z",
                                     "best_for": "Summarization tasks.",
                                     "cost": "fast",
                                     "limitations": "Doesn't account for semantic meaning; "
@@ -176,7 +176,7 @@ async def get_tests_facets(session: SessionDep, filters: TestFiltersDep,
                                                    "and the expected text are in different "
                                                    "languages.",
                                     "is_active": True,
-                                    "created_at": "2026-10-01T03:00:00.000000",
+                                    "created_at": "2026-10-01T03:00:00.000000Z",
                                     "best_for": "Answers in languages other than English, or "
                                                 "in a different language from the expected "
                                                 "text.",
@@ -234,7 +234,7 @@ async def get_tests_facets(session: SessionDep, filters: TestFiltersDep,
                                                    "maximum number of words, and optionally "
                                                    "at least a minimum.",
                                     "is_active": True,
-                                    "created_at": "2026-09-29T21:50:26.040821",
+                                    "created_at": "2026-09-29T21:50:26.040821Z",
                                     "best_for": "Length requirements on prose: summaries, "
                                                 "descriptions, short answers that must "
                                                 "fit a card or a screen.",
@@ -281,7 +281,7 @@ async def get_tests_facets(session: SessionDep, filters: TestFiltersDep,
                                                    "with an expected value at a JSONPath, "
                                                    "compared type for type.",
                                     "is_active": True,
-                                    "created_at": "2026-09-29T21:44:14.362617",
+                                    "created_at": "2026-09-29T21:44:14.362617Z",
                                     "best_for": "One decisive field in a structured answer: "
                                                 "a status, a category, a flag, an amount.",
                                     "cost": "very_fast",
@@ -958,7 +958,7 @@ async def delete_test(
             "items": [{
                 "test_set": {
                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890", "name": "Support answers",
-                    "created_at": "2026-09-30T10:00:00", "entry_count": 12,
+                    "created_at": "2026-09-30T10:00:00Z", "entry_count": 12,
                     "test_plan_count": 1, **SCOPE_RAN},
                 "entry": {"id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123", "has_runs": True,
                           "matches_test": False},

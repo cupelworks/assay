@@ -6,6 +6,7 @@ from pydantic import TypeAdapter
 
 from assay.main import create_app
 from assay.openapi_examples import api_routes
+from tests.timestamp_checks import without_offset
 
 
 def _examples(content: dict) -> list:
@@ -45,3 +46,10 @@ def test_there_are_examples_to_check():
                               in enumerate(_EXAMPLES)])
 def test_every_success_example_is_a_valid_response(route, status, example, model):
     TypeAdapter(model).validate_python(example)
+
+
+@pytest.mark.parametrize(("route", "status", "example", "model"), _EXAMPLES,
+                         ids=[f"{route} {status} #{n}" for n, (route, status, _, _)
+                              in enumerate(_EXAMPLES)])
+def test_every_example_timestamp_has_an_offset(route, status, example, model):
+    assert without_offset(example) == []

@@ -184,7 +184,7 @@ async def unlink_test_set_entry_from_a_test_set(
                     "example": {
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Renamed regression suite",
-                        "created_at": "2026-07-03T15:43:09.032480",
+                        "created_at": "2026-07-03T15:43:09.032480Z",
                         "entry_count": 12,
                         "test_plan_count": 1,
                         **SCOPE_RAN,
@@ -831,7 +831,7 @@ async def add_tests_to_test_set(
                     "example": {
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Regression suite",
-                        "created_at": "2026-07-03T15:43:09.032480",
+                        "created_at": "2026-07-03T15:43:09.032480Z",
                         "entry_count": 12,
                         "test_plan_count": 1,
                         **SCOPE_RAN,
@@ -882,7 +882,7 @@ async def get_single_test_set_metadata(
                             {
                                 "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                                 "name": "Regression suite",
-                                "created_at": "2026-07-03T15:43:09.032480",
+                                "created_at": "2026-07-03T15:43:09.032480Z",
                                 "entry_count": 12,
                                 "test_plan_count": 1,
                                 **SCOPE_RAN,
@@ -890,7 +890,7 @@ async def get_single_test_set_metadata(
                             {
                                 "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                 "name": "Smoke tests",
-                                "created_at": "2026-07-03T16:00:00.000000",
+                                "created_at": "2026-07-03T16:00:00.000000Z",
                                 "entry_count": 4,
                                 "test_plan_count": 0,
                                 **SCOPE_NEVER_RAN,
@@ -968,7 +968,7 @@ async def create_test_set(
             "items": [{
                 "test_plan": {
                     "id": "b8c9d0e1-2345-6abc-def7-89012345cdef", "name": "Release check",
-                    "created_at": "2026-09-30T11:00:00", "linked_set_count": 3,
+                    "created_at": "2026-09-30T11:00:00Z", "linked_set_count": 3,
                     "latest_batch": None, "latest_execution": None, "execution_count": 0,
                     "has_runs": False},
                 "entry_id": "c9d0e1f2-3456-7abc-def8-9012345defab",

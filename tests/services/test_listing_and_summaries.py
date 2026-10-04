@@ -1,12 +1,12 @@
 import uuid
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from sqlalchemy import Column, DateTime, MetaData, String, Table
 from sqlalchemy.dialects import sqlite
 
 from assay.models import TestStatus
-from assay.services._listing import as_stored, contains_text, created_between
+from assay.services._listing import contains_text, created_between
 from assay.services.runs._summaries import count_checks, execution_checks
 
 # --- the check counter ---
@@ -64,16 +64,6 @@ def test_search_lowers_both_sides_and_matches_wildcards_as_themselves():
 
     assert "lower(things.name)" in sql
     assert "'%' || '50/%/_off' || '%'" in sql and "ESCAPE '/'" in sql
-
-
-def test_a_moment_with_an_offset_is_compared_in_the_servers_local_time():
-    moment = datetime(2026, 10, 4, 0, 0, tzinfo=timezone(timedelta(hours=2)))
-
-    stored = as_stored(moment)
-
-    assert stored.tzinfo is None
-    assert stored == moment.astimezone().replace(tzinfo=None)
-    assert as_stored(datetime(2026, 10, 4, 0, 0)) == datetime(2026, 10, 4, 0, 0)
 
 
 def test_a_range_can_be_open_on_either_side():

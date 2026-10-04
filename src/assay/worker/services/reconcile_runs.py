@@ -1,13 +1,14 @@
 import logging
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from kombu.exceptions import KombuError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from assay.models import TestRunModel, TestStatus
+from assay.timestamps import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def reconcile_pending_runs(
             passed in by the task wrapper so this module never imports the
             tasks package (which imports this one).
     """
-    cutoff = datetime.now().astimezone() - threshold
+    cutoff = utc_now() - threshold
     stale_ids = session.scalars(
         select(TestRunModel.id).where(
             TestRunModel.status == TestStatus.pending,

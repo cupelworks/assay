@@ -10,12 +10,12 @@ sentinel; every series is in the same order with the same `index`; every
 interval says what it is (`method`, `level`, `sides`).
 """
 import uuid
-from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from assay.schemas._common import Pagination, RunCounts
+from assay.timestamps import Timestamp
 
 # ── shared vocabulary ────────────────────────────────────────────────────────
 
@@ -972,7 +972,7 @@ class FailuresByEntry(BaseModel):
 class BatchResult(BaseModel):
     """The statistics, computed once every run has finished and stored with
     the batch: later reads return exactly this."""
-    computed_at: datetime = Field(description="When it was computed.")
+    computed_at: Timestamp = Field(description="When it was computed.")
     checks_total: int
     checks_applicable: int = Field(description="Checks the statistical test gives a verdict.")
     verdicts: dict[str, int] = Field(
@@ -1016,9 +1016,9 @@ class BatchSummary(BaseModel):
                     "once computed — the same counts as `result.verdicts`, here for lists; "
                     "null while the batch runs.",
     )
-    created_at: datetime
-    stopped_at: datetime | None = Field(description="When a stop cancelled runs; null otherwise.")
-    completed_at: datetime | None = Field(
+    created_at: Timestamp
+    stopped_at: Timestamp | None = Field(description="When a stop cancelled runs; null otherwise.")
+    completed_at: Timestamp | None = Field(
         description="When the result was computed: every run had finished.",
     )
     targets: list[CheckTarget] = Field(
@@ -1249,7 +1249,7 @@ class ComparedBatch(BaseModel):
     status: BatchStatusName
     statistical_test: str
     times_requested: int
-    created_at: datetime
+    created_at: Timestamp
 
 
 class ComparisonSummary(BaseModel):
@@ -1275,7 +1275,7 @@ class ComparisonSummary(BaseModel):
                     "`none`, when nothing could be compared. The same order `summary` "
                     "follows.",
     )
-    created_at: datetime
+    created_at: Timestamp
 
 
 class ComparisonDetails(ComparisonSummary):

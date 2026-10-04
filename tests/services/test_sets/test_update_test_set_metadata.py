@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from assay.models import TestSetModel
 from assay.schemas import ModifyTestSetMetadataRequest
 from assay.services import update_test_set_metadata_by_id
+from assay.timestamps import as_utc
 from tests.services.standing_fakes import neutral_standing
 
 
@@ -91,7 +92,7 @@ def test_update_test_set_name_none_is_noop():
     assert session.scalar.call_count == 1
     assert response.id == test_set_id
     assert response.name == test_set_name
-    assert response.created_at == created_at
+    assert response.created_at == as_utc(created_at)
     assert response.entry_count == 4
 
 
@@ -121,7 +122,7 @@ def test_update_test_set_name_unchanged_is_noop():
     assert session.scalar.call_count == 1
     assert response.id == test_set_id
     assert response.name == test_set_name
-    assert response.created_at == created_at
+    assert response.created_at == as_utc(created_at)
     assert response.entry_count == 4
 
 
@@ -152,5 +153,5 @@ def test_update_test_set_name_happy_path():
     assert session.scalar.call_count == 2
     assert response.id == test_set_id
     assert response.name == test_set_name
-    assert response.created_at == created_at
+    assert response.created_at == as_utc(created_at)
     assert response.entry_count == 4

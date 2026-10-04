@@ -1,6 +1,5 @@
 import logging
 import uuid
-from datetime import datetime
 
 from kombu.exceptions import KombuError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +10,7 @@ from assay.models import JudgeCheckModel, TargetCheckStatus
 from assay.schemas import JudgeCheck, JudgeCheckRequest, JudgeSettings, JudgeSettingsUpdate
 from assay.services.settings._common import _apply_or_422, _find_judge_row, _judge_check_schema
 from assay.services.settings.create_target_check import NOT_DISPATCHED
+from assay.timestamps import utc_now
 from assay.worker import app as _celery_app
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ async def create_judge_check(
 
     check = JudgeCheckModel(
         id=uuid.uuid4(),
-        created_at=datetime.now().astimezone(),
+        created_at=utc_now(),
         status=TargetCheckStatus.pending,
         settings=settings.model_dump(mode="json"),
     )
@@ -68,7 +68,7 @@ async def create_judge_check(
         check.status = TargetCheckStatus.completed
         check.ok = False
         check.error = NOT_DISPATCHED
-        check.completed_at = datetime.now().astimezone()
+        check.completed_at = utc_now()
         await session.commit()
     else:
         logger.info(

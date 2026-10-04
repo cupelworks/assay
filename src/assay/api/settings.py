@@ -34,7 +34,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 _SETTINGS_FROM_DATABASE = {
     "source": "database",
-    "updated_at": "2026-09-27T15:10:00+02:00",
+    "updated_at": "2026-09-27T13:10:00Z",
     "url": "https://support-bot.internal/chat",
     "method": "POST",
     "headers": {"Authorization": "Bearer ${ASSAY_TARGET_API_KEY}"},
@@ -93,7 +93,7 @@ _INVALID_SETTINGS = {
 _CHECK_PENDING = {
     "id": "5b0c9a3e-2f1d-4c1e-9d6b-0f4a1f2e7c11",
     "status": "pending",
-    "created_at": "2026-09-27T15:12:03+02:00",
+    "created_at": "2026-09-27T13:12:03Z",
     "completed_at": None,
     "settings": {k: v for k, v in _SETTINGS_FROM_DATABASE.items()
                  if k not in ("source", "updated_at")},
@@ -234,13 +234,13 @@ async def post_target_check(
                     "examples": {
                         "ok": {"summary": "The application answered", "value": {
                             **_CHECK_PENDING, "status": "completed",
-                            "completed_at": "2026-09-27T15:12:04+02:00", "ok": True,
+                            "completed_at": "2026-09-27T13:12:04Z", "ok": True,
                             "status_code": 200, "latency_ms": 412.5,
                             "answer": "We open at 9am on Saturdays.",
                         }},
                         "failed": {"summary": "The application refused the key", "value": {
                             **_CHECK_PENDING, "status": "completed",
-                            "completed_at": "2026-09-27T15:12:04+02:00", "ok": False,
+                            "completed_at": "2026-09-27T13:12:04Z", "ok": False,
                             "status_code": 401, "latency_ms": 88.1,
                             "error": "Application answered HTTP 401",
                         }},
@@ -276,7 +276,7 @@ _JUDGE_FROM_DATABASE = {
     "endpoint": "https://api.anthropic.com/v1/messages",
     "api_key_variable": "ANTHROPIC_API_KEY",
     "source": "database",
-    "updated_at": "2026-10-01T09:30:00+02:00",
+    "updated_at": "2026-10-01T07:30:00Z",
 }
 _JUDGE_FROM_ENVIRONMENT = {
     "provider": None,
@@ -331,7 +331,7 @@ _INVALID_JUDGE_SETTINGS = {
 _JUDGE_CHECK_PENDING = {
     "id": "8e2f4b1a-6c3d-4e5f-9a7b-1c2d3e4f5a6b",
     "status": "pending",
-    "created_at": "2026-10-01T09:31:12+02:00",
+    "created_at": "2026-10-01T07:31:12Z",
     "completed_at": None,
     "settings": {k: v for k, v in _JUDGE_FROM_DATABASE.items()
                  if k not in ("endpoint", "api_key_variable", "source", "updated_at")},
@@ -460,14 +460,14 @@ async def post_judge_check(
                     "examples": {
                         "ok": {"summary": "The judge answered", "value": {
                             **_JUDGE_CHECK_PENDING, "status": "completed",
-                            "completed_at": "2026-10-01T09:31:14+02:00", "ok": True,
+                            "completed_at": "2026-10-01T07:31:14Z", "ok": True,
                             "status_code": 200, "latency_ms": 1840.2,
                             "answer": "The answer directly states that Paris is the capital "
                                       "of France, which is exactly what was asked.",
                         }},
                         "no_key": {"summary": "The key's variable isn't set", "value": {
                             **_JUDGE_CHECK_PENDING, "status": "completed",
-                            "completed_at": "2026-10-01T09:31:12+02:00", "ok": False,
+                            "completed_at": "2026-10-01T07:31:12Z", "ok": False,
                             "error": "ANTHROPIC_API_KEY is not set on this server",
                         }},
                         "pending": {"summary": "Not picked up yet",

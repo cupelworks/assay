@@ -1,6 +1,5 @@
 import logging
 import uuid
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +43,7 @@ from assay.services.tests._common import (
     _find_all_tests_with_details_or_404,
     _frozen_test_type_assignments,
 )
+from assay.timestamps import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def _new_standalone_run(test, batch_id: uuid.UUID | None = None,
                         batch_index: int | None = None) -> TestRunModel:
     """A pending standalone run of a live test, with its frozen copy. Not
     added to a session. A statistical batch passes its id and the time."""
-    created_at = datetime.now().astimezone()
+    created_at = utc_now()
     run = TestRunModel(
         id=uuid.uuid4(),
         test_id=test.id,
@@ -86,7 +86,7 @@ def _new_test_set_execution(
         id=uuid.uuid4(),
         test_set_id=test_set_id,
         replayed_execution_id=replayed_execution_id,
-        created_at=datetime.now().astimezone(),
+        created_at=utc_now(),
         batch_id=batch_id,
         batch_index=batch_index,
     )
@@ -94,7 +94,7 @@ def _new_test_set_execution(
         TestRunModel(
             id=uuid.uuid4(),
             status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
+            created_at=utc_now(),
             test_set_entry_id=entry_id,
             test_set_execution_id=execution.id,
             batch_id=batch_id,
@@ -118,7 +118,7 @@ def _new_test_plan_execution(
         id=uuid.uuid4(),
         test_plan_id=test_plan_id,
         replayed_execution_id=replayed_execution_id,
-        created_at=datetime.now().astimezone(),
+        created_at=utc_now(),
         batch_id=batch_id,
         batch_index=batch_index,
     )
@@ -126,7 +126,7 @@ def _new_test_plan_execution(
         TestRunModel(
             id=uuid.uuid4(),
             status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
+            created_at=utc_now(),
             test_set_entry_id=entry_id,
             test_plan_execution_id=execution.id,
             batch_id=batch_id,

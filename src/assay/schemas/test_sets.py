@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from assay.schemas import Pagination
 from assay.schemas.standing import ScopeStanding
+from assay.timestamps import Timestamp
 
 
 class TestSetName(BaseModel):
@@ -25,7 +25,7 @@ class TestSetID(BaseModel):
 class TestSetMetadata(TestSetID, TestSetName, ScopeStanding):
     test_plan_count: int = Field(
         description="How many test plans link it (`GET /test-sets/{id}/test-plans`).")
-    created_at: datetime = Field(
+    created_at: Timestamp = Field(
         ...,
         description="The creation date of the test set.",
     )

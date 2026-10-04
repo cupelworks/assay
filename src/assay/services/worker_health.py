@@ -1,4 +1,3 @@
-from datetime import datetime
 
 from assay.code_fingerprint import CODE_FINGERPRINT, CODE_VERSION
 from assay.messages import sentence
@@ -6,6 +5,7 @@ from assay.schemas import BrokerStatus, WorkerHealth, WorkerHealthStatus, Worker
 from assay.services.runs._common import EXECUTE_RUN_TASK
 from assay.services.settings.create_judge_check import CHECK_TASK as CHECK_JUDGE_TASK
 from assay.services.settings.create_target_check import CHECK_TASK as CHECK_TARGET_TASK
+from assay.timestamps import utc_now
 from assay.worker import app as _celery_app
 from assay.worker.celery_app import CODE_COMMAND
 
@@ -50,7 +50,7 @@ def get_worker_health() -> WorkerHealth:
     started on code from before fingerprints. Either is out of date, as is
     one missing a task.
     """
-    checked_at = datetime.now().astimezone()
+    checked_at = utc_now()
     try:
         with _celery_app.connection_for_write(transport_options={
             **_celery_app.conf.broker_transport_options,

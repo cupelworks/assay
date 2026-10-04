@@ -8,7 +8,6 @@ value refused in one place can't get in through another.
 """
 import re
 import uuid
-from datetime import datetime
 from enum import StrEnum
 from typing import Any
 from urllib.parse import urlparse
@@ -25,6 +24,7 @@ from pydantic import (
 
 from assay.messages import sentence
 from assay.models import TargetCheckStatus
+from assay.timestamps import Timestamp
 
 INPUT_PLACEHOLDER = "{{input}}"
 ALLOWED_METHODS = ("POST", "PUT", "PATCH")
@@ -201,7 +201,7 @@ class TargetSettingsRead(TargetSettings):
                     "reset), so read from the ASSAY_TARGET_* environment variables "
                     "and the defaults. The source applies to the whole group.",
     )
-    updated_at: datetime | None = Field(
+    updated_at: Timestamp | None = Field(
         None,
         description="When the settings were last saved from the UI; null when the "
                     "source is the environment.",
@@ -239,8 +239,8 @@ class TargetCheck(BaseModel):
         description="`pending` until a worker picks it up, `running` while it calls "
                     "the application, `completed` once the outcome is written.",
     )
-    created_at: datetime
-    completed_at: datetime | None = None
+    created_at: Timestamp
+    completed_at: Timestamp | None = None
     settings: TargetSettings = Field(
         ..., description="The complete settings this check uses (or used).",
     )
@@ -431,7 +431,7 @@ class JudgeSettingsRead(JudgeSettings):
                     "reset), so read from the ASSAY_JUDGE_* environment variables and "
                     "the defaults. The source applies to the whole group.",
     )
-    updated_at: datetime | None = Field(
+    updated_at: Timestamp | None = Field(
         None,
         description="When the settings were last saved from the UI; null when the "
                     "source is the environment.",
@@ -461,8 +461,8 @@ class JudgeCheck(BaseModel):
         description="`pending` until a worker picks it up, `running` while it asks the "
                     "judge, `completed` once the outcome is written.",
     )
-    created_at: datetime
-    completed_at: datetime | None = None
+    created_at: Timestamp
+    completed_at: Timestamp | None = None
     settings: JudgeSettings = Field(
         ..., description="The complete settings this check uses (or used).",
     )

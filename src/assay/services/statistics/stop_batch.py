@@ -3,7 +3,6 @@ still Pending becomes Not Ran, in one statement; runs already executing
 finish and count. The batch is then Incomplete once none is running."""
 import logging
 import uuid
-from datetime import datetime
 
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from assay.models import StatisticalBatchModel, TestRunModel, TestStatus
 from assay.schemas.statistics import BatchDetails
 from assay.services.statistics._batches import STOP_REASON, describe, find_batch_or_404, refresh
+from assay.timestamps import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ async def stop_batch(batch_id: uuid.UUID, session: AsyncSession) -> BatchDetails
     Raises: HTTPException 404 for an unknown batch.
     """
     batch = await find_batch_or_404(batch_id, session)
-    now = datetime.now().astimezone()
+    now = utc_now()
     cancelled = (await session.execute(
         update(TestRunModel)
         .where(TestRunModel.batch_id == batch.id, TestRunModel.status == TestStatus.pending)

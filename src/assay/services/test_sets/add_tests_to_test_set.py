@@ -1,6 +1,5 @@
 import logging
 import uuid
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +13,7 @@ from assay.services.tests._common import (
     _find_all_tests_with_details_or_404,
     _frozen_test_type_assignments,
 )
+from assay.timestamps import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ async def add_tests_to_test_set_by_test_id(
             expected_output=test.expected_output,
             model_output=test.model_output,
             test_type_assignments=_frozen_test_type_assignments(test),
-            snapshot_at=datetime.now(),
+            snapshot_at=utc_now(),
         )
         for test in found_tests
     ]

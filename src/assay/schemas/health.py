@@ -1,8 +1,9 @@
 """Whether the parts of Assay outside the API can do their work."""
-from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+from assay.timestamps import Timestamp
 
 
 class WorkerHealthStatus(StrEnum):
@@ -72,4 +73,4 @@ class WorkerHealth(BaseModel):
         description="The fingerprint of the code the API runs — what each worker's "
                     "`code_fingerprint` is compared with.",
     )
-    checked_at: datetime = Field(description="When this was checked.")
+    checked_at: Timestamp = Field(description="When this was checked.")

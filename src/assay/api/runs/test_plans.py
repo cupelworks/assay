@@ -73,7 +73,7 @@ _EXECUTION_404 = {
 _RUN_DETAIL_RECORDED = {
     "id": "f1a2b3c4-d5e6-7890-fabc-234567890123",
     "status": "Green",
-    "created_at": "2026-07-20T09:12:04.221310",
+    "created_at": "2026-07-20T09:12:04.221310Z",
     "batch_id": None,
     "batch_index": None,
     "test_set_entry_id": {
@@ -98,7 +98,7 @@ _RUN_DETAIL_RECORDED = {
     "error": None,
     "evaluated_output": "Hello, Alice!",
     "output_source": "recorded",
-    "executed_at": "2026-07-20T09:12:08.554021",
+    "executed_at": "2026-07-20T09:12:08.554021Z",
     "test_case_id": {
         "id": "c4d5e6f7-a8b9-0123-cdef-567890123456"
     },
@@ -111,7 +111,7 @@ _RUN_DETAIL_RECORDED = {
         {"name": "Exact Match", "label": "Exact Match", "config": None},
     ],
     "test_case_snapshot_at": {
-        "snapshot_at": "2026-07-20T09:10:41.117903"
+        "snapshot_at": "2026-07-20T09:10:41.117903Z"
     },
     "test_set_id": {
         "id": "d5e6f7a8-b9c0-1234-defa-678901234567"
@@ -171,7 +171,7 @@ _RUN_DETAIL_FROM_APPLICATION = {
                 "application/json": {
                     "example": {
                         "id": "a2b3c4d5-e6f7-8901-ab23-456789abcdef",
-                        "created_at": "2026-07-17T09:21:44.512873",
+                        "created_at": "2026-07-17T09:21:44.512873Z",
                         "test_plan_id": {
                             "id": "7c1d2e3f-4a5b-6c7d-8e9f-0123456789ab"
                         },
@@ -313,7 +313,7 @@ async def run_live_test_plan_entries(
                 "application/json": {
                     "example": {
                         "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0",
-                        "created_at": "2026-07-18T11:05:52.284917",
+                        "created_at": "2026-07-18T11:05:52.284917Z",
                         "test_plan_id": {
                             "id": "7c1d2e3f-4a5b-6c7d-8e9f-0123456789ab"
                         },
@@ -443,7 +443,7 @@ async def replay_previous_test_plan_execution(
                         "items": [
                             {
                                 "id": "a2b3c4d5-e6f7-8901-ab23-456789abcdef",
-                                "created_at": "2026-07-17T09:21:44.512873",
+                                "created_at": "2026-07-17T09:21:44.512873Z",
                                 "test_plan_id": {
                                     "id": "7c1d2e3f-4a5b-6c7d-8e9f-0123456789ab"
                                 },
@@ -454,7 +454,7 @@ async def replay_previous_test_plan_execution(
                             },
                             {
                                 "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0",
-                                "created_at": "2026-07-18T11:05:52.284917",
+                                "created_at": "2026-07-18T11:05:52.284917Z",
                                 "test_plan_id": {
                                     "id": "7c1d2e3f-4a5b-6c7d-8e9f-0123456789ab"
                                 },
@@ -552,7 +552,7 @@ async def get_test_plan_execution(
                             {
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
                                 "status": "Green",
-                                "created_at": "2026-07-18T11:05:55.163355",
+                                "created_at": "2026-07-18T11:05:55.163355Z",
                                 "batch_id": None,
                                 "batch_index": None,
                                 "test_set_entry_id": {
@@ -569,7 +569,7 @@ async def get_test_plan_execution(
                             {
                                 "id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123",
                                 "status": "Pending",
-                                "created_at": "2026-07-18T11:05:55.163355",
+                                "created_at": "2026-07-18T11:05:55.163355Z",
                                 "batch_id": None,
                                 "batch_index": None,
                                 "test_set_entry_id": {

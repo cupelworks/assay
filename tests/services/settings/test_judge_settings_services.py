@@ -19,6 +19,7 @@ from assay.services import (
     reset_judge_settings,
     update_judge_settings,
 )
+from assay.timestamps import as_utc
 
 SAVED_AT = datetime(2026, 10, 1, 9, 30)
 _PATCH_SEND = "assay.services.settings.create_judge_check._celery_app.send_task"
@@ -59,7 +60,7 @@ def test_get_reads_the_environment_when_nothing_is_saved():
 def test_get_reads_the_saved_row_with_the_variable_its_key_is_read_from():
     result = asyncio.run(get_judge_settings(_session(_saved_row())))
 
-    assert (result.source, result.updated_at) == (SettingsSource.database, SAVED_AT)
+    assert (result.source, result.updated_at) == (SettingsSource.database, as_utc(SAVED_AT))
     assert (result.model, result.api_key_variable) == ("claude-sonnet-5-5", "ANTHROPIC_API_KEY")
 
 

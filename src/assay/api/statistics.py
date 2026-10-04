@@ -447,7 +447,7 @@ _BATCH_COMMON = {
     "parameters": {"target": 0.9, "confidence": 0.95},
     "note": "Prompt v3, temperature 0.2",
     "floor": 29,
-    "created_at": "2026-10-01T09:30:00+02:00",
+    "created_at": "2026-10-01T07:30:00Z",
     "stopped_at": None,
 }
 
@@ -574,9 +574,9 @@ _BATCH_FINISHED = {
     "summary": ("Inconclusive: of the 2 checks, 1 met the goal and 1 can't be told yet. A bigger "
                 "batch would settle it."),
     "verdicts": {"pass": 1, "fail": 0, "inconclusive": 1, "none": 0},
-    "completed_at": "2026-10-01T09:52:41+02:00",
+    "completed_at": "2026-10-01T07:52:41Z",
     "result": {
-        "computed_at": "2026-10-01T09:52:41+02:00",
+        "computed_at": "2026-10-01T07:52:41Z",
         "checks_total": 2,
         "checks_applicable": 2,
         "verdicts": {"pass": 1, "fail": 0, "inconclusive": 1, "none": 0},
@@ -625,7 +625,7 @@ _STOPPED_RESULT = computed.stopped_result()
 _BATCH_STOPPED = {
     **_BATCH_COMMON,
     "status": "Incomplete",
-    "stopped_at": "2026-10-01T09:41:07+02:00",
+    "stopped_at": "2026-10-01T07:41:07Z",
     "progress": {
         "times_requested": 30, "times_done": 30, "runs_total": 60, "runs_done": 60,
         "runs": _counts(Green=22, Amber=2, NotRan=36), "runs_cancelled": 36,
@@ -636,7 +636,7 @@ _BATCH_STOPPED = {
     },
     "summary": _STOPPED_RESULT["summary"],
     "verdicts": _STOPPED_RESULT["verdicts"],
-    "completed_at": "2026-10-01T09:41:09+02:00",
+    "completed_at": "2026-10-01T07:41:09Z",
     # a stopped batch keeps what ran: rates, ranges and series, here without a
     # verdict since 12 evaluated runs are below the floor of 29
     "result": _STOPPED_RESULT,
@@ -973,7 +973,7 @@ async def get_statistical_batch(
                 "finishing": {"summary": "Stopped while two runs were executing: Running "
                                          "until they finish, no result yet",
                               "value": {**_BATCH_RUNNING,
-                                        "stopped_at": "2026-10-01T09:41:07+02:00",
+                                        "stopped_at": "2026-10-01T07:41:07Z",
                                         "progress": {
                                             **_BATCH_RUNNING["progress"],
                                             "times_done": 28, "runs_done": 58,
@@ -1071,14 +1071,14 @@ _COMPARISON_SUMMARY = {
     "engine": "pass_rates",
     "parameters": {"confidence": 0.95},
     "note": "Prompt v3 against v2",
-    "batch_a": _compared(_BATCH_ID, "Prompt v2", "2026-09-30T16:02:11+02:00"),
+    "batch_a": _compared(_BATCH_ID, "Prompt v2", "2026-09-30T14:02:11Z"),
     "batch_b": _compared(_BATCH_B_ID, "Prompt v3, temperature 0.2",
-                         "2026-10-01T09:30:00+02:00"),
+                         "2026-10-01T07:30:00Z"),
     "summary": "B is better on 1 of 2 checks, worse on none.",
     "verdicts": {"better": 1, "worse": 0, "no_difference": 1, "no_worse": 0,
                  "inconclusive": 0, "none": 0},
     "outcome": "better",
-    "created_at": "2026-10-01T10:05:12+02:00",
+    "created_at": "2026-10-01T08:05:12Z",
 }
 
 _COMPARISON = {

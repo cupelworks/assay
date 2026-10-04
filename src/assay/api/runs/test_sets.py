@@ -73,7 +73,7 @@ _EXECUTION_404 = {
 _RUN_DETAIL_RECORDED = {
     "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
     "status": "Green",
-    "created_at": "2026-07-15T16:44:30.163355",
+    "created_at": "2026-07-15T16:44:30.163355Z",
     "batch_id": None,
     "batch_index": None,
     "test_set_entry_id": {
@@ -98,7 +98,7 @@ _RUN_DETAIL_RECORDED = {
     "error": None,
     "evaluated_output": "Hello, Alice!",
     "output_source": "recorded",
-    "executed_at": "2026-07-15T16:44:33.981022",
+    "executed_at": "2026-07-15T16:44:33.981022Z",
     "test_case_id": {
         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
     },
@@ -111,7 +111,7 @@ _RUN_DETAIL_RECORDED = {
         {"name": "Exact Match", "label": "Exact Match", "config": None},
     ],
     "test_case_snapshot_at": {
-        "snapshot_at": "2026-07-15T16:40:02.552210"
+        "snapshot_at": "2026-07-15T16:40:02.552210Z"
     },
     "test_set_id": {
         "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901"
@@ -168,7 +168,7 @@ _RUN_DETAIL_FROM_APPLICATION = {
                 "application/json": {
                     "example": {
                         "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12",
-                        "created_at": "2026-07-15T16:44:30.163355",
+                        "created_at": "2026-07-15T16:44:30.163355Z",
                         "test_set_id": {
                             "id": "4e86003a-9e28-4c93-a08e-f99c6acbaab6"
                         },
@@ -292,7 +292,7 @@ async def run_live_test_set_entries(
                 "application/json": {
                     "example": {
                         "id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123",
-                        "created_at": "2026-07-15T17:12:08.947213",
+                        "created_at": "2026-07-15T17:12:08.947213Z",
                         "test_set_id": {
                             "id": "4e86003a-9e28-4c93-a08e-f99c6acbaab6"
                         },
@@ -422,7 +422,7 @@ async def replay_previous_test_set_execution(
                         "items": [
                             {
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-                                "created_at": "2026-07-14T18:03:21.123456",
+                                "created_at": "2026-07-14T18:03:21.123456Z",
                                 "test_set_id": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                                 },
@@ -433,7 +433,7 @@ async def replay_previous_test_set_execution(
                             },
                             {
                                 "id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
-                                "created_at": "2026-07-15T09:12:47.884213",
+                                "created_at": "2026-07-15T09:12:47.884213Z",
                                 "test_set_id": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                                 },
@@ -530,7 +530,7 @@ async def get_test_set_execution(
                             {
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
                                 "status": "Green",
-                                "created_at": "2026-07-15T16:44:30.163355",
+                                "created_at": "2026-07-15T16:44:30.163355Z",
                                 "batch_id": None,
                                 "batch_index": None,
                                 "test_set_entry_id": {
@@ -547,7 +547,7 @@ async def get_test_set_execution(
                             {
                                 "id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123",
                                 "status": "Pending",
-                                "created_at": "2026-07-15T16:44:30.163355",
+                                "created_at": "2026-07-15T16:44:30.163355Z",
                                 "batch_id": None,
                                 "batch_index": None,
                                 "test_set_entry_id": {

@@ -10,6 +10,7 @@ from assay.services import (
     get_dataset_metadata_by_id,
     get_datasets_metadata,
 )
+from assay.timestamps import as_utc
 from tests.services.standing_fakes import neutral_standing
 
 
@@ -40,7 +41,7 @@ def test_get_datasets_metadata_returns_correct_items():
     assert (result.items[0].row_count, result.items[0].first_prompt) == (4, None)
     assert result.items[0].id == ds1.id
     assert result.items[0].name == ds1.name
-    assert result.items[0].created_at == ds1.created_at
+    assert result.items[0].created_at == as_utc(ds1.created_at)
     assert result.items[1].id == ds2.id
 
 
@@ -82,7 +83,7 @@ def test_get_dataset_metadata_by_id_returns_correct_metadata():
 
     assert result.id == dataset.id
     assert result.name == dataset.name
-    assert result.created_at == dataset.created_at
+    assert result.created_at == as_utc(dataset.created_at)
 
 
 def test_get_dataset_metadata_by_id_missing_raises_404():

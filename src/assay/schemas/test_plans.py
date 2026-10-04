@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from assay.schemas import Pagination
 from assay.schemas.standing import ScopeStanding
+from assay.timestamps import Timestamp
 
 
 class TestPlanName(BaseModel):
@@ -23,7 +23,7 @@ class TestPlanID(BaseModel):
 
 
 class TestPlanMetadata(TestPlanID, TestPlanName, ScopeStanding):
-    created_at: datetime = Field(
+    created_at: Timestamp = Field(
         ...,
         description="The creation date of the test plan.",
     )

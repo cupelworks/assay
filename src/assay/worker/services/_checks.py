@@ -2,7 +2,7 @@
 claim it atomically, expire it if it waited too long, write its outcome —
 and if anything goes wrong once it's claimed, write that as its outcome
 too, so a check never stays `running`."""
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from pydantic import ValidationError
 from sqlalchemy import select, update
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from assay.messages import sentence
 from assay.models import JudgeCheckModel, TargetCheckModel, TargetCheckStatus
 from assay.schemas.settings import describe_validation_error
+from assay.timestamps import as_stored, utc_now
 
 # A check still queued after this long is completed without calling out:
 # whoever asked has long stopped waiting for it, and a worker that starts
@@ -36,11 +37,7 @@ def claim(session: Session, model: type[CheckModel], check_id) -> CheckModel | N
 
 
 def expired(check: CheckModel) -> bool:
-    created_at = check.created_at
-    # SQLite hands a DateTime column back naive (local wall time); compare
-    # like with like either way
-    now = datetime.now(created_at.tzinfo) if created_at.tzinfo else datetime.now()
-    return now - created_at > CHECK_EXPIRES_AFTER
+    return utc_now() - as_stored(check.created_at) > CHECK_EXPIRES_AFTER
 
 
 def complete(check: CheckModel, *, ok: bool, answer: str | None = None,
@@ -52,7 +49,7 @@ def complete(check: CheckModel, *, ok: bool, answer: str | None = None,
     check.error = error
     check.status_code = status_code
     check.latency_ms = latency_ms
-    check.completed_at = datetime.now().astimezone()
+    check.completed_at = utc_now()
 
 
 def fail(session: Session, check: CheckModel, exc: Exception) -> None:

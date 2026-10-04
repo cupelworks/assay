@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from assay.models.base import Base
+from assay.timestamps import utc_now
 
 
 class DatasetModel(Base):
@@ -15,7 +16,7 @@ class DatasetModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), unique=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
+        DateTime, default=utc_now
     )
 
     rows: Mapped[list["DatasetRowModel"]] = relationship(

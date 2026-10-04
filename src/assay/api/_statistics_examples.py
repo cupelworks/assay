@@ -159,7 +159,7 @@ def stopped_result() -> dict:
     result = compute.compute(StatisticalEngine.binomial_gate,
                              {"target": 0.9, "confidence": 0.95}, 29, True, entries,
                              {"Contains": _CONTAINS, "Relevance": relevance},
-                             "2026-10-01T09:41:09+02:00")
+                             "2026-10-01T07:41:09Z")
     all_runs = [run for entry in entries for run in entry.runs]
     status = compute.roll_up(result, True, all_runs)
     result.summary = compute.summary(status, result, 12, 30, all_runs)

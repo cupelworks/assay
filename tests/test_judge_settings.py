@@ -7,6 +7,7 @@ from assay.config import Settings, settings
 from assay.judge_settings import resolve_judge_settings
 from assay.models import SettingsModel, SettingsSection
 from assay.schemas import JudgeProvider, JudgeSettings, SettingsSource
+from assay.timestamps import as_utc
 
 # --- the rules (JudgeSettings) ---
 
@@ -121,7 +122,7 @@ def test_a_saved_row_is_the_whole_truth(monkeypatch):
 
     effective = resolve_judge_settings(row)
 
-    assert (effective.source, effective.updated_at) == (SettingsSource.database, saved_at)
+    assert (effective.source, effective.updated_at) == (SettingsSource.database, as_utc(saved_at))
     assert (effective.provider, effective.model) == (JudgeProvider.openai, "gpt-4o-mini")
     assert effective.api_key_variable == "TEAM_KEY"
 

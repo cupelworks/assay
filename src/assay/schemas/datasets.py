@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
 from assay.schemas import Pagination
+from assay.timestamps import Timestamp
 
 
 class DataSetImportViaPathRequest(BaseModel):
@@ -115,7 +115,7 @@ class DataSetRowUpdatedData(BaseModel):
 
 
 class DataSetMetadata(DataSetID, DataSetName):
-    created_at: datetime = Field(
+    created_at: Timestamp = Field(
         ...,
         description="The creation date of the dataset.",
     )

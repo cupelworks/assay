@@ -7,6 +7,7 @@ from assay.config import settings
 from assay.models import SettingsModel, SettingsSection
 from assay.schemas import SettingsSource
 from assay.target_settings import resolve_target_settings
+from assay.timestamps import as_utc
 
 
 def test_with_no_saved_row_the_environment_applies(monkeypatch):
@@ -28,7 +29,7 @@ def test_a_saved_row_is_the_whole_truth_whatever_the_environment_says(monkeypatc
 
     resolved = resolve_target_settings(row)
 
-    assert (resolved.source, resolved.updated_at) == (SettingsSource.database, saved_at)
+    assert (resolved.source, resolved.updated_at) == (SettingsSource.database, as_utc(saved_at))
     assert resolved.url == "https://saved.example.test/chat"
     # not mixed field by field: a field the row lacks is the default, not the env's 5
     assert resolved.max_retries == 2
