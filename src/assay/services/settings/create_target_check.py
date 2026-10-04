@@ -1,6 +1,5 @@
 import logging
 import uuid
-from datetime import datetime
 
 from kombu.exceptions import KombuError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +13,7 @@ from assay.services.settings._common import (
     _target_check_schema,
 )
 from assay.target_settings import resolve_target_settings
+from assay.timestamps import utc_now
 from assay.worker import app as _celery_app
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ async def create_target_check(
 
     check = TargetCheckModel(
         id=uuid.uuid4(),
-        created_at=datetime.now().astimezone(),
+        created_at=utc_now(),
         status=TargetCheckStatus.pending,
         input=request.input,
         settings=settings.model_dump(mode="json"),
@@ -80,7 +80,7 @@ async def create_target_check(
         check.status = TargetCheckStatus.completed
         check.ok = False
         check.error = NOT_DISPATCHED
-        check.completed_at = datetime.now().astimezone()
+        check.completed_at = utc_now()
         await session.commit()
     else:
         logger.info(

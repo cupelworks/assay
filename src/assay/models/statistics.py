@@ -7,6 +7,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from assay.models.base import Base
+from assay.timestamps import utc_now
 
 
 class BatchStatus(StrEnum):
@@ -67,7 +68,7 @@ class StatisticalTestModel(Base):
     floor_examples: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     method: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now().astimezone())
+        DateTime, nullable=False, default=utc_now)
 
 
 class StatisticalBatchModel(Base):
@@ -129,7 +130,7 @@ class StatisticalBatchModel(Base):
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now().astimezone())
+        DateTime, nullable=False, default=utc_now)
     # Set when a stop cancelled at least one pending run
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Set when the result was computed: every run finished
@@ -171,4 +172,4 @@ class StatisticalComparisonModel(Base):
     # verdicts when it's created, a column so the list can filter and count by it
     outcome: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now().astimezone())
+        DateTime, nullable=False, default=utc_now)

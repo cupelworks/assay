@@ -10,7 +10,7 @@ def execution_details(scope_key: str, scope_name: str) -> dict:
     return {
         "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12",
         "name": scope_name,
-        "created_at": "2026-07-15T16:44:30.163355",
+        "created_at": "2026-07-15T16:44:30.163355Z",
         "batch_id": None,
         "batch_index": None,
         scope_key: {"id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"},

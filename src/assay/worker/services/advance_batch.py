@@ -3,13 +3,13 @@ the next one or stop (docs/version_1/statistics/dev_notes.md notes 30-32)."""
 import logging
 import uuid
 from collections.abc import Callable
-from datetime import datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from assay import batch_waves, sequential
 from assay.models import StatisticalBatchModel, TestRunModel
+from assay.timestamps import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def advance_batch(batch_id: uuid.UUID, session: Session,
             .where(StatisticalBatchModel.id == batch_id,
                    StatisticalBatchModel.waves_released == released,
                    StatisticalBatchModel.waves_closed_at.is_(None))
-            .values(waves_closed_at=datetime.now().astimezone()))
+            .values(waves_closed_at=utc_now()))
         session.commit()
         if closed.rowcount:
             why = "every check has its answer" if not undecided else "the maximum is reached"

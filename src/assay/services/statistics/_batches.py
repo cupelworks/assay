@@ -6,7 +6,6 @@ computing its result the first time a read finds every run finished
 import logging
 import uuid
 from collections import defaultdict
-from datetime import datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, case, func, select, update
@@ -44,6 +43,7 @@ from assay.schemas.statistics import (
 )
 from assay.services.statistics import compute
 from assay.services.statistics.compute import entry_order
+from assay.timestamps import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +285,7 @@ async def refresh(batch: StatisticalBatchModel, session: AsyncSession) -> None:
     types = await load_types(entries, session)
     runs = [run for entry in entries for run in entry.runs]
     stopped = batch.stopped_at is not None
-    now = datetime.now().astimezone()
+    now = utc_now()
     engine = StatisticalEngine(batch.engine)
     result = compute.compute(engine, batch.parameters, batch.plan["floor"], stopped, entries,
                              types, now, batch.overrides, batch.plan.get("waves"))

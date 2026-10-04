@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +6,7 @@ from assay.models import SettingsModel, SettingsSection
 from assay.schemas import SettingsSource, TargetSettingsRead, TargetSettingsUpdate
 from assay.services.settings._common import _apply_or_422, _find_target_row
 from assay.target_settings import resolve_target_settings
+from assay.timestamps import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ async def update_target_settings(
     first_save = row is None
     saved = _apply_or_422(resolve_target_settings(row), request)
 
-    now = datetime.now().astimezone()
+    now = utc_now()
     value = saved.model_dump(mode="json")
     if first_save:
         session.add(SettingsModel(section=SettingsSection.target, value=value, updated_at=now))

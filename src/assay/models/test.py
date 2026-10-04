@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from assay.models.base import Base
 from assay.models.datasets import DatasetRowModel
+from assay.timestamps import utc_now
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DESIGN OVERVIEW
@@ -280,7 +281,7 @@ class TestTypesModel(Base):
     comparison: Mapped[Comparison | None] = mapped_column(SAEnum(Comparison), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=True, default=lambda: datetime.now().astimezone()
+        DateTime, nullable=True, default=utc_now
     )
 
 
@@ -354,7 +355,7 @@ class TestModel(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone(), index=True
+        DateTime, default=utc_now, index=True
     )
 
     # All snapshots of this test across every test set it has been added to.
@@ -438,7 +439,7 @@ class TestSetModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
+        DateTime, default=utc_now
     )
 
     # passive_deletes lets the database's ON DELETE CASCADE remove the entries,
@@ -482,7 +483,7 @@ class TestSetExecutionModel(Base):
     )
     batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
+        DateTime, default=utc_now
     )
 
     test_set: Mapped["TestSetModel"] = relationship()
@@ -544,7 +545,7 @@ class TestSetEntryModel(Base):
     # entry's own expected_output above, already frozen.
     test_type_assignments: Mapped[list[dict]] = mapped_column(JSON, default=list)
     snapshot_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
+        DateTime, default=utc_now
     )
 
     test_set: Mapped["TestSetModel"] = relationship(back_populates="entries")
@@ -574,7 +575,7 @@ class TestPlanModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
+        DateTime, default=utc_now
     )
 
     entries: Mapped[list["TestPlanEntryModel"]] = relationship(
@@ -617,7 +618,7 @@ class TestPlanExecutionModel(Base):
     )
     batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
+        DateTime, default=utc_now
     )
 
     test_plan: Mapped["TestPlanModel"] = relationship()
@@ -779,7 +780,7 @@ class TestRunModel(Base):
         SAEnum(TestStatus, create_constraint=True), default=TestStatus.pending, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
+        DateTime, default=utc_now
     )
 
     # Populated once status reaches Green/Amber/Red. results is
@@ -856,7 +857,7 @@ class StandaloneRunModel(Base):
     model_output: Mapped[str | None] = mapped_column(Text, nullable=True)
     test_type_assignments: Mapped[list[dict]] = mapped_column(JSON, default=list)
     snapshot_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now().astimezone()
+        DateTime, default=utc_now
     )
 
     test_run: Mapped["TestRunModel"] = relationship(back_populates="standalone_run")

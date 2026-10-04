@@ -25,7 +25,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 _RUN_DETAIL_RECORDED = {
     "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
     "status": "Green",
-    "created_at": "2026-07-14T18:03:21.123456",
+    "created_at": "2026-07-14T18:03:21.123456Z",
     "test_case_id": {
         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
     },
@@ -45,7 +45,7 @@ _RUN_DETAIL_RECORDED = {
     "error": None,
     "evaluated_output": "Hello, Alice!",
     "output_source": "recorded",
-    "executed_at": "2026-07-14T18:03:24.981022",
+    "executed_at": "2026-07-14T18:03:24.981022Z",
     "name": "greets the user by name",
     "input": "Say hello to Alice.",
     "expected_output": "Hello, Alice!",
@@ -55,7 +55,7 @@ _RUN_DETAIL_RECORDED = {
         {"name": "Exact Match", "label": "Exact Match", "config": None},
     ],
     "test_case_snapshot_at": {
-        "snapshot_at": "2026-07-14T18:03:21.123456"
+        "snapshot_at": "2026-07-14T18:03:21.123456Z"
     },
 }
 
@@ -110,7 +110,7 @@ _RUN_DETAIL_FROM_APPLICATION = {
                     "example": {
                         "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
                         "status": "Pending",
-                        "created_at": "2026-07-14T18:03:21.123456",
+                        "created_at": "2026-07-14T18:03:21.123456Z",
                         "test_case_id": {
                             "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                         },
@@ -199,7 +199,7 @@ async def run_standalone_test(
                             {
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
                                 "status": "Green",
-                                "created_at": "2026-07-14T18:03:21.123456",
+                                "created_at": "2026-07-14T18:03:21.123456Z",
                                 "test_case_id": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                                 },
@@ -207,7 +207,7 @@ async def run_standalone_test(
                             {
                                 "id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
                                 "status": "Pending",
-                                "created_at": "2026-07-15T09:12:47.884213",
+                                "created_at": "2026-07-15T09:12:47.884213Z",
                                 "test_case_id": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                                 },

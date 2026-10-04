@@ -1,11 +1,12 @@
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import MagicMock
 
 import pytest
 from kombu.exceptions import EncodeError, OperationalError
 
+from assay.timestamps import utc_now
 from assay.worker.services.reconcile_runs import reconcile_pending_runs
 
 
@@ -94,11 +95,11 @@ def test_republish_summary_counts_the_failures(caplog):
 def test_query_filters_pending_runs_older_than_threshold():
     session = _session_returning([])
     threshold = timedelta(minutes=15)
-    before = datetime.now().astimezone() - threshold
+    before = utc_now() - threshold
 
     reconcile_pending_runs(session, threshold, MagicMock())
 
-    after = datetime.now().astimezone() - threshold
+    after = utc_now() - threshold
     compiled = session.scalars.call_args.args[0].compile()
     sql = str(compiled)
     assert "test_runs.status = :status_1" in sql

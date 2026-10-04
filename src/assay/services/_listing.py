@@ -20,6 +20,8 @@ from enum import Enum
 from sqlalchemy import ColumnElement, Select, and_, case, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.timestamps import as_stored
+
 Values = Sequence
 
 
@@ -118,13 +120,6 @@ def contains_text(q: str, *columns: ColumnElement) -> ColumnElement:
     matched as themselves)."""
     needle = q.lower()
     return or_(*(func.lower(column).contains(needle, autoescape=True) for column in columns))
-
-
-def as_stored(moment: datetime) -> datetime:
-    """A moment as timestamps are stored: the server's local time, without an
-    offset. A moment with an offset is converted; one without is taken as the
-    server's local time already."""
-    return moment.astimezone().replace(tzinfo=None) if moment.tzinfo else moment
 
 
 def created_between(column: ColumnElement, start: datetime | None,

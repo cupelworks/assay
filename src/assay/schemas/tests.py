@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -7,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from assay.models import Comparison, ConfigFieldKind, TestTypes, TestTypesCost
 from assay.schemas import DataSetID, Pagination
 from assay.schemas.standing import TestStanding
+from assay.timestamps import Timestamp
 
 MAX_LABEL_LENGTH = 100
 
@@ -127,7 +127,7 @@ class TestCaseID(BaseModel):
 
 
 class TestCaseSnapshotDate(BaseModel):
-    snapshot_at: datetime = Field(
+    snapshot_at: Timestamp = Field(
         ...,
         description=(
             "When this frozen copy was taken from its live test — when the "
@@ -261,7 +261,7 @@ class TestTypesSchema(BaseModel):
         description="Whether this test type is currently available for assignment. "
                     "Inactive entries are kept for historical reference, not for new use."
     )
-    created_at: datetime | None = Field(
+    created_at: Timestamp | None = Field(
         description="When this test type was added to the catalogue."
     )
     best_for: str | None = Field(

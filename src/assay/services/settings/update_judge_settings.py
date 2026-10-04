@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +6,7 @@ from assay.judge_settings import judge_settings_read, resolve_judge_settings
 from assay.models import SettingsModel, SettingsSection
 from assay.schemas import JudgeSettings, JudgeSettingsRead, JudgeSettingsUpdate, SettingsSource
 from assay.services.settings._common import _apply_or_422, _find_judge_row
+from assay.timestamps import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ async def update_judge_settings(
     first_save = row is None
     saved = _apply_or_422(resolve_judge_settings(row), request, schema=JudgeSettings)
 
-    now = datetime.now().astimezone()
+    now = utc_now()
     value = saved.model_dump(mode="json")
     if first_save:
         session.add(SettingsModel(section=SettingsSection.judge, value=value, updated_at=now))

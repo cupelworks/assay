@@ -355,7 +355,7 @@ async def add_test_sets_to_a_test_plan(
                     "example": {
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Renamed regression plan",
-                        "created_at": "2026-07-03T15:43:09.032480",
+                        "created_at": "2026-07-03T15:43:09.032480Z",
                         "linked_set_count": 3,
                         **SCOPE_RAN,
                     }
@@ -448,7 +448,7 @@ async def update_a_test_plan_metadata(
                                 "test_set": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                                     "name": "Regression suite",
-                                    "created_at": "2026-07-03T15:43:09.032480",
+                                    "created_at": "2026-07-03T15:43:09.032480Z",
                                     "entry_count": 12,
                                     "test_plan_count": 1,
                                     **SCOPE_RAN,
@@ -459,7 +459,7 @@ async def update_a_test_plan_metadata(
                                 "test_set": {
                                     "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                     "name": "Smoke tests",
-                                    "created_at": "2026-07-03T16:00:00.000000",
+                                    "created_at": "2026-07-03T16:00:00.000000Z",
                                     "entry_count": 4,
                                     "test_plan_count": 0,
                                     **SCOPE_NEVER_RAN,
@@ -518,7 +518,7 @@ async def get_all_test_sets_metadata_in_a_test_plan(
                     "example": {
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Regression plan",
-                        "created_at": "2026-07-03T15:43:09.032480",
+                        "created_at": "2026-07-03T15:43:09.032480Z",
                         "linked_set_count": 3,
                         **SCOPE_RAN,
                     }
@@ -565,14 +565,14 @@ async def get_single_test_plan_metadata(
                             {
                                 "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                                 "name": "Regression plan",
-                                "created_at": "2026-07-03T15:43:09.032480",
+                                "created_at": "2026-07-03T15:43:09.032480Z",
                                 "linked_set_count": 3,
                                 **SCOPE_RAN,
                             },
                             {
                                 "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                 "name": "Smoke plan",
-                                "created_at": "2026-07-03T16:00:00.000000",
+                                "created_at": "2026-07-03T16:00:00.000000Z",
                                 "linked_set_count": 1,
                                 **SCOPE_NEVER_RAN,
                             },

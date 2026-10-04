@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from assay.models import TestSetModel
 from assay.services import get_all_test_sets_metadata, get_test_set_metadata_by_id
+from assay.timestamps import as_utc
 from tests.services.standing_fakes import neutral_standing
 
 # --- get_all_test_sets_metadata() ---
@@ -55,11 +56,11 @@ def test_returns_correct_items():
     assert len(response.items) == 2
     assert response.items[0].id == first_id
     assert response.items[0].name == first_name
-    assert response.items[0].created_at == first_created_at
+    assert response.items[0].created_at == as_utc(first_created_at)
     assert response.items[0].entry_count == 5
     assert response.items[1].id == second_id
     assert response.items[1].name == second_name
-    assert response.items[1].created_at == second_created_at
+    assert response.items[1].created_at == as_utc(second_created_at)
     assert response.items[1].entry_count == 0
 
 
@@ -95,7 +96,7 @@ def test_metadata_correctly_returned():
 
     assert response.id == test_set_id
     assert response.name == "Test Set"
-    assert response.created_at == datetime(2026, 1, 1)
+    assert response.created_at == as_utc(datetime(2026, 1, 1))
     assert response.entry_count == 7
 
 

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from assay.models import TestPlanModel
 from assay.schemas import TestPlanMetadata
 from assay.services import get_all_test_plans_metadata, get_test_plan_metadata_by_id
+from assay.timestamps import as_utc
 from tests.services.standing_fakes import NO_SCOPE_STANDING, neutral_standing
 
 # --- get_all_test_plans_metadata() ---
@@ -119,5 +120,5 @@ def test_test_plan_metadata_happy_path():
     assert session.scalar.call_count == 1
     assert response.id == test_plan_id
     assert response.name == test_plan_name
-    assert response.created_at == created_at
+    assert response.created_at == as_utc(created_at)
     assert response.linked_set_count == 6

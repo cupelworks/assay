@@ -12,6 +12,7 @@ too late to reach it.
 import json
 import re
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -1858,3 +1859,63 @@ def test_downgrade_drops_the_outcome(scratch):
     command.downgrade(config, "a7c3e1f5b9d2")
 
     assert "outcome" not in _table_columns(db_path, "statistical_comparisons")
+
+
+# --- c2e6a8f4b0d7: every timestamp stored in UTC ---
+
+
+@pytest.fixture
+def in_rome(monkeypatch):
+    """The machine's local time is Rome's (CET in winter, CEST in summer)."""
+    monkeypatch.setenv("TZ", "Europe/Rome")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def _timestamps(db_path: Path) -> list[tuple]:
+    with sqlite3.connect(db_path) as connection:
+        return connection.execute(
+            "SELECT name, created_at, (SELECT executed_at FROM test_runs WHERE test_id = t.id) "
+            "FROM tests t ORDER BY name").fetchall()
+
+
+def test_upgrade_stores_every_timestamp_in_utc_each_with_its_dates_offset(scratch, in_rome):
+    config, db_path = scratch
+    command.upgrade(config, "b8d4f2a6c1e3")
+    with sqlite3.connect(db_path) as connection:
+        for n, name, created in ((50, "summer", "2026-07-01 14:00:00.000000"),
+                                 (51, "winter", "2026-01-15 14:00:00.000000")):
+            connection.execute("INSERT INTO tests (id, name, input, created_at) "
+                               "VALUES (?, ?, 'q', ?)", (f"{n:032x}", name, created))
+            connection.execute("INSERT INTO test_runs (id, status, created_at, executed_at, "
+                               "test_id) VALUES (?, 'green', ?, ?, ?)",
+                               (f"{n + 10:032x}", created, created, f"{n:032x}"))
+
+    command.upgrade(config, "c2e6a8f4b0d7")
+
+    assert _timestamps(db_path) == [
+        ("summer", "2026-07-01 12:00:00.000000", "2026-07-01 12:00:00.000000"),  # CEST, +2
+        ("winter", "2026-01-15 13:00:00.000000", "2026-01-15 13:00:00.000000"),  # CET, +1
+    ]
+
+    command.downgrade(config, "b8d4f2a6c1e3")
+
+    assert [row[1] for row in _timestamps(db_path)] == ["2026-07-01 14:00:00.000000",
+                                                         "2026-01-15 14:00:00.000000"]
+
+
+def test_the_upgrade_converts_every_timestamp_column_there_is():
+    from sqlalchemy import DateTime
+
+    import assay.models  # noqa: F401
+    from assay.models.base import Base
+
+    spec = Path(__file__).parents[1] / "alembic" / "versions" / "c2e6a8f4b0d7_timestamps_in_utc.py"
+    listed = dict(re.findall(r'^    "(\w+)": \("\w+", \[([^\]]*)\]', spec.read_text(), re.M))
+    declared = {table.name: sorted(c.name for c in table.columns if isinstance(c.type, DateTime))
+                for table in Base.metadata.tables.values()}
+
+    assert {name: sorted(re.findall(r'"(\w+)"', columns)) for name, columns in listed.items()} == {
+        name: columns for name, columns in declared.items() if columns}

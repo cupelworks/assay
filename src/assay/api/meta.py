@@ -9,7 +9,7 @@ router = APIRouter(tags=["meta"])
 # Sample values for the Swagger examples of GET /health/worker below — none of
 # this runs when the endpoint is called; the real report is built by
 # services/worker_health.py from code_fingerprint.py's hash of the running code.
-_EXAMPLE_CHECKED_AT = "2026-10-01T10:55:00+02:00"
+_EXAMPLE_CHECKED_AT = "2026-10-01T08:55:00Z"
 _EXAMPLE_FINGERPRINT = "e64e0c986336"
 _EXAMPLE_BROKER_OK = {"reachable": True, "error": None}
 

@@ -2,7 +2,6 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime
 from typing import Any
 
 from pydantic import ValidationError
@@ -24,6 +23,7 @@ from assay.models import (
 from assay.schemas import JudgeSettings, TestTypeAssignment, TestTypeResult
 from assay.schemas.settings import describe_validation_error
 from assay.target_settings import resolve_target_settings
+from assay.timestamps import utc_now
 from assay.worker import evaluators, target
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
         logger.exception("Run %s could not be executed: %s", run_id, exc)
         run.status = TestStatus.not_ran
         run.error = sentence(str(exc))
-        run.executed_at = datetime.now().astimezone()
+        run.executed_at = utc_now()
         session.commit()
         return
 
@@ -115,7 +115,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
             logger.error("Run %s could not be executed: %s", run_id, reason)
             run.status = TestStatus.not_ran
             run.error = reason
-            run.executed_at = datetime.now().astimezone()
+            run.executed_at = utc_now()
             session.commit()
             return
         output_source = OutputSource.application
@@ -177,7 +177,7 @@ def execute_run(run_id: uuid.UUID, session: Session) -> None:
     run.output_source = output_source
     run.application_reply = reply
     run.status = status
-    run.executed_at = datetime.now().astimezone()
+    run.executed_at = utc_now()
     session.commit()
 
     passed = sum(passed_flags)

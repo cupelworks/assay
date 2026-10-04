@@ -8,7 +8,6 @@ import math
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -28,6 +27,7 @@ from assay.models import (
 )
 from assay.run_check_types import with_check_types
 from assay.schemas import TestTypeAssignment
+from assay.timestamps import utc_now
 
 SEQUENTIAL_ENGINES = frozenset({"sequential_gate", "sequential_judge_stability",
                                 "sequential_t"})
@@ -155,7 +155,7 @@ def next_wave(batch: StatisticalBatchModel, session: Session, first: int, last: 
     skips: dict = defaultdict(list)
     for entry_id, label in left_out:
         skips[entry_id].append(label)
-    now = datetime.now().astimezone()
+    now = utc_now()
     executions, runs = [], []
     if batch.test_id is not None:
         copy = session.scalar(

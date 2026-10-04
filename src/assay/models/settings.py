@@ -7,6 +7,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from assay.models.base import Base
+from assay.timestamps import utc_now
 
 
 class SettingsSection(StrEnum):
@@ -41,7 +42,7 @@ class SettingsModel(Base):
     )
     value: Mapped[dict] = mapped_column(JSON, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now().astimezone()
+        DateTime, nullable=False, default=utc_now
     )
 
 
@@ -73,7 +74,7 @@ class TargetCheckModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now().astimezone()
+        DateTime, nullable=False, default=utc_now
     )
     status: Mapped[TargetCheckStatus] = mapped_column(
         SAEnum(TargetCheckStatus, create_constraint=True),
@@ -106,7 +107,7 @@ class JudgeCheckModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now().astimezone()
+        DateTime, nullable=False, default=utc_now
     )
     status: Mapped[TargetCheckStatus] = mapped_column(
         SAEnum(TargetCheckStatus, name="judgecheckstatus", create_constraint=True),

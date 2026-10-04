@@ -22,6 +22,7 @@ from assay.services import (
     create_new_replay_test_set_run,
     create_new_standalone_run,
 )
+from assay.timestamps import as_utc
 
 # --- create_new_standalone_run() ---
 
@@ -124,7 +125,7 @@ def test_standalone_happy_path(added):
     # guaranteed to see the row until then.
     assert order == ["commit", "dispatch"]
     assert response.id == test_run_model.id
-    assert response.created_at == test_run_model.created_at
+    assert response.created_at == as_utc(test_run_model.created_at)
     assert response.status == test_run_model.status
     assert response.test_case_id.id == test_id
 
@@ -263,7 +264,7 @@ def test_new_live_test_set_run_happy_path(added):
         [test_run_model.id for test_run_model in test_runs_models]
     )
     assert response.id == test_set_execution_model.id
-    assert response.created_at == test_set_execution_model.created_at
+    assert response.created_at == as_utc(test_set_execution_model.created_at)
     assert response.test_set_id.id == test_set_id
     assert response.run_count == len(available_test_set_entry_models)
 
@@ -415,7 +416,7 @@ def test_new_replay_test_set_run_happy_path(added):
         [test_run_model.id for test_run_model in test_runs_models]
     )
     assert response.id == test_set_execution_model.id
-    assert response.created_at == test_set_execution_model.created_at
+    assert response.created_at == as_utc(test_set_execution_model.created_at)
     assert response.test_set_id.id == test_set_id
     assert response.run_count == len(available_test_set_entry_models)
     assert response.replayed_execution_id.id == test_set_execution_id
@@ -570,7 +571,7 @@ def test_new_live_test_plan_run_happy_path(added):
         [test_run_model.id for test_run_model in test_runs_models]
     )
     assert response.id == test_plan_execution_model.id
-    assert response.created_at == test_plan_execution_model.created_at
+    assert response.created_at == as_utc(test_plan_execution_model.created_at)
     assert response.test_plan_id.id == test_plan_id
     assert response.run_count == len(available_entry_ids)
 
@@ -720,7 +721,7 @@ def test_new_replay_test_plan_happy_path(added):
     assert test_run_model.status == TestStatus.pending
     mock_dispatch.assert_called_once_with([test_run_model.id])
     assert response.id == test_plan_execution_model.id
-    assert response.created_at == test_plan_execution_model.created_at
+    assert response.created_at == as_utc(test_plan_execution_model.created_at)
     assert response.test_plan_id == TestPlanID(id=test_plan_id)
     assert response.run_count == len(test_run_models)
     assert response.replayed_execution_id == TestPlanReplayedExecutionID(id=test_plan_execution_id)

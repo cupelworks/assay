@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from assay.models import TestPlanModel
 from assay.schemas import ModifyTestPlanRequest
 from assay.services import update_test_plan_by_id
+from assay.timestamps import as_utc
 from tests.services.standing_fakes import neutral_standing
 
 
@@ -90,7 +91,7 @@ def test_update_test_plan_name_none_is_noop():
     assert session.scalar.call_count == 1
     assert response.id == test_plan_id
     assert response.name == test_plan_name
-    assert response.created_at == created_at
+    assert response.created_at == as_utc(created_at)
     assert response.linked_set_count == 2
 
 
@@ -120,7 +121,7 @@ def test_update_test_plan_name_unchanged_is_noop():
     assert session.scalar.call_count == 1
     assert response.id == test_plan_id
     assert response.name == test_plan_name
-    assert response.created_at == created_at
+    assert response.created_at == as_utc(created_at)
     assert response.linked_set_count == 2
 
 
@@ -151,7 +152,7 @@ def test_update_test_plan_name_happy_path():
     assert session.scalar.call_count == 2
     assert response.id == test_plan_id
     assert response.name == test_plan_name
-    assert response.created_at == created_at
+    assert response.created_at == as_utc(created_at)
     assert response.linked_set_count == 2
 
 

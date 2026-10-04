@@ -10,10 +10,10 @@ def run_counts(**counts: int) -> dict:
 
 
 LATEST_BATCH = {"id": "b2c3d4e5-f6a7-8901-bcde-f23456789012", "status": "Passed",
-                "created_at": "2026-10-02T15:30:00"}
+                "created_at": "2026-10-02T15:30:00Z"}
 
 LATEST_EXECUTION = {"id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12",
-                    "created_at": "2026-10-01T09:00:00", "replayed": False,
+                    "created_at": "2026-10-01T09:00:00Z", "replayed": False,
                     "runs": run_counts(Green=11, Amber=1)}
 
 SCOPE_RAN = {"latest_batch": LATEST_BATCH, "latest_execution": LATEST_EXECUTION,
@@ -23,11 +23,11 @@ SCOPE_RAN = {"latest_batch": LATEST_BATCH, "latest_execution": LATEST_EXECUTION,
 SCOPE_NEVER_RAN = {"latest_batch": None, "latest_execution": None, "execution_count": 0,
                    "has_runs": False}
 
-TEST_STANDING = {"created_at": "2026-09-30T10:00:00",
+TEST_STANDING = {"created_at": "2026-09-30T10:00:00Z",
                  "dataset_row_id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
                  "dataset_row_number": 7, "latest_batch": None,
                  "latest_run": {"id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
-                                "status": "Green", "created_at": "2026-10-01T08:45:00"},
+                                "status": "Green", "created_at": "2026-10-01T08:45:00Z"},
                  "has_runs": True, "copy_count": 2, "test_set_count": 1}
 """A test made from a dataset's row 7, run on its own, copied into two set
 entries of which one is still in a set."""

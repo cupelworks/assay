@@ -79,7 +79,7 @@ RunFiltersDep = Annotated[RunFilters, Depends(run_filters)]
                             {
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
                                 "status": "Amber",
-                                "created_at": "2026-07-15T09:12:47.884213",
+                                "created_at": "2026-07-15T09:12:47.884213Z",
                                 "batch_id": None,
                                 "batch_index": None,
                                 "origin": "Standalone",
@@ -99,7 +99,7 @@ RunFiltersDep = Annotated[RunFilters, Depends(run_filters)]
                             {
                                 "id": "a7b8c9d0-1234-5abc-def6-789012345bcd",
                                 "status": "NotRan",
-                                "created_at": "2026-07-13T11:47:02.556213",
+                                "created_at": "2026-07-13T11:47:02.556213Z",
                                 "batch_id": None,
                                 "batch_index": None,
                                 "origin": "TestPlan",
@@ -204,7 +204,7 @@ async def get_run_facets_endpoint(session: SessionDep,
                         "items": [
                             {
                                 "id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
-                                "created_at": "2026-07-15T09:12:47.884213",
+                                "created_at": "2026-07-15T09:12:47.884213Z",
                                 "origin": "TestSet",
                                 "name": "Support answers",
                                 "run_count": 12,
@@ -218,7 +218,7 @@ async def get_run_facets_endpoint(session: SessionDep,
                             },
                             {
                                 "id": "a7b8c9d0-1234-5abc-def6-789012345bcd",
-                                "created_at": "2026-07-14T18:03:21.123456",
+                                "created_at": "2026-07-14T18:03:21.123456Z",
                                 "origin": "TestPlan",
                                 "name": "Release check",
                                 "run_count": 34,

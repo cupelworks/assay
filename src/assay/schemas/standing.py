@@ -3,30 +3,30 @@ it: its latest batch, its latest run or execution outside a batch, and
 whether it has runs (what makes it impossible to delete, or an entry
 frozen)."""
 import uuid
-from datetime import datetime
 
 from pydantic import BaseModel, Field
 
 from assay.models import TestStatus
 from assay.schemas._common import RunCounts
 from assay.schemas.statistics import BatchStatusName
+from assay.timestamps import Timestamp
 
 
 class LatestBatch(BaseModel):
     id: uuid.UUID
     status: BatchStatusName
-    created_at: datetime
+    created_at: Timestamp
 
 
 class LatestRun(BaseModel):
     id: uuid.UUID
     status: TestStatus
-    created_at: datetime
+    created_at: Timestamp
 
 
 class LatestExecution(BaseModel):
     id: uuid.UUID
-    created_at: datetime
+    created_at: Timestamp
     replayed: bool = Field(description="Whether it replayed an earlier execution's entries.")
     runs: RunCounts = Field(description="Its runs by status, every status present.")
 
@@ -47,7 +47,7 @@ class ScopeStanding(BaseModel):
 
 class TestStanding(BaseModel):
     """How a test stands, and where it came from."""
-    created_at: datetime
+    created_at: Timestamp
     dataset_row_id: uuid.UUID | None = Field(
         description="The dataset row it was made from, or null (made by hand, or its row "
                     "was deleted or replaced since).")

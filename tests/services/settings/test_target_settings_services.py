@@ -10,6 +10,7 @@ from assay.config import settings
 from assay.models import SettingsModel, SettingsSection
 from assay.schemas import SettingsSource, TargetSettingsUpdate
 from assay.services import get_target_settings, reset_target_settings, update_target_settings
+from assay.timestamps import as_utc
 
 SAVED_AT = datetime(2026, 9, 27, 15, 10)
 
@@ -58,7 +59,7 @@ def test_get_returns_header_references_unexpanded(monkeypatch):
 def test_get_reads_the_saved_row_when_there_is_one():
     result = asyncio.run(get_target_settings(_session(_saved_row())))
 
-    assert (result.source, result.updated_at) == (SettingsSource.database, SAVED_AT)
+    assert (result.source, result.updated_at) == (SettingsSource.database, as_utc(SAVED_AT))
     assert result.url == "https://saved.example.test/chat"
 
 
@@ -78,7 +79,7 @@ def test_the_first_save_carries_the_environment_forward_with_the_changes_applied
     assert row.value["timeout_seconds"] == 30
     session.commit.assert_awaited_once()
     assert result.source == SettingsSource.database
-    assert result.updated_at == row.updated_at
+    assert result.updated_at == as_utc(row.updated_at)
 
 
 def test_a_later_save_updates_the_row_in_place():

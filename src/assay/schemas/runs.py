@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -17,6 +16,7 @@ from assay.schemas import (
 )
 from assay.schemas._common import RunCounts
 from assay.schemas.settings import JudgeProvider, JudgeSettings
+from assay.timestamps import Timestamp
 
 
 class RunID(BaseModel):
@@ -45,7 +45,7 @@ class RunStatus(BaseModel):
 
 
 class RunCreationDate(BaseModel):
-    created_at: datetime = Field(
+    created_at: Timestamp = Field(
         ...,
         description=(
             'Timestamp when the run was created (enqueued as `Pending`), not '
@@ -326,7 +326,7 @@ class RunEvaluatedOutput(BaseModel):
 
 
 class RunExecutionDate(BaseModel):
-    executed_at: datetime | None = Field(
+    executed_at: Timestamp | None = Field(
         ...,
         description=(
             'Timestamp when the run finished executing, successfully or not — '
@@ -430,7 +430,7 @@ class TestSetExecutionID(BaseModel):
 
 
 class TestSetExecutionCreationDate(BaseModel):
-    created_at: datetime = Field(
+    created_at: Timestamp = Field(
         ...,
         description=(
             'Timestamp when the test set run was created '
@@ -539,7 +539,7 @@ class TestPlanExecutionID(BaseModel):
 
 
 class TestPlanExecutionCreationDate(BaseModel):
-    created_at: datetime = Field(
+    created_at: Timestamp = Field(
         ...,
         description=(
             'Timestamp when the test plan run was created '
@@ -733,7 +733,7 @@ class ExecutionMetadata(BatchMembership, ExecutionRunCounts, ExecutionScopeName)
             'or `TestPlanExecutionModel.id`, depending on `origin`).'
         ),
     )
-    created_at: datetime = Field(
+    created_at: Timestamp = Field(
         ...,
         description=(
             'Timestamp when the execution was triggered (when its runs got '

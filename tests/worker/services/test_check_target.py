@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from assay.models import TargetCheckModel, TargetCheckStatus
+from assay.timestamps import utc_now
 from assay.worker.services.check_target import CHECK_EXPIRES_AFTER, check_target
 from assay.worker.target import TargetError, TargetResponse
 
@@ -87,7 +88,7 @@ def test_an_unset_header_variable_on_the_worker_is_reported_by_name():
 
 
 def test_a_check_queued_too_long_expires_without_calling_the_application():
-    check = _check(created_at=datetime.now() - CHECK_EXPIRES_AFTER - timedelta(seconds=1))
+    check = _check(created_at=utc_now() - CHECK_EXPIRES_AFTER - timedelta(seconds=1))
 
     with patch(_PATCH_GET_ANSWER) as get_answer:
         check_target(check.id, _claimed(check))
