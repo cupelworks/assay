@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api.runs._batch_filter import BatchFilter
 from assay.db import get_session
 from assay.schemas import (
     PaginatedTestPlanExecutionMetadata,
@@ -25,6 +26,84 @@ router = APIRouter(tags=["run (test plan)"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+_RUN_DETAIL_RECORDED = {
+    "id": "f1a2b3c4-d5e6-7890-fabc-234567890123",
+    "status": "Green",
+    "created_at": "2026-07-20T09:12:04.221310",
+    "batch_id": None,
+    "batch_index": None,
+    "test_set_entry_id": {
+        "id": "a2b3c4d5-e6f7-8901-abcd-345678901234"
+    },
+    "test_plan_execution_id": {
+        "id": "b3c4d5e6-f7a8-9012-bcde-456789012345"
+    },
+    # keyed by label, in label order; each result says which type it ran
+    "results": {
+        "BLEU": {
+            "passed": True, "score": 100.0, "detail": None, "test_type": "BLEU",
+            "engine": "bleu", "engine_settings": {"smooth_method": "exp", "lowercase": False},
+        },
+        "Exact Match": {
+            "passed": True, "score": None, "detail": None, "test_type": "Exact Match",
+            "engine": "exact_match",
+            "engine_settings": {"trim": True, "case_sensitive": True,
+                                "normalize_lookalikes": True},
+        },
+    },
+    "error": None,
+    "evaluated_output": "Hello, Alice!",
+    "output_source": "recorded",
+    "executed_at": "2026-07-20T09:12:08.554021",
+    "test_case_id": {
+        "id": "c4d5e6f7-a8b9-0123-cdef-567890123456"
+    },
+    "name": "greets the user by name",
+    "input": "Say hello to Alice.",
+    "expected_output": "Hello, Alice!",
+    "model_output": "Hello, Alice!",
+    "test_type_assignments": [
+        {"name": "BLEU", "label": "BLEU", "config": {"threshold": "20"}},
+        {"name": "Exact Match", "label": "Exact Match", "config": None},
+    ],
+    "test_case_snapshot_at": {
+        "snapshot_at": "2026-07-20T09:10:41.117903"
+    },
+    "test_set_id": {
+        "id": "d5e6f7a8-b9c0-1234-defa-678901234567"
+    },
+    "test_plan_id": {
+        "id": "e6f7a8b9-c0d1-2345-efab-789012345678"
+    },
+}
+
+# The same test, answered by the application under test: the whole reply is
+# kept, the default answer is its output object as JSON text, and both checks
+# read the greeting inside it (answer_path).
+_RUN_DETAIL_FROM_APPLICATION = {
+    **_RUN_DETAIL_RECORDED,
+    "results": {
+        label: {**result, "answer_path": "$.output.greeting"}
+        for label, result in _RUN_DETAIL_RECORDED["results"].items()
+    },
+    "evaluated_output": '{"greeting": "Hello, Alice!"}',
+    "output_source": "application",
+    "application_reply": {
+        "output": {"greeting": "Hello, Alice!"},
+        "model": "claude-sonnet-5-5",
+        "stop_reason": "end_turn",
+        "input_tokens": 812,
+        "output_tokens": 64,
+    },
+    "model_output": None,
+    "test_type_assignments": [
+        {"name": "BLEU", "label": "BLEU", "config": {"threshold": "20"},
+         "answer_path": "$.output.greeting"},
+        {"name": "Exact Match", "label": "Exact Match", "config": None,
+         "answer_path": "$.output.greeting"},
+    ],
+}
+
 @router.post(
     path="/runs/test-plans/{test_plan_id}",
     responses={
@@ -32,12 +111,17 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
             "description": (
                 "A live execution was triggered: one pending run was created "
                 "per entry across every test set currently linked to the "
-                "plan, all grouped under a single new test plan execution. "
-                "This endpoint only enqueues the runs — it does not call the "
-                "model, score anything, or write back results. Every created "
-                "run's `status` is `Pending`; a separate, later mechanism "
-                "promotes each one to `Running`, `Completed`, or `Failed` "
-                "once it actually executes."
+                "plan, all grouped under a single new test plan execution, "
+                "and each one dispatched for execution. This endpoint doesn't "
+                "call your application, score anything, or write back results "
+                "itself — every created run's `status` is `Pending`, since "
+                "the worker that does all of that runs separately, after "
+                "this response is returned. Dispatch is best-effort per run: "
+                "a run whose dispatch fails (e.g. the broker is unreachable) "
+                "stays `Pending` until the reconciliation scan re-sends it. "
+                "Once picked up, the worker promotes "
+                "each run to `Running`, then a terminal outcome (`Green`, "
+                "`Amber`, `Red`, or `NotRan`)."
             ),
             "content": {
                 "application/json": {
@@ -144,8 +228,10 @@ async def run_live_test_plan_entries(
 
     Creates one test plan execution record (the trigger-event grouping
     every run this call produces) and one pending run per entry across all
-    linked test sets, all sharing that same execution. This endpoint only
-    creates those records — it does not execute anything itself.
+    linked test sets, all sharing that same execution. This endpoint
+    creates those records and dispatches each new run for execution — it
+    does not execute anything itself; that happens in the worker process,
+    once it picks up each dispatched task.
 
     Returns the new execution's ID, creation timestamp, the test plan it
     targeted, and the number of runs created (equal to the number of
@@ -167,12 +253,17 @@ async def run_live_test_plan_entries(
                 "sets are currently linked to the plan — test sets linked or "
                 "unlinked since have no effect, and an entry whose test set "
                 "has since been unlinked from the plan is still included, "
-                "since its content stays frozen either way. This endpoint "
-                "only enqueues the runs — it does not call the model, score "
-                "anything, or write back results. Every created run's "
-                "`status` is `Pending`; a separate, later mechanism promotes "
-                "each one to `Running`, `Completed`, or `Failed` once it "
-                "actually executes."
+                "since its content stays frozen either way, and each new "
+                "run is dispatched for execution. This endpoint doesn't "
+                "call your application, score anything, or write back results "
+                "itself — every created run's `status` is `Pending`, since "
+                "the worker that does all of that runs separately, after "
+                "this response is returned. Dispatch is best-effort per "
+                "run: a run whose dispatch fails (e.g. the broker is "
+                "unreachable) stays `Pending` until the reconciliation scan "
+                "re-sends it. Once picked up, the "
+                "worker promotes each run to `Running`, then a terminal "
+                "outcome (`Green`, `Amber`, `Red`, or `NotRan`)."
             ),
             "content": {
                 "application/json": {
@@ -266,6 +357,9 @@ async def replay_previous_test_plan_execution(
     historical scope (e.g. "did the model regress against exactly what was
     tested last time"), which a live re-run can't guarantee once the plan's
     linked test sets have changed.
+    An entry with no recorded answer asks the application under test again,
+    with the settings in effect now, so its answer — and score — can differ
+    from the original run's.
 
     Four guards run before anything is created:
     - The test plan must exist (404).
@@ -277,8 +371,10 @@ async def replay_previous_test_plan_execution(
     Creates one new test plan execution record (with `replayed_execution_id`
     set to the execution being replayed, marking it as a replay rather than
     a live run) and one pending run per original test set entry,
-    all sharing that new execution. This endpoint only creates those records —
-    it does not execute anything itself.
+    all sharing that new execution. This endpoint creates those records and
+    dispatches each new run for execution — it does not execute anything
+    itself; that happens in the worker process, once it picks up each
+    dispatched task.
 
     Returns the new execution's ID, creation timestamp, the test plan it
     targeted, the number of runs created (always equal to the number of
@@ -346,6 +442,7 @@ async def get_test_plan_execution_metadata(
         limit: int = Query(
             default=100, description="Maximum number of records to return for pagination."
         ),
+        batch: BatchFilter = None,
 ) -> PaginatedTestPlanExecutionMetadata: # pragma: no cover
     """List every execution ever triggered for a test plan, newest first.
 
@@ -364,7 +461,7 @@ async def get_test_plan_execution_metadata(
     usual `total`, `offset`, and `limit`.
     """
     return await get_test_plan_execution_metadata_all_executions(
-        test_plan_id, session, offset, limit
+        test_plan_id, session, offset, limit, batch
     )
 
 
@@ -383,8 +480,10 @@ async def get_test_plan_execution_metadata(
                         "items": [
                             {
                                 "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-                                "status": "Completed",
+                                "status": "Green",
                                 "created_at": "2026-07-18T11:05:55.163355",
+                                "batch_id": None,
+                                "batch_index": None,
                                 "test_set_entry_id": {
                                     "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
                                 },
@@ -396,6 +495,8 @@ async def get_test_plan_execution_metadata(
                                 "id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123",
                                 "status": "Pending",
                                 "created_at": "2026-07-18T11:05:55.163355",
+                                "batch_id": None,
+                                "batch_index": None,
                                 "test_set_entry_id": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                                 },
@@ -487,50 +588,27 @@ async def get_test_plan_execution_run_metadata(
         200: {
             "description": (
                 "Full details for the run, including the snapshotted test set "
-                "entry it ran against and its post-execution results. `scores`, "
+                "entry it ran against and its post-execution results. `results`, "
                 "`error`, and `executed_at` are null until the run reaches a "
-                "terminal status (`Completed` or `Failed`) — this example shows "
-                "a completed run with scores populated. `test_set_id` reflects "
-                "the entry's *current* test set and is null if the entry has "
-                "since been unlinked from it (`PATCH /test-sets/{test_set_id}"
-                "/entries`) — it does not affect whether this run's own detail "
-                "is reachable, only this one field."
+                "terminal status (`Green`, `Amber`, `Red`, or `NotRan`). The two "
+                "examples show a run scored from the entry's recorded answer, "
+                "and one scored from the application's reply, kept whole in "
+                "`application_reply`, where one check reads its own part of it "
+                "(`answer_path`). "
+                "`test_set_id` reflects the entry's *current* test set and is "
+                "null if the entry has since been unlinked from it (`PATCH "
+                "/test-sets/{test_set_id}/entries`) — it does not affect "
+                "whether this run's own detail is reachable, only this one "
+                "field."
             ),
             "content": {
                 "application/json": {
-                    "example": {
-                        "id": "f1a2b3c4-d5e6-7890-fabc-234567890123",
-                        "status": "Completed",
-                        "created_at": "2026-07-20T09:12:04.221310",
-                        "test_set_entry_id": {
-                            "id": "a2b3c4d5-e6f7-8901-abcd-345678901234"
-                        },
-                        "test_plan_execution_id": {
-                            "id": "b3c4d5e6-f7a8-9012-bcde-456789012345"
-                        },
-                        "scores": {
-                            "exact_match": 1.0,
-                            "bleu": 0.37
-                        },
-                        "error": None,
-                        "executed_at": "2026-07-20T09:12:08.554021",
-                        "test_case_id": {
-                            "id": "c4d5e6f7-a8b9-0123-cdef-567890123456"
-                        },
-                        "name": "greets the user by name",
-                        "input": "Say hello to Alice.",
-                        "expected_output": "Hello, Alice!",
-                        "model_output": "Hello, Alice!",
-                        "test_type_names": ["exact_match", "bleu"],
-                        "test_case_snapshot_at": {
-                            "snapshot_at": "2026-07-20T09:10:41.117903"
-                        },
-                        "test_set_id": {
-                            "id": "d5e6f7a8-b9c0-1234-defa-678901234567"
-                        },
-                        "test_plan_id": {
-                            "id": "e6f7a8b9-c0d1-2345-efab-789012345678"
-                        },
+                    "examples": {
+                        "recorded": {"summary": "The test's recorded answer was scored",
+                                     "value": _RUN_DETAIL_RECORDED},
+                        "application": {"summary": "Scored from the application's reply; one "
+                                                   "check reads its own part of it",
+                                        "value": _RUN_DETAIL_FROM_APPLICATION},
                     }
                 }
             },
@@ -616,13 +694,26 @@ async def get_test_plan_execution_run_details(
       of execution Y through execution Z's URL.
 
     Returns the run's `id`, `status`, `created_at`, `test_set_entry_id`, and
-    `test_plan_execution_id`, plus `scores`, `error`, and `executed_at` — the
+    `test_plan_execution_id`, plus `results`, `error`, and `executed_at` — the
     latter three are null until the run reaches a terminal status
-    (`Completed` or `Failed`), and `scores`/`error` are mutually exclusive
-    even then: a run either scores successfully or fails, never both.
+    (`Green`, `Amber`, `Red`, or `NotRan`), and `results`/`error` are
+    mutually exclusive even then: `error` is only ever set for `NotRan`,
+    `results` for the other three.
+
+    Also returns what was scored: `evaluated_output`, the answer every check
+    reads by default — the test's recorded `model_output`, or, when it has
+    none, the application's answer at the settings' output path (JSON text
+    for a structured answer, `""` when the application answered with
+    nothing) — and `output_source` (`recorded` / `application`). When the
+    answer came from the application, `application_reply` holds its whole
+    reply, and a check whose assignment set an `answer_path` read that part
+    of it instead; each result records the `answer_path` it read (null: the
+    default answer). All three are null until a terminal status and for
+    `NotRan`.
+
     Also returns the snapshotted test set entry the run executed against —
     `test_case_id` (the live test it was originally snapshotted from),
-    `name`, `input`, `expected_output`, `model_output`, `test_type_names`,
+    `name`, `input`, `expected_output`, `model_output`, `test_type_assignments`,
     and `test_case_snapshot_at` — frozen at the moment the entry was added
     to its test set, and never updated by later edits to the live test.
     This stays reachable even if the entry has since been unlinked from

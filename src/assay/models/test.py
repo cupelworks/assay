@@ -1,17 +1,14 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from assay.models.base import Base
 from assay.models.datasets import DatasetRowModel
-
-if TYPE_CHECKING:
-    from assay.models.stats import StatisticalVerificationModel
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DESIGN OVERVIEW
@@ -33,7 +30,7 @@ if TYPE_CHECKING:
 #   2. TEST SET (TestSetModel + TestSetEntryModel)
 #      A named, ordered collection of tests. When a test is added to a test set,
 #      a snapshot (TestSetEntryModel) is created at that exact moment — copying
-#      input, expected_output, and test_type_names from the live TestModel. From
+#      input, expected_output, and test_type_assignments from the live TestModel. From
 #      that point on, changes to the live test do NOT propagate into the set —
 #      this mirrors the behavior of test management tools like Jira/Zephyr, where
 #      a test set represents a stable, auditable baseline. The snapshot itself
@@ -66,9 +63,11 @@ if TYPE_CHECKING:
 #   A TestRunModel represents a single evaluation attempt. There are three modes:
 #
 #   - STANDALONE: test_id is set, everything else null.
-#     The user runs a live test directly, outside any set or plan. The run
-#     reads input/expected_output from the live TestModel at execution time.
-#     Has no live/replay pair — nothing about a standalone run is ever frozen.
+#     The user runs a live test directly, outside any set or plan. When the
+#     run is created the test is copied into a StandaloneRunModel (same id as
+#     the run), and the run is evaluated against that copy — later edits to
+#     the live test never change it. Has no live/replay pair: each standalone
+#     run copies the test as it is at that moment.
 #
 #   - TEST-SET-TRIGGERED: test_set_entry_id + test_set_execution_id are set.
 #     The run belongs to a standalone test set execution (TestSetExecutionModel),
@@ -99,11 +98,11 @@ if TYPE_CHECKING:
 #       └── TestModel (dataset_row_id, traceability only)
 #               └── TestSetEntryModel (snapshot at time of set inclusion)
 #                       └── TestRunModel (frozen execution)
-#                               └── StatisticalVerificationModel (stats results)
 #
 #   From a live TestModel you can navigate:
-#     test.set_entries → entry.runs → run.statistical_verifications
-#   to retrieve the full execution history across all sets and plans.
+#     test.set_entries → entry.runs
+#   to retrieve the full execution history across all sets and plans. Runs
+#   created by a statistical batch also carry its batch_id (models/statistics.py).
 #
 #   TestRunModel is also grouped by trigger event, via exactly one of:
 #     - TestSetExecutionModel (standalone test set execution)
@@ -136,8 +135,32 @@ if TYPE_CHECKING:
 class TestStatus(StrEnum):
     pending = "Pending"
     running = "Running"
-    completed = "Completed"
-    failed = "Failed"
+    green = "Green"
+    amber = "Amber"
+    red = "Red"
+    not_ran = "NotRan"
+
+
+# The four values a run doesn't move on from — every other status
+# (pending, running) still has work ahead of it. Kept next to TestStatus
+# itself so anything needing "is this run done" checks the same set,
+# rather than each caller re-deriving its own idea of which values count.
+TERMINAL_STATUSES = frozenset({
+    TestStatus.green,
+    TestStatus.amber,
+    TestStatus.red,
+    TestStatus.not_ran,
+})
+
+
+class OutputSource(StrEnum):
+    """Where the answer a run evaluated came from. recorded: the test already
+    had a model_output and the run scored that. application: the test had
+    none, so the run called the application under test and scored its reply
+    — which is why two runs of the same test can legitimately differ.
+    """
+    recorded = "recorded"
+    application = "application"
 
 
 class TestTypes(StrEnum):
@@ -152,6 +175,54 @@ class TestTypesCost(StrEnum):
     expensive = "expensive"
 
 
+class Comparison(StrEnum):
+    """How a threshold-scored test type turns its score into passed.
+
+    gte: higher is better, passed = score >= threshold (every metric today).
+    lte: lower is better, passed = score <= threshold (a future distance or
+    error-rate metric). Null on the catalogue row for a type that isn't
+    scored against a threshold at all (deterministic checks, LLM judges).
+    """
+    gte = "gte"
+    lte = "lte"
+
+
+class ConfigFieldKind(StrEnum):
+    """What kind of value a TestTypesModel.config_fields entry holds.
+
+    "reference" is reserved: a field of this kind is never stored per
+    assignment, it always resolves to the test case's own expected_output.
+    Every other kind is
+    per-assignment free text, stored under TestTypeAssignmentModel.config /
+    TestSetEntryModel.test_type_assignments, keyed by the field's own key.
+    """
+    reference = "reference"
+    multiline = "multiline"
+    rubric = "rubric"
+    # A number, checked when the type is assigned: it must parse, fall within
+    # the field's min/max when set, and be whole when the field says integer.
+    numeric = "numeric"
+    # A JSON document or value, written as JSON text; checked to parse when
+    # the type is assigned.
+    json = "json"
+    # A JSONPath expression, e.g. $.status; checked to parse when the type is
+    # assigned.
+    jsonpath = "jsonpath"
+    # A regular expression for the worker's `regex` library; checked to compile
+    # when the type is assigned, with that same library.
+    regex = "regex"
+    # A JSON Schema, written as JSON text; checked when the type is assigned to
+    # parse as JSON and to be a valid schema for the draft its $schema names.
+    json_schema = "json_schema"
+
+
+# The engine of every LLM-judge type (a catalogue row's `engine`). Named once,
+# here, because the worker (to read the judge settings once per run) and the
+# API's statistics (judge calls, judge stability) both test for it, and models
+# are the one package both may import.
+JUDGE_ENGINE = "llm_judge"
+
+
 class TestTypesModel(Base):
     """
     A catalogue entry describing a supported evaluation method.
@@ -159,13 +230,21 @@ class TestTypesModel(Base):
     TestTypesModel is a reference table populated at setup time (e.g. via
     seed data). It describes the available evaluation strategies — deterministic
     checks, NLP metrics, or LLM-as-judge — along with metadata that helps the
-    user choose the right one (cost, limitations, whether a reference output is
-    required).
+    user choose the right one (cost, limitations, what config it needs when
+    assigned — see config_fields).
 
     Tests assign test types via TestTypeAssignmentModel, a junction table that
     references this model by name rather than UUID. This keeps assignments
     stable if the table is ever reseeded — name is the stable, human-readable
     identifier, while id is internal only.
+
+    A row also says how its type is evaluated, as data: engine names the
+    code that scores it (a small, fixed set of generic engines in
+    worker/evaluators), engine_settings carries that engine's parameters for
+    this type, and comparison says which way a threshold-scored type passes.
+    Engines are the kitchen appliances, rows are the recipes: a new type that
+    only needs an existing engine with different settings (a "ROUGE-1" next
+    to "ROUGE", a case-insensitive "Exact Match") is a new row, not new code.
     """
 
     __tablename__ = "test_types"
@@ -177,8 +256,28 @@ class TestTypesModel(Base):
     best_for: Mapped[str] = mapped_column(Text, nullable=True)
     cost: Mapped[TestTypesCost | None] = mapped_column(SAEnum(TestTypesCost), nullable=True)
     limitations: Mapped[str] = mapped_column(Text, nullable=True)
-    # If True, the test type requires an expected_output to function correctly.
-    required_reference: Mapped[bool] = mapped_column(Boolean, nullable=True)
+    # Seeded server-side only, never user-editable through the API. Each item:
+    # {"key": str, "label": str, "kind": str, "required": bool, "min": float |
+    # None, "max": float | None, "integer": bool, "placeholder": str | None,
+    # "hint": str | None}. kind "reference" is reserved — it never gets its own
+    # storage, it always resolves to the test case's own expected_output.
+    # min/max (inclusive) and integer are only ever set for kind "numeric", and
+    # a value outside them is refused when the type is assigned; omitted
+    # (→ None / false) for every other kind. Empty list for a self-contained
+    # type that needs no extra input.
+    config_fields: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    # Plain text, not an enum: the engine list grows with code, and a row
+    # naming an engine this worker doesn't have must fail that one type at
+    # run time (detail says which engine is missing), never fail to load.
+    engine: Mapped[str] = mapped_column(Text, nullable=False)
+    # The engine's parameters for this type — e.g. {"variant": "rougeL"} for
+    # ROUGE, {"default_rubric": "..."} for a judge type. Shape is per engine;
+    # {} for an engine that takes nothing.
+    engine_settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Only for types scored against their threshold config field; null for
+    # the rest. Together with that field's min/max (the type's native score
+    # range) it fully describes how a score becomes passed.
+    comparison: Mapped[Comparison | None] = mapped_column(SAEnum(Comparison), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=True, default=lambda: datetime.now().astimezone()
@@ -244,9 +343,14 @@ class TestModel(Base):
         back_populates="test",
         cascade="all, delete-orphan",
     )
+    # Read-only: a type can be assigned more than once, so writing through
+    # this shortcut couldn't say which assignment is meant — and it would
+    # list a repeated type twice. Assignments are written through
+    # test_type_assignments.
     test_types: Mapped[list["TestTypesModel"]] = relationship(
         secondary="test_type_assignments",
         overlaps="test_type_assignments",
+        viewonly=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -273,16 +377,35 @@ class TestTypeAssignmentModel(Base):
     keeps the data human-readable directly in the DB — if test_types is
     reseeded with new UUIDs, no assignment records need to be updated.
 
-    The composite primary key (test_id, test_type_name) naturally enforces
-    uniqueness — a test type can only be assigned once per test.
+    A type can be assigned more than once — two Contains checks, two JSON
+    Field Equals on different paths — so the assignment's own `label`, unique
+    within its test, identifies it: the primary key is (test_id, label). A
+    run's results are keyed by the label too. Keeping the key natural rather
+    than a generated id matters for PATCH, which replaces the whole list in
+    one flush: SQLAlchemy turns "delete (test, label), insert (test, label)"
+    into an update, where a generated id with a unique label would insert
+    before deleting and collide.
     """
 
     __tablename__ = "test_type_assignments"
 
     test_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tests.id", ondelete="CASCADE"),
                                                primary_key=True,)
+    # What the check is called within its test: unique there, ignoring letter
+    # case (checked by the API, not the database). Defaults to the type's
+    # name, numbered when taken ("Contains 2").
+    label: Mapped[str] = mapped_column(Text, primary_key=True)
     # References TestTypesModel.name — stable, human-readable, unique.
-    test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), primary_key=True)
+    test_type_name: Mapped[str] = mapped_column(ForeignKey("test_types.name"), nullable=False)
+    # Per-assignment config values, keyed by the test type's config_fields[].key.
+    # Null if the type has no non-reference config fields. A "reference"-kind
+    # field is never stored here — it always resolves to the live test's own
+    # expected_output.
+    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Which part of the answer this check reads, as a JSONPath into the
+    # application's reply (or into a recorded answer that is JSON). Null:
+    # the answer at the settings' output path, like every other check.
+    answer_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     test: Mapped["TestModel"] = relationship(back_populates="test_type_assignments",
                                              overlaps="test_types")
@@ -351,6 +474,12 @@ class TestSetExecutionModel(Base):
     replayed_execution_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_set_executions.id"), nullable=True, index=True
     )
+    # Set when the execution is one time of a statistical batch
+    # (docs/version_1/statistics/): the batch, and which time (1-based) it is
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("statistical_batches.id"), nullable=True, index=True
+    )
+    batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )
@@ -365,18 +494,19 @@ class TestSetEntryModel(Base):
     A snapshot of a TestModel at the moment it was added to a TestSetModel.
 
     This is the record that test set executions run against. It captures input,
-    expected_output, and test_type_names exactly as they were at snapshot time.
-    Subsequent edits to the originating TestModel never propagate here.
+    expected_output, and test_type_assignments exactly as they were at snapshot
+    time. Subsequent edits to the originating TestModel never propagate here.
 
     The entry itself is directly editable (PATCH) until it has been referenced
     by at least one TestRunModel — at that point it freezes and further edits
     are rejected with a 409, so a run's record of what it executed against
     always stays accurate.
 
-    Test type names (not UUIDs) are stored as a JSON list of strings. This keeps
-    the snapshot self-contained and human-readable, and consistent with the
-    name-based FK used in TestTypeAssignmentModel. The service layer populates
-    this by copying [tt.name for tt in test.test_types] at snapshot time.
+    Test type assignments are stored as a JSON list of {name, config} objects,
+    keyed by name (not UUID) for human-readability and resilience against
+    table rebuilds — consistent with the name-based FK used in
+    TestTypeAssignmentModel, which is where each assignment's config is
+    copied from at snapshot time.
 
     The test_id FK is kept for traceability — it allows navigating from a
     snapshot back to the current live test — but it is never used to pull or
@@ -405,9 +535,13 @@ class TestSetEntryModel(Base):
     expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_output: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Snapshot of test type names at inclusion time — stored as strings, not
-    # UUIDs, for human-readability and resilience against table rebuilds.
-    test_type_names: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Snapshot of test type assignments at inclusion time. Each item:
+    # {"name": str, "config": dict | null} — name (not UUID) for
+    # human-readability and resilience against table rebuilds, config copied
+    # from the live TestTypeAssignmentModel.config at snapshot time. A
+    # "reference"-kind field needs no entry here — it resolves from this
+    # entry's own expected_output above, already frozen.
+    test_type_assignments: Mapped[list[dict]] = mapped_column(JSON, default=list)
     snapshot_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )
@@ -475,6 +609,12 @@ class TestPlanExecutionModel(Base):
     replayed_execution_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_plan_executions.id"), nullable=True, index=True
     )
+    # Set when the execution is one time of a statistical batch
+    # (docs/version_1/statistics/): the batch, and which time (1-based) it is
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("statistical_batches.id"), nullable=True, index=True
+    )
+    batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now().astimezone()
     )
@@ -526,9 +666,13 @@ class TestRunModel(Base):
 
     STANDALONE (test_id set, everything else null):
         The user runs a live TestModel directly, outside any set or plan.
-        Input and configuration are read from the live test at execution time.
-        Use this for quick, ad-hoc evaluation during test authoring. Has no
-        live/replay pair, unlike the other two modes.
+        When the run is created, the test is copied into a
+        StandaloneRunModel sharing this run's id (see standalone_run), and
+        input and configuration are read from that frozen copy — so, like
+        the other two modes, the run stays reproducible regardless of later
+        edits to the live test. Use this for quick, ad-hoc evaluation
+        during test authoring. Has no live/replay pair, unlike the other
+        two modes.
 
     TEST-SET-TRIGGERED (test_set_entry_id + test_set_execution_id set):
         The run is part of a standalone test set execution. Input and
@@ -558,9 +702,16 @@ class TestRunModel(Base):
         the same TestSetEntryModel can accumulate runs from both paths over
         its lifetime, across different trigger events.
 
-    Results (scores, error) are written back to this record on completion.
-    Statistical verifications produced post-run are linked via the
-    statistical_verifications relationship.
+    Results are written back to this record once execution reaches a
+    terminal status. status itself is the outcome, not just the lifecycle
+    stage: Green (every assigned test type passed), Amber (some passed,
+    some didn't), and Red (every assigned type was evaluated and none
+    passed) are all backed by results, one entry per assigned test type
+    keyed by name. NotRan means nothing could be attempted at all (the
+    model couldn't be called, the entry couldn't be read) — error carries
+    the reason, and results stays null; NotRan is the only status error is
+    ever set for. A run created by a statistical batch carries its batch_id
+    and batch_index (models/statistics.py).
     """
 
     __tablename__ = "test_runs"
@@ -586,6 +737,16 @@ class TestRunModel(Base):
         ForeignKey("test_plan_executions.id"), nullable=True, index=True
     )
 
+    # Set when the run belongs to a statistical batch: the batch, and which
+    # time (1-based) of it — the same on every run of one execution
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("statistical_batches.id"), nullable=True, index=True
+    )
+    batch_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Labels this run doesn't evaluate: the checks a statistical batch left out,
+    # so their judge calls aren't made. Null for every ordinary run.
+    skip_labels: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     test: Mapped["TestModel | None"] = relationship(
         back_populates="runs",
         foreign_keys=[test_id]
@@ -600,6 +761,12 @@ class TestRunModel(Base):
     test_plan_execution: Mapped["TestPlanExecutionModel | None"] = relationship(
         back_populates="runs"
     )
+    # Standalone mode only: the frozen copy of the test this run evaluates.
+    # One-to-one, sharing this run's id; None in the other two modes.
+    standalone_run: Mapped["StandaloneRunModel | None"] = relationship(
+        back_populates="test_run",
+        passive_deletes=True,
+    )
 
     status: Mapped[TestStatus] = mapped_column(
         SAEnum(TestStatus, create_constraint=True), default=TestStatus.pending, index=True
@@ -608,13 +775,66 @@ class TestRunModel(Base):
         DateTime, default=lambda: datetime.now().astimezone()
     )
 
-    # Populated on completion. scores is a dict of {metric_name: score}.
-    # error is set instead of scores if the run failed.
-    scores: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Populated once status reaches Green/Amber/Red. results is
+    # {type_name: {"passed": bool, "score": float | None, "detail": str | None}},
+    # one entry per assigned test type. error is only ever set for NotRan —
+    # a run-level failure where no per-type result exists at all, distinct
+    # from an individual type failing its own pass criterion (which shows
+    # up as that type's own results[type_name]["detail"] instead).
+    results: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-    statistical_verifications: Mapped[list["StatisticalVerificationModel"]] = relationship(
-        back_populates="test_run",
-        # TODO: cascade deletion of statistical_verifications should be opt-in via the API
+    # The answer this run actually scored, and where it came from — set on
+    # every run that evaluated anything (Green/Amber/Red), whether the answer
+    # was the copy's recorded model_output or obtained from the application
+    # during the run. Copied even when recorded, so results always sit next
+    # to the exact text they describe. Null while Pending/Running and for
+    # NotRan (nothing was evaluated). Not named model_output: on the test
+    # that means "the answer someone recorded, if any"; here it means "what
+    # this run scored, always".
+    evaluated_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_source: Mapped[OutputSource | None] = mapped_column(
+        SAEnum(OutputSource), nullable=True
     )
+    # The application's whole reply, parsed, when the answer came from the
+    # application — the model's output together with the application's own
+    # fields (stop_reason, token counts, model). A check with an answer_path
+    # reads its part of it. Null for a recorded answer and for NotRan.
+    application_reply: Mapped[Any] = mapped_column(JSON, nullable=True)
+
+
+class StandaloneRunModel(Base):
+    """
+    The standalone-specific half of a standalone run: a frozen copy of the
+    test as it was when the run was created.
+
+    test_runs is still the table that lists every run, standalone or not —
+    this table only extends the standalone ones. The two are one-to-one and
+    share the same id: a row's primary key is the test_runs.id it belongs
+    to (also its foreign key), so there's no second id to track.
+
+    The copy holds the same fields as a TestSetEntryModel snapshot, in the
+    same shapes — test_type_assignments is the same list of
+    {"name": str, "config": dict | null} objects — so a standalone run is
+    evaluated and displayed exactly like a test-set-triggered one. Unlike an
+    entry, it has no set membership and is never editable: it belongs to
+    exactly one run from the moment it's created, and later edits to the
+    live test (reachable through TestRunModel.test_id) never touch it.
+    """
+
+    __tablename__ = "standalone_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("test_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    input: Mapped[str] = mapped_column(Text)
+    expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    test_type_assignments: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    snapshot_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now().astimezone()
+    )
+
+    test_run: Mapped["TestRunModel"] = relationship(back_populates="standalone_run")

@@ -1,9 +1,16 @@
+import logging
 import uuid
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import TestPlanExecutionModel, TestRunModel, TestSetExecutionModel, TestStatus
+from assay.models import (
+    StandaloneRunModel,
+    TestPlanExecutionModel,
+    TestRunModel,
+    TestSetExecutionModel,
+    TestStatus,
+)
 from assay.schemas import (
     StandaloneRunCreationMetadata,
     TestCaseID,
@@ -23,6 +30,7 @@ from assay.services.runs._common import (
     _check_test_set_execution_id_linked_to_specific_test_set_id_or_404,
     _check_test_set_execution_or_404,
     _check_tests_have_test_types_or_409,
+    _dispatch_runs,
     _find_test_plan_entries_or_409,
     _find_test_plan_execution_id_entries_or_409,
     _find_test_set_entries_ids_or_409,
@@ -31,7 +39,101 @@ from assay.services.runs._common import (
 )
 from assay.services.test_plans._common import _find_test_plan_by_id_or_404
 from assay.services.test_sets._common import _find_test_set_or_404
-from assay.services.tests._common import _find_all_tests_with_details_or_404
+from assay.services.tests._common import (
+    _find_all_tests_with_details_or_404,
+    _frozen_test_type_assignments,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _new_standalone_run(test, batch_id: uuid.UUID | None = None,
+                        batch_index: int | None = None) -> TestRunModel:
+    """A pending standalone run of a live test, with its frozen copy. Not
+    added to a session. A statistical batch passes its id and the time."""
+    created_at = datetime.now().astimezone()
+    run = TestRunModel(
+        id=uuid.uuid4(),
+        test_id=test.id,
+        status=TestStatus.pending,
+        created_at=created_at,
+        batch_id=batch_id,
+        batch_index=batch_index,
+    )
+    run.standalone_run = StandaloneRunModel(
+        id=run.id,
+        name=test.name,
+        input=test.input,
+        expected_output=test.expected_output,
+        model_output=test.model_output,
+        test_type_assignments=_frozen_test_type_assignments(test),
+        snapshot_at=created_at,
+    )
+    return run
+
+
+def _new_test_set_execution(
+        test_set_id: uuid.UUID,
+        entry_ids: list[uuid.UUID],
+        replayed_execution_id: uuid.UUID | None = None,
+        batch_id: uuid.UUID | None = None,
+        batch_index: int | None = None,
+) -> tuple[TestSetExecutionModel, list[TestRunModel]]:
+    """A test set execution and one pending run per entry. Not added to a
+    session."""
+    execution = TestSetExecutionModel(
+        id=uuid.uuid4(),
+        test_set_id=test_set_id,
+        replayed_execution_id=replayed_execution_id,
+        created_at=datetime.now().astimezone(),
+        batch_id=batch_id,
+        batch_index=batch_index,
+    )
+    runs = [
+        TestRunModel(
+            id=uuid.uuid4(),
+            status=TestStatus.pending,
+            created_at=datetime.now().astimezone(),
+            test_set_entry_id=entry_id,
+            test_set_execution_id=execution.id,
+            batch_id=batch_id,
+            batch_index=batch_index,
+        )
+        for entry_id in entry_ids
+    ]
+    return execution, runs
+
+
+def _new_test_plan_execution(
+        test_plan_id: uuid.UUID,
+        entry_ids: list[uuid.UUID],
+        replayed_execution_id: uuid.UUID | None = None,
+        batch_id: uuid.UUID | None = None,
+        batch_index: int | None = None,
+) -> tuple[TestPlanExecutionModel, list[TestRunModel]]:
+    """A test plan execution and one pending run per entry. Not added to a
+    session."""
+    execution = TestPlanExecutionModel(
+        id=uuid.uuid4(),
+        test_plan_id=test_plan_id,
+        replayed_execution_id=replayed_execution_id,
+        created_at=datetime.now().astimezone(),
+        batch_id=batch_id,
+        batch_index=batch_index,
+    )
+    runs = [
+        TestRunModel(
+            id=uuid.uuid4(),
+            status=TestStatus.pending,
+            created_at=datetime.now().astimezone(),
+            test_set_entry_id=entry_id,
+            test_plan_execution_id=execution.id,
+            batch_id=batch_id,
+            batch_index=batch_index,
+        )
+        for entry_id in entry_ids
+    ]
+    return execution, runs
 
 
 async def create_new_standalone_run(
@@ -45,11 +147,16 @@ async def create_new_standalone_run(
     test with no test types would measure nothing once executed, so it's
     rejected upfront rather than silently created as a guaranteed no-op.
 
-    Enqueue-only: this creates a single TestRunModel with status=pending
-    (test_id set, every other FK left null — the standalone mode) and
-    returns immediately. Nothing here calls a model or writes back scores;
-    that's separate, later work. Exactly one row is created regardless of
-    how many test types are assigned.
+    Creates a single TestRunModel with status=pending (test_id set, every
+    other FK left null — the standalone mode) together with its
+    StandaloneRunModel — the frozen copy of the test (name, input, outputs,
+    assigned types with their config) this run is evaluated against, so
+    later edits to the live test never change what the run was judged by.
+    Both are committed in one transaction, then the run is dispatched for
+    execution (best-effort, see _dispatch_runs) before returning. Nothing
+    here calls a model or writes back scores itself — that happens in the
+    worker process once it picks up the dispatched task. Exactly one run is
+    created regardless of how many test types are assigned.
 
     Args:
         test_id: UUID of the live test to create a run for.
@@ -67,15 +174,16 @@ async def create_new_standalone_run(
     
     _check_tests_have_test_types_or_409([found])
     
-    test_run_model = TestRunModel(
-        id=uuid.uuid4(),
-        test_id=found.id,
-        status=TestStatus.pending,
-        created_at=datetime.now().astimezone(),
-    )
+    test_run_model = _new_standalone_run(found)
 
     session.add(test_run_model)
     await session.commit()
+
+    logger.info(
+        "Created standalone run %s for test %s", test_run_model.id, found.id,
+        extra={"run_id": test_run_model.id, "test_id": found.id},
+    )
+    _dispatch_runs([test_run_model.id])
 
     return StandaloneRunCreationMetadata(
         id=test_run_model.id,
@@ -108,8 +216,9 @@ async def create_new_live_test_set_run(
     every run produced by this call, with replayed_execution_id left unset
     since this is a live run, not a replay) and one TestRunModel per entry,
     each pointing at that same execution — test_set_entry_id and
-    test_set_execution_id set, status=pending. Enqueue-only: nothing here
-    calls a model or writes back results.
+    test_set_execution_id set, status=pending. Every created run is then
+    dispatched for execution (best-effort, see _dispatch_runs); nothing
+    here calls a model or writes back results itself.
 
     Args:
         test_set_id: UUID of the test set to execute.
@@ -128,27 +237,23 @@ async def create_new_live_test_set_run(
     entries_ids = await _find_test_set_entries_ids_or_409(test_set_id, session)
     await _check_test_set_entries_have_test_types_or_409(entries_ids, session)
 
-    test_set_execution_model = TestSetExecutionModel(
-        id=uuid.uuid4(),
-        test_set_id=test_set_id,
-        created_at=datetime.now().astimezone(),
-    )
-
-    test_runs = [
-        TestRunModel(
-            id=uuid.uuid4(),
-            status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
-            test_set_entry_id=test_set_entry_id,
-            test_set_execution_id=test_set_execution_model.id
-        )
-        for test_set_entry_id in entries_ids
-    ]
+    test_set_execution_model, test_runs = _new_test_set_execution(test_set_id, entries_ids)
 
     session.add(test_set_execution_model)
     session.add_all(test_runs)
     await session.commit()
-    
+
+    logger.info(
+        "Created live execution %s of test set %s with %d runs",
+        test_set_execution_model.id, test_set_id, len(test_runs),
+        extra={
+            "test_set_execution_id": test_set_execution_model.id,
+            "test_set_id": test_set_id,
+            "run_count": len(test_runs),
+        },
+    )
+    _dispatch_runs([test_run.id for test_run in test_runs])
+
     return TestSetLiveRunCreationMetadata(
         id=test_set_execution_model.id,
         created_at=test_set_execution_model.created_at,
@@ -181,8 +286,9 @@ async def create_new_replay_test_set_run(
     the execution being replayed, marking this one as a replay rather than a
     live run) and one TestRunModel per original entry, each pointing at the
     new execution — test_set_entry_id and test_set_execution_id set,
-    status=pending. Enqueue-only: nothing here calls a model or writes back
-    results.
+    status=pending. Every created run is then dispatched for execution
+    (best-effort, see _dispatch_runs); nothing here calls a model or writes
+    back results itself.
 
     Args:
         test_set_id: UUID of the test set the execution must belong to.
@@ -206,27 +312,24 @@ async def create_new_replay_test_set_run(
     )
     found_entries = await _find_test_set_execution_id_entries_or_409(test_set_execution_id, session)
 
-    test_set_execution_model = TestSetExecutionModel(
-        id=uuid.uuid4(),
-        test_set_id=test_set_id,
-        replayed_execution_id=test_set_execution_id,
-        created_at=datetime.now().astimezone(),
-    )
-
-    test_runs = [
-        TestRunModel(
-            id=uuid.uuid4(),
-            status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
-            test_set_entry_id=test_set_entry_id,
-            test_set_execution_id=test_set_execution_model.id,
-        )
-        for test_set_entry_id in found_entries
-    ]
+    test_set_execution_model, test_runs = _new_test_set_execution(
+        test_set_id, found_entries, replayed_execution_id=test_set_execution_id)
 
     session.add(test_set_execution_model)
     session.add_all(test_runs)
     await session.commit()
+
+    logger.info(
+        "Created execution %s of test set %s replaying execution %s with %d runs",
+        test_set_execution_model.id, test_set_id, test_set_execution_id, len(test_runs),
+        extra={
+            "test_set_execution_id": test_set_execution_model.id,
+            "test_set_id": test_set_id,
+            "replayed_execution_id": test_set_execution_id,
+            "run_count": len(test_runs),
+        },
+    )
+    _dispatch_runs([test_run.id for test_run in test_runs])
 
     return TestSetReplayedExecutionCreationMetadata(
         id=test_set_execution_model.id,
@@ -266,8 +369,9 @@ async def create_new_live_test_plan_run(
     left unset since this is a live run, not a replay) and one TestRunModel
     per entry across all linked test sets, each pointing at that same
     execution — test_set_entry_id and test_plan_execution_id set,
-    status=pending. Enqueue-only: nothing here calls a model or writes back
-    results.
+    status=pending. Every created run is then dispatched for execution
+    (best-effort, see _dispatch_runs); nothing here calls a model or writes
+    back results itself.
 
     Args:
         test_plan_id: UUID of the test plan to execute.
@@ -289,27 +393,24 @@ async def create_new_live_test_plan_run(
     test_sets_entries_ids = await _find_test_sets_entries_ids_or_409(test_plan_entries_ids, session)
     await _check_test_set_entries_have_test_types_or_409(test_sets_entries_ids, session)
     
-    test_plan_execution_model = TestPlanExecutionModel(
-        id=uuid.uuid4(),
-        test_plan_id=test_plan_id,
-        created_at=datetime.now().astimezone(),
-    )
+    test_plan_execution_model, test_runs = _new_test_plan_execution(
+        test_plan_id, test_sets_entries_ids)
 
-    test_runs = [
-        TestRunModel(
-            id=uuid.uuid4(),
-            status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
-            test_set_entry_id=test_set_entry_id,
-            test_plan_execution_id=test_plan_execution_model.id,
-        )
-        for test_set_entry_id in test_sets_entries_ids
-    ]
-    
     session.add(test_plan_execution_model)
     session.add_all(test_runs)
     await session.commit()
-    
+
+    logger.info(
+        "Created live execution %s of test plan %s with %d runs",
+        test_plan_execution_model.id, test_plan_id, len(test_runs),
+        extra={
+            "test_plan_execution_id": test_plan_execution_model.id,
+            "test_plan_id": test_plan_id,
+            "run_count": len(test_runs),
+        },
+    )
+    _dispatch_runs([test_run.id for test_run in test_runs])
+
     return TestPlanLiveRunCreationMetadata(
         id=test_plan_execution_model.id,
         created_at=test_plan_execution_model.created_at,
@@ -345,8 +446,9 @@ async def create_new_replay_test_plan_run(
     to the execution being replayed, marking this one as a replay rather
     than a live run) and one TestRunModel per original entry, each pointing
     at the new execution — test_set_entry_id and test_plan_execution_id
-    set, status=pending. Enqueue-only: nothing here calls a model or writes
-    back results.
+    set, status=pending. Every created run is then dispatched for execution
+    (best-effort, see _dispatch_runs); nothing here calls a model or writes
+    back results itself.
 
     Args:
         test_plan_id: UUID of the test plan the execution must belong to.
@@ -373,28 +475,25 @@ async def create_new_replay_test_plan_run(
         test_plan_execution_id, session
     )
 
-    test_plan_execution_model = TestPlanExecutionModel(
-        id=uuid.uuid4(),
-        test_plan_id=test_plan_id,
-        replayed_execution_id=test_plan_execution_id,
-        created_at=datetime.now().astimezone(),
-    )
-    
-    test_runs = [
-        TestRunModel(
-            id=uuid.uuid4(),
-            status=TestStatus.pending,
-            created_at=datetime.now().astimezone(),
-            test_set_entry_id=test_set_entry_id,
-            test_plan_execution_id=test_plan_execution_model.id,
-        )
-        for test_set_entry_id in found_entries
-    ]
-    
+    test_plan_execution_model, test_runs = _new_test_plan_execution(
+        test_plan_id, found_entries, replayed_execution_id=test_plan_execution_id)
+
     session.add(test_plan_execution_model)
     session.add_all(test_runs)
     await session.commit()
-    
+
+    logger.info(
+        "Created execution %s of test plan %s replaying execution %s with %d runs",
+        test_plan_execution_model.id, test_plan_id, test_plan_execution_id, len(test_runs),
+        extra={
+            "test_plan_execution_id": test_plan_execution_model.id,
+            "test_plan_id": test_plan_id,
+            "replayed_execution_id": test_plan_execution_id,
+            "run_count": len(test_runs),
+        },
+    )
+    _dispatch_runs([test_run.id for test_run in test_runs])
+
     return TestPlanReplayedExecutionCreationMetadata(
         id=test_plan_execution_model.id,
         created_at=test_plan_execution_model.created_at,

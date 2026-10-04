@@ -3,9 +3,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api.runs._batch_filter import BatchFilter
 from assay.db import get_session
-from assay.schemas import PaginatedRunMetadata
-from assay.services import get_run_metadata_all_runs
+from assay.models import TestStatus
+from assay.schemas import PaginatedExecutionMetadata, PaginatedRunMetadata, RunOrigin
+from assay.services import get_execution_metadata_all_executions, get_run_metadata_all_runs
 
 router = APIRouter(tags=["run (all)"])
 
@@ -40,10 +42,12 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                 "test_set_entry_id": None,
                                 "test_set_execution_id": None,
                                 "test_plan_execution_id": None,
+                                "test_set_id": None,
+                                "test_plan_id": None,
                             },
                             {
                                 "id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
-                                "status": "Completed",
+                                "status": "Green",
                                 "created_at": "2026-07-14T18:03:21.123456",
                                 "origin": "TestSet",
                                 "test_case_id": None,
@@ -54,10 +58,14 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                     "id": "f6a7b8c9-0123-def4-5678-9012345abcde"
                                 },
                                 "test_plan_execution_id": None,
+                                "test_set_id": {
+                                    "id": "11111111-1111-1111-1111-111111111111"
+                                },
+                                "test_plan_id": None,
                             },
                             {
                                 "id": "a7b8c9d0-1234-5abc-def6-789012345bcd",
-                                "status": "Failed",
+                                "status": "NotRan",
                                 "created_at": "2026-07-13T11:47:02.556213",
                                 "origin": "TestPlan",
                                 "test_case_id": None,
@@ -67,6 +75,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
                                 "test_set_execution_id": None,
                                 "test_plan_execution_id": {
                                     "id": "c9d0e1f2-3456-7abc-def8-9012345defab"
+                                },
+                                "test_set_id": None,
+                                "test_plan_id": {
+                                    "id": "22222222-2222-2222-2222-222222222222"
                                 },
                             },
                         ],
@@ -81,7 +93,29 @@ async def get_all_run_metadata(
         session: SessionDep,
         offset: int = Query(default=0, description="Number of records to skip for pagination."),
         limit: int = Query(default=100, description="Maximum number of records to "
-                                                    "return for pagination.")
+                                                    "return for pagination."),
+        status: Annotated[
+            TestStatus | None,
+            Query(
+                description=(
+                    "If given, restricts the list to runs currently at this status "
+                    "(e.g. `Pending`, to see what's still queued). Omit to see "
+                    "every run regardless of status."
+                ),
+            ),
+        ] = None,
+        origin: Annotated[
+            RunOrigin | None,
+            Query(
+                description=(
+                    "If given, restricts the list to runs created this way "
+                    "(`Standalone`, `TestSet`, or `TestPlan`). Omit to see every "
+                    "run regardless of origin. Combines with `status` — both "
+                    "filters apply together when both are given."
+                ),
+            ),
+        ] = None,
+        batch: BatchFilter = None,
 ) -> PaginatedRunMetadata: # pragma: no cover
     """List every run ever created, across every test, test set, and test
     plan, newest first.
@@ -100,10 +134,121 @@ async def get_all_run_metadata(
     Each item carries `origin` (`Standalone`, `TestSet`, or `TestPlan`)
     alongside `id`, `status`, and `created_at`. Only the ID field(s) that
     origin implies are non-null — `test_case_id` for `Standalone`;
-    `test_set_entry_id` and `test_set_execution_id` for `TestSet`;
-    `test_set_entry_id` and `test_plan_execution_id` for `TestPlan` — the
-    rest are always null on that item. Results are ordered by `created_at`
-    descending (ties broken by `id` descending), plus the usual `total`,
-    `offset`, and `limit`.
+    `test_set_entry_id`, `test_set_execution_id`, and `test_set_id` for
+    `TestSet`; `test_set_entry_id`, `test_plan_execution_id`, and
+    `test_plan_id` for `TestPlan` — the rest are always null on that item.
+    `test_set_id`/`test_plan_id` are resolved server-side specifically so a
+    caller can deep-link a row (e.g. to that test set's/test plan's own
+    detail page) without a separate lookup from the execution ID alone.
+    Results are ordered by `created_at` descending (ties broken by `id`
+    descending), plus the usual `total`, `offset`, and `limit`.
+
+    Pass `status` to restrict the feed to one status at a time (`Pending`,
+    `Running`, `Green`, `Amber`, `Red`, or `NotRan`) — both `total` and the
+    returned page are scoped to it. Omit it to see every run regardless of
+    status.
+
+    Pass `origin` to restrict the feed to one origin at a time (`Standalone`,
+    `TestSet`, or `TestPlan`) the same way. Combines with `status`: passing
+    both filters on their intersection.
     """
-    return await get_run_metadata_all_runs(session, offset, limit)
+    return await get_run_metadata_all_runs(session, offset, limit, status, origin, batch)
+
+
+@router.get(
+    path="/runs/executions",
+    summary=(
+        "List every test set and test plan execution in the system "
+        "(standalone runs excluded — they have no execution wrapper)"
+    ),
+    responses={
+        200: {
+            "description": (
+                "A paginated list of every test set and test plan execution "
+                "ever triggered (live or replayed), newest first. Does NOT "
+                "include standalone runs — a standalone run has no "
+                "execution wrapper to aggregate, so it never appears here "
+                "regardless of status; see `GET /runs` for a listing that "
+                "does include standalone runs."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "total": 2,
+                        "offset": 0,
+                        "limit": 100,
+                        "items": [
+                            {
+                                "id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
+                                "created_at": "2026-07-15T09:12:47.884213",
+                                "origin": "TestSet",
+                                "run_count": 12,
+                                "test_set_id": {
+                                    "id": "e5f6a7b8-c901-2345-def6-789012345bcd"
+                                },
+                                "test_plan_id": None,
+                                "replayed_test_set_execution_id": None,
+                                "replayed_test_plan_execution_id": None,
+                            },
+                            {
+                                "id": "a7b8c9d0-1234-5abc-def6-789012345bcd",
+                                "created_at": "2026-07-14T18:03:21.123456",
+                                "origin": "TestPlan",
+                                "run_count": 34,
+                                "test_set_id": None,
+                                "test_plan_id": {
+                                    "id": "c9d0e1f2-3456-7abc-def8-9012345defab"
+                                },
+                                "replayed_test_set_execution_id": None,
+                                "replayed_test_plan_execution_id": {
+                                    "id": "b8c9d0e1-2345-6abc-def7-89012345cdef"
+                                },
+                            },
+                        ],
+                    }
+                }
+            },
+        },
+    },
+    response_model=PaginatedExecutionMetadata,
+)
+async def get_all_execution_metadata(
+        session: SessionDep,
+        offset: int = Query(default=0, description="Number of records to skip for pagination."),
+        limit: int = Query(default=100, description="Maximum number of records to "
+                                                    "return for pagination."),
+        batch: BatchFilter = None,
+) -> PaginatedExecutionMetadata: # pragma: no cover
+    """List every execution ever triggered, across every test set and test
+    plan, newest first. Does NOT include standalone runs — see below.
+
+    An execution is a `TestSetExecutionModel` or `TestPlanExecutionModel`
+    row — the grouping/trigger-event record a batch of runs was fanned out
+    under (`run_count`, `replayed_*_execution_id`) — never an individual
+    run, and never a standalone run, which has no such wrapper at all and
+    so can never appear in this listing, regardless of status (see `GET
+    /runs`, which covers runs including standalone ones, and `GET
+    /runs/test-sets/{test_set_id}/executions` /
+    `GET /runs/test-plans/{test_plan_id}/executions`, which cover a single
+    set's or plan's own execution history).
+
+    This is the aggregate counterpart to those two scoped listing
+    endpoints: instead of one call per test set or test plan, a caller gets
+    every execution across the whole system in one paginated,
+    `created_at`-descending feed — what a "recent executions" overview
+    actually wants, without fanning out one request per test set/test plan
+    in the catalog.
+
+    No guards run before the list is fetched — there's no parent resource
+    whose ID could be wrong.
+
+    Each item carries `origin` (`TestSet` or `TestPlan`) alongside `id`,
+    `created_at`, and `run_count`. Only the ID field(s) that origin implies
+    are non-null — `test_set_id` (plus `replayed_test_set_execution_id` if
+    it was a replay) for `TestSet`; `test_plan_id` (plus
+    `replayed_test_plan_execution_id` if it was a replay) for `TestPlan` —
+    the rest are always null on that item. Results are ordered by
+    `created_at` descending (ties broken by `id` descending), plus the
+    usual `total`, `offset`, and `limit`.
+    """
+    return await get_execution_metadata_all_executions(session, offset, limit, batch)

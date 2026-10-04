@@ -70,7 +70,8 @@ def test_update_test_set_name_none_is_noop():
             id=test_set_id,
             name=test_set_name,
             created_at=created_at,
-        )
+        ),
+        4,
     ]
 
     response = asyncio.run(
@@ -80,10 +81,11 @@ def test_update_test_set_name_none_is_noop():
     )
 
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 1
+    assert session.scalar.call_count == 2
     assert response.id == test_set_id
     assert response.name == test_set_name
     assert response.created_at == created_at
+    assert response.entry_count == 4
 
 
 def test_update_test_set_name_unchanged_is_noop():
@@ -98,7 +100,8 @@ def test_update_test_set_name_unchanged_is_noop():
             id=test_set_id,
             name=test_set_name,
             created_at=created_at,
-        )
+        ),
+        4,
     ]
 
     response = asyncio.run(
@@ -108,10 +111,11 @@ def test_update_test_set_name_unchanged_is_noop():
     )
 
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 1
+    assert session.scalar.call_count == 2
     assert response.id == test_set_id
     assert response.name == test_set_name
     assert response.created_at == created_at
+    assert response.entry_count == 4
 
 
 def test_update_test_set_name_happy_path():
@@ -127,7 +131,8 @@ def test_update_test_set_name_happy_path():
             name="Old Test Set Name",
             created_at=created_at,
         ),
-        None
+        None,
+        4,
     ]
 
     response = asyncio.run(
@@ -137,7 +142,8 @@ def test_update_test_set_name_happy_path():
     )
 
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 2
+    assert session.scalar.call_count == 3
     assert response.id == test_set_id
     assert response.name == test_set_name
     assert response.created_at == created_at
+    assert response.entry_count == 4

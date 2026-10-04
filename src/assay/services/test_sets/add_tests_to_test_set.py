@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 
@@ -9,7 +10,12 @@ from assay.services.test_sets._common import (
     _check_tests_not_in_test_set_or_409,
     _find_test_set_or_404,
 )
-from assay.services.tests._common import _find_all_tests_with_details_or_404
+from assay.services.tests._common import (
+    _find_all_tests_with_details_or_404,
+    _frozen_test_type_assignments,
+)
+
+logger = logging.getLogger(__name__)
 
 
 async def add_tests_to_test_set_by_test_id(
@@ -24,8 +30,9 @@ async def add_tests_to_test_set_by_test_id(
     2. All requested test IDs must exist (404 otherwise).
     3. None of the requested tests may already be in the set (409 otherwise).
 
-    Each snapshot copies name, input, expected_output, model_output, and test_type_names
-    from the live test at the moment of this call. Subsequent edits to the originating
+    Each snapshot copies name, input, expected_output, model_output, and
+    test_type_assignments (including each assignment's config) from the live
+    test at the moment of this call. Subsequent edits to the originating
     test have no effect on the entry, though the entry itself can still be edited
     directly until it has been run at least once, after which it freezes. Duplicate
     test IDs in the request are silently deduplicated by the SQL IN clause — each test
@@ -59,7 +66,7 @@ async def add_tests_to_test_set_by_test_id(
             input=test.input,
             expected_output=test.expected_output,
             model_output=test.model_output,
-            test_type_names=[test_type.test_type_name for test_type in test.test_type_assignments],
+            test_type_assignments=_frozen_test_type_assignments(test),
             snapshot_at=datetime.now(),
         )
         for test in found_tests
@@ -75,4 +82,8 @@ async def add_tests_to_test_set_by_test_id(
     session.add_all(test_set_entries_model)
     await session.commit()
 
+    logger.info(
+        "Added %d entries to test set %s", len(test_set_entries_model), test_set_id,
+        extra={"test_set_id": test_set_id, "entry_count": len(test_set_entries_model)},
+    )
     return test_set_entries_ids

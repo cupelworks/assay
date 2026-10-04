@@ -34,6 +34,9 @@ def test_correct_mapping_of_test_fields():
 
     mock_assignment = MagicMock()
     mock_assignment.test_type_name = "ROUGE"
+    mock_assignment.label = "ROUGE"
+    mock_assignment.config = None
+    mock_assignment.answer_path = None
 
     mock_test.test_type_assignments = [mock_assignment]
 
@@ -53,7 +56,7 @@ def test_correct_mapping_of_test_fields():
     assert returned_test_case.input == mock_test.input
     assert returned_test_case.model_output == mock_test.model_output
     assert returned_test_case.expected_output == mock_test.expected_output
-    assert returned_test_case.test_type_names[0] == mock_assignment.test_type_name
+    assert returned_test_case.test_type_assignments[0].name == mock_assignment.test_type_name
 
 
 def test_no_test_types_returns_empty_list():
@@ -75,7 +78,7 @@ def test_no_test_types_returns_empty_list():
 
     test_cases = asyncio.run(get_all_created_tests(session))
 
-    assert test_cases.test_cases[0].test_type_names == []
+    assert test_cases.test_cases[0].test_type_assignments == []
 
 
 # --- get_test_case_by_id ---
@@ -112,4 +115,4 @@ def test_found_test_mapping():
     assert test_case.input == mock_test.input
     assert test_case.model_output == mock_test.model_output
     assert test_case.expected_output == mock_test.expected_output
-    assert test_case.test_type_names == []
+    assert test_case.test_type_assignments == []

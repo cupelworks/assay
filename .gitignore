@@ -25,10 +25,24 @@ htmlcov/
 .idea/
 .vscode/
 
+# Local scratch/debug scripts — not part of the project
+/scratch/
+
 # Database
 *.db
 *.db-shm
 *.db-wal
+*.db.bak
+!demo/assay_demo.db
+
+# Local Celery SQLite broker/result backend (worker's local default)
+celery_broker.sqlite
+celery_results.sqlite
+# Celery's default beat schedule file — created as a side effect of running
+# the worker/Flower locally
+celerybeat-schedule*
+# Flower's own persistent task-history DB, if run with --persistent=True
+flower.db
 
 # Env
 .env

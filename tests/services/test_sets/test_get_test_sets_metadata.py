@@ -37,6 +37,11 @@ def test_returns_correct_items():
             ),
         ]
     ))
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.tuples.return_value.all.return_value = [
+        (first_id, 5),
+        (second_id, 0),
+    ]
 
     response = asyncio.run(get_all_test_sets_metadata(session, offset, limit))
 
@@ -47,15 +52,19 @@ def test_returns_correct_items():
     assert response.items[0].id == first_id
     assert response.items[0].name == first_name
     assert response.items[0].created_at == first_created_at
+    assert response.items[0].entry_count == 5
     assert response.items[1].id == second_id
     assert response.items[1].name == second_name
     assert response.items[1].created_at == second_created_at
+    assert response.items[1].entry_count == 0
 
 
 def test_empty_table():
     session = AsyncMock()
     session.scalar.return_value = 0
     session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.tuples.return_value.all.return_value = []
 
     response = asyncio.run(get_all_test_sets_metadata(session))
 
@@ -69,17 +78,21 @@ def test_metadata_correctly_returned():
     test_set_id = uuid.uuid4()
 
     session = AsyncMock()
-    session.scalar.return_value = TestSetModel(
-        id=test_set_id,
-        name="Test Set",
-        created_at=datetime(2026, 1, 1),
-    )
+    session.scalar.side_effect = [
+        TestSetModel(
+            id=test_set_id,
+            name="Test Set",
+            created_at=datetime(2026, 1, 1),
+        ),
+        7,
+    ]
 
     response = asyncio.run(get_test_set_metadata_by_id(test_set_id, session))
 
     assert response.id == test_set_id
     assert response.name == "Test Set"
     assert response.created_at == datetime(2026, 1, 1)
+    assert response.entry_count == 7
 
 
 def test_test_set_not_found():

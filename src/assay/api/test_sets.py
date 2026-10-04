@@ -124,6 +124,7 @@ async def unlink_test_set_entry_from_a_test_set(
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Renamed regression suite",
                         "created_at": "2026-07-03T15:43:09.032480",
+                        "entry_count": 12,
                     }
                 }
             },
@@ -367,7 +368,13 @@ async def delete_a_test_set(
                                             "order #4471.",
                         "model_output": "Your refund for order #4471 has been "
                                          "issued.",
-                        "test_type_names": ["semantic_similarity", "toxicity"],
+                        "test_type_assignments": [
+                            {"name": "Cosine Similarity", "config": {"threshold": "0.75"}},
+                            {
+                                "name": "Toxicity",
+                                "config": {"rubric": "Flag anything that could read as rude."},
+                            },
+                        ],
                     }
                 }
             },
@@ -412,11 +419,42 @@ async def delete_a_test_set(
             },
         },
         422: {
-            "description": "One or more test type names are not in the catalogue.",
+            "description": (
+                "One or more test type names are not in the catalogue, an assignment "
+                "is missing a required config field, a config value isn't valid for "
+                "its field (a number out of range, a pattern that doesn't compile, "
+                "JSON, a JSONPath or a JSON Schema that doesn't parse) or an "
+                "`answer_path` doesn't parse, or a reference-required type "
+                "(e.g. Exact Match, ROUGE) is left with no `expected_output` once this "
+                "update is applied — considering both the request and whatever the "
+                "entry already had for any field this request doesn't touch."
+            ),
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Unknown test types: {'Invalid Type'}"
+                    "examples": {
+                        "unknown_test_type": {
+                            "summary": "Unknown test type name",
+                            "value": {"detail": "Unknown test types: ['Invalid Type']"},
+                        },
+                        "unparseable_value": {
+                            "summary": "A config value or an answer_path that isn't valid",
+                            "value": {"detail": (
+                                "'ROUGE' config field 'threshold' must be between 0 and 1; "
+                                "'Regex Match' config field 'pattern' is not a valid regex "
+                                "pattern: unterminated character set at position 5; "
+                                "'Contains' answer_path is not a valid JSONPath: Parse "
+                                "error near the end of string!"
+                            )},
+                        },
+                        "missing_expected_output": {
+                            "summary": "Reference-required type with no expected_output",
+                            "value": {
+                                "detail": (
+                                    "Test types ['Exact Match'] require a non-empty "
+                                    "expected_output, but none was provided"
+                                )
+                            },
+                        },
                     }
                 }
             },
@@ -438,10 +476,25 @@ async def update_a_test_set_entry(
     the originating test's state at snapshot time; `test_case_id` keeps pointing
     at the live test regardless.
 
-    Only fields explicitly set in the request body are written — omitted fields are
-    left unchanged. For `test_type_names` specifically, omitting it leaves the
-    snapshot list untouched, while `[]` clears it. Each provided name must exist in
-    the test types catalogue — a 422 is returned if any name is unrecognized.
+    Only fields included in the request body are written — omitted fields are left
+    unchanged:
+
+    | Field | Sent with a value | Sent as `null` | Left out |
+    |---|---|---|---|
+    | `expected_output`, `model_output` | set | **cleared** | unchanged |
+    | `name`, `input` | set | unchanged (neither can be empty) | unchanged |
+    | `test_type_assignments` | replaces the list (`[]` clears it) | unchanged | unchanged |
+
+    Each provided name must exist in
+    the test types catalogue and satisfy that type's required config fields — a 422
+    is returned otherwise. Considering the effective state after this update, a type
+    requiring a reference (e.g. Exact Match, ROUGE) also requires a non-empty
+    `expected_output` — a 422 is returned if that's not the case, even if this
+    particular request doesn't touch either field directly. An assignment's optional
+    `answer_path` (the part of the application's reply that check reads) must parse,
+    and every config value must be valid for its field — a number within its range, a
+    pattern that compiles, JSON, a JSONPath or a JSON Schema that parses: a 422
+    otherwise.
 
     Returns the full updated entry, so no follow-up GET is needed.
     """
@@ -466,7 +519,13 @@ async def update_a_test_set_entry(
                                             "order #4471.",
                         "model_output": "Your refund for order #4471 has been "
                                          "issued.",
-                        "test_type_names": ["semantic_similarity", "toxicity"],
+                        "test_type_assignments": [
+                            {"name": "Cosine Similarity", "config": {"threshold": "0.75"}},
+                            {
+                                "name": "Toxicity",
+                                "config": {"rubric": "Flag anything that could read as rude."},
+                            },
+                        ],
                     }
                 }
             },
@@ -507,7 +566,7 @@ async def get_single_test_set_entry(
     """Retrieve a single entry from a test set by its ID.
 
     Returns the entry's snapshot data (`name`, `input`, `expected_output`,
-    `model_output`, `test_type_names`) as it was at the moment the test was added to
+    `model_output`, `test_type_assignments`) as it was at the moment the test was added to
     the set — or as it was last edited via `PATCH`, if it has been edited and has no
     runs yet — along with `test_case_id`, which traces the entry back to the live
     test it was created from.
@@ -539,7 +598,13 @@ async def get_single_test_set_entry(
                                                     "order #4471.",
                                 "model_output": "Your refund for order #4471 has been "
                                                  "issued.",
-                                "test_type_names": ["semantic_similarity", "toxicity"],
+                                "test_type_assignments": [
+                                    {"name": "Cosine Similarity", "config": {"threshold": "0.75"}},
+                                    {
+                                        "name": "Toxicity",
+                                        "config": {"rubric": "Flag anything rude."},
+                                    },
+                                ],
                             },
                             {
                                 "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
@@ -552,7 +617,9 @@ async def get_single_test_set_entry(
                                                     "the email used at checkout?",
                                 "model_output": "I'm sorry, I can't process refunds "
                                                  "without an order number.",
-                                "test_type_names": ["semantic_similarity"],
+                                "test_type_assignments": [
+                                    {"name": "Cosine Similarity", "config": {"threshold": "0.75"}},
+                                ],
                             },
                         ],
                     }
@@ -590,7 +657,7 @@ async def get_all_test_set_entries(
 
     Each entry is a snapshot captured at the moment a test was added to the set via
     `POST /test-sets/{test_set_id}/entries` — `input`, `expected_output`,
-    `model_output`, and `test_type_names` reflect the test's state at that time, not
+    `model_output`, and `test_type_assignments` reflect the test's state at that time, not
     its current live state, and never re-sync from it. The entry itself can still be
     edited directly via `PATCH /test-sets/{test_set_id}/entries/{entry_id}` until it
     has been run at least once, after which it freezes. `test_case_id` traces the
@@ -670,7 +737,7 @@ async def add_tests_to_test_set(
     """Snapshot one or more tests into a test set.
 
     Each test in the request body is copied into an entry that captures `name`,
-    `input`, `expected_output`, `model_output`, and `test_type_names` at the
+    `input`, `expected_output`, `model_output`, and `test_type_assignments` at the
     moment this endpoint is called. Subsequent edits to the originating test have
     no effect on the entry — but the entry itself can still be edited directly via
     `PATCH /test-sets/{test_set_id}/entries/{entry_id}` until it has been run at
@@ -698,6 +765,7 @@ async def add_tests_to_test_set(
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Regression suite",
                         "created_at": "2026-07-03T15:43:09.032480",
+                        "entry_count": 12,
                     }
                 }
             },
@@ -706,7 +774,7 @@ async def add_tests_to_test_set(
             "description": "No test set exists with the given ID.",
             "content": {
                 "application/json": {
-                    "example": {"detail": "Test set with id <example-id> not found"},
+                    "example": {"detail": "Test set with ID '<test_set_id>' not found"},
                     "schema": {
                         "type": "object",
                         "properties": {"detail": {"type": "string"}},
@@ -724,7 +792,8 @@ async def get_single_test_set_metadata(
 ) -> TestSetMetadata: # pragma: no cover
     """Retrieve metadata for a single test set by its ID.
 
-    Returns the test set's `id`, `name`, and `created_at` timestamp.
+    Returns the test set's `id`, `name`, `created_at` timestamp, and `entry_count`
+    (the number of entries currently in the set).
     """
     return await get_test_set_metadata_by_id(test_set_id, session)
 
@@ -745,11 +814,13 @@ async def get_single_test_set_metadata(
                                 "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                                 "name": "Regression suite",
                                 "created_at": "2026-07-03T15:43:09.032480",
+                                "entry_count": 12,
                             },
                             {
                                 "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                 "name": "Smoke tests",
                                 "created_at": "2026-07-03T16:00:00.000000",
+                                "entry_count": 4,
                             },
                         ],
                     }
@@ -768,7 +839,8 @@ async def get_test_sets_metadata(
 ) -> PaginatedTestSetMetadataResponse: # pragma: no cover
     """List all test sets with their metadata, paginated.
 
-    Returns each test set's `id`, `name`, and `created_at` timestamp.
+    Returns each test set's `id`, `name`, `created_at` timestamp, and `entry_count`
+    (the number of entries currently in the set).
     Use `offset` and `limit` to page through results. The response includes `total`
     so the client can calculate the number of pages.
     """

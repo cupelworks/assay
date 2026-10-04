@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from assay.models import TestSetEntryModel
+from assay.schemas import TestTypeAssignment
 from assay.services import get_test_set_linked_test_by_entry_id, get_test_sets_linked_tests
 
 _PATCH_FIND_TEST_SET = "assay.services.test_sets.get_test_sets_entries._find_test_set_or_404"
@@ -38,7 +39,10 @@ def test_returns_correct_items():
     first_input = "First Input"
     first_expected_output = "First Expected Output"
     first_model_output = "First Model Output"
-    first_test_type_names = ["semantic_similarity", "toxicity"]
+    first_test_type_assignments = [
+        {"name": "Cosine Similarity", "config": None},
+        {"name": "Toxicity", "config": {"rubric": "Flag anything rude."}},
+    ]
 
     second_test_set_entry_id = uuid.uuid4()
     second_test_id = uuid.uuid4()
@@ -46,7 +50,7 @@ def test_returns_correct_items():
     second_input = "Second Input"
     second_expected_output = "Second Expected Output"
     second_model_output = None
-    second_test_type_names = ["exact_match"]
+    second_test_type_assignments = [{"name": "Exact Match", "config": None}]
 
     session.scalars.return_value = MagicMock(all=MagicMock(return_value=[
         TestSetEntryModel(
@@ -57,7 +61,7 @@ def test_returns_correct_items():
             input=first_input,
             expected_output=first_expected_output,
             model_output=first_model_output,
-            test_type_names=first_test_type_names,
+            test_type_assignments=first_test_type_assignments,
         ),
         TestSetEntryModel(
             id=second_test_set_entry_id,
@@ -67,7 +71,7 @@ def test_returns_correct_items():
             input=second_input,
             expected_output=second_expected_output,
             model_output=second_model_output,
-            test_type_names=second_test_type_names,
+            test_type_assignments=second_test_type_assignments,
         )
     ]))
     
@@ -85,7 +89,9 @@ def test_returns_correct_items():
     assert response.items[0].input == first_input
     assert response.items[0].expected_output == first_expected_output
     assert response.items[0].model_output == first_model_output
-    assert response.items[0].test_type_names == first_test_type_names
+    assert response.items[0].test_type_assignments == [
+        TestTypeAssignment(**item) for item in first_test_type_assignments
+    ]
 
     assert response.items[1].id == second_test_set_entry_id
     assert response.items[1].test_case_id.id == second_test_id
@@ -93,7 +99,9 @@ def test_returns_correct_items():
     assert response.items[1].input == second_input
     assert response.items[1].expected_output == second_expected_output
     assert response.items[1].model_output is None
-    assert response.items[1].test_type_names == second_test_type_names
+    assert response.items[1].test_type_assignments == [
+        TestTypeAssignment(**item) for item in second_test_type_assignments
+    ]
 
     
 def test_empty_test_set():
@@ -151,7 +159,10 @@ def test_returns_correct_entry():
     found_input = "Input"
     found_expected_output = None
     found_model_output = "Model Output"
-    found_test_type_names = ["Exact Match", "ROUGE"]
+    found_test_type_assignments = [
+        {"name": "Exact Match", "config": None},
+        {"name": "ROUGE", "config": None},
+    ]
 
     session = AsyncMock()
     session.scalar.return_value = TestSetEntryModel(
@@ -162,7 +173,7 @@ def test_returns_correct_entry():
         input=found_input,
         expected_output=found_expected_output,
         model_output=found_model_output,
-        test_type_names=found_test_type_names,
+        test_type_assignments=found_test_type_assignments,
     )
 
     with patch(_PATCH_FIND_TEST_SET):
@@ -174,5 +185,7 @@ def test_returns_correct_entry():
     assert response.input == found_input
     assert response.expected_output is None
     assert response.model_output == found_model_output
-    assert response.test_type_names == found_test_type_names
+    assert response.test_type_assignments == [
+        TestTypeAssignment(**item) for item in found_test_type_assignments
+    ]
 

@@ -16,6 +16,8 @@ def test_test_plans_metadata_total_none_defaults_to_zero():
     session = AsyncMock()
     session.scalar.return_value = None
     session.scalars.return_value = MagicMock(all=MagicMock(return_value=[]))
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.tuples.return_value.all.return_value = []
 
     response = asyncio.run(get_all_test_plans_metadata(session))
 
@@ -43,6 +45,10 @@ def test_test_plans_metadata_happy_path():
         )
     ]
     session.scalars.return_value = MagicMock(all=MagicMock(return_value=existing_test_plans))
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.tuples.return_value.all.return_value = [
+        (existing_test_plans[0].id, 3),
+    ]
 
     response = asyncio.run(get_all_test_plans_metadata(session, 1, 2))
 
@@ -51,12 +57,19 @@ def test_test_plans_metadata_happy_path():
     assert response.total == 2
     assert response.offset == 1
     assert response.limit == 2
-    assert response.items == [TestPlanMetadata(
-        id=test_plan.id,
-        name=test_plan.name,
-        created_at=test_plan.created_at,
-    )
-        for test_plan in existing_test_plans
+    assert response.items == [
+        TestPlanMetadata(
+            id=existing_test_plans[0].id,
+            name=existing_test_plans[0].name,
+            created_at=existing_test_plans[0].created_at,
+            linked_set_count=3,
+        ),
+        TestPlanMetadata(
+            id=existing_test_plans[1].id,
+            name=existing_test_plans[1].name,
+            created_at=existing_test_plans[1].created_at,
+            linked_set_count=0,
+        ),
     ]
 
 # --- get_test_plan_metadata_by_id() ---
@@ -81,15 +94,19 @@ def test_test_plan_metadata_happy_path():
     created_at = datetime.now()
 
     session = AsyncMock()
-    session.scalar.return_value = TestPlanModel(
-        id=test_plan_id,
-        name=test_plan_name,
-        created_at=created_at,
-    )
+    session.scalar.side_effect = [
+        TestPlanModel(
+            id=test_plan_id,
+            name=test_plan_name,
+            created_at=created_at,
+        ),
+        6,
+    ]
 
     response = asyncio.run(get_test_plan_metadata_by_id(test_plan_id, session))
 
-    session.scalar.assert_called_once()
+    assert session.scalar.call_count == 2
     assert response.id == test_plan_id
     assert response.name == test_plan_name
     assert response.created_at == created_at
+    assert response.linked_set_count == 6

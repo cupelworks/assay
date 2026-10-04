@@ -107,9 +107,9 @@ def test_happy_path_executes_delete_and_commits():
 
 
 def test_unlinking_a_run_having_test_set_does_not_raise_and_leaves_test_runs_untouched():
-    """Regression test for basic_api_implementation/dev_notes.md note 4: unlinking a test set from a
-    plan is unconditional — allowed even if TestRunModel rows already exist
-    against that test set via this plan (test_plan_execution_id). There is
+    """Regression test: unlinking a test set from a plan is unconditional —
+    allowed even if TestRunModel rows already exist against that test set
+    via this plan (test_plan_execution_id). There is
     no runs-history guard anywhere in this function's guard chain (only the
     three patched above run at all), so a test set with run history unlinks
     exactly the same way an untouched one does — no raise.

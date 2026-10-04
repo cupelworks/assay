@@ -304,6 +304,7 @@ async def add_test_sets_to_a_test_plan(
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Renamed regression plan",
                         "created_at": "2026-07-03T15:43:09.032480",
+                        "linked_set_count": 3,
                     }
                 }
             },
@@ -395,6 +396,7 @@ async def update_a_test_plan_metadata(
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                                     "name": "Regression suite",
                                     "created_at": "2026-07-03T15:43:09.032480",
+                                    "entry_count": 12,
                                 },
                             },
                             {
@@ -403,6 +405,7 @@ async def update_a_test_plan_metadata(
                                     "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                     "name": "Smoke tests",
                                     "created_at": "2026-07-03T16:00:00.000000",
+                                    "entry_count": 4,
                                 },
                             },
                         ],
@@ -434,9 +437,9 @@ async def get_all_test_sets_metadata_in_a_test_plan(
 
     Each item is an entry linking the test plan to one of its test sets: `id` is
     the entry's own identifier (the plan-to-set link, not the test set's), and
-    `test_set` embeds that test set's `id`, `name`, and `created_at`. Use the
-    embedded `test_set.id` to fetch the snapshotted tests inside that set via
-    `GET /test-sets/{test_set_id}/entries`.
+    `test_set` embeds that test set's `id`, `name`, `created_at`, and `entry_count`.
+    Use the embedded `test_set.id` to fetch the snapshotted tests inside that set
+    via `GET /test-sets/{test_set_id}/entries`.
 
     Results are ordered by the linked test set's `name`, with its `id` as a
     tiebreaker, so pagination is stable across pages even when multiple test sets
@@ -459,6 +462,7 @@ async def get_all_test_sets_metadata_in_a_test_plan(
                         "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Regression plan",
                         "created_at": "2026-07-03T15:43:09.032480",
+                        "linked_set_count": 3,
                     }
                 }
             },
@@ -482,7 +486,8 @@ async def get_single_test_plan_metadata(
 ) -> TestPlanMetadata: # pragma: no cover
     """Retrieve metadata for a single test plan.
 
-    Returns the test plan's `id`, `name`, and `created_at` timestamp.
+    Returns the test plan's `id`, `name`, `created_at` timestamp, and
+    `linked_set_count` (the number of test sets currently linked to the plan).
     """
     return await get_test_plan_metadata_by_id(test_plan_id, session)
 
@@ -503,11 +508,13 @@ async def get_single_test_plan_metadata(
                                 "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                                 "name": "Regression plan",
                                 "created_at": "2026-07-03T15:43:09.032480",
+                                "linked_set_count": 3,
                             },
                             {
                                 "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                 "name": "Smoke plan",
                                 "created_at": "2026-07-03T16:00:00.000000",
+                                "linked_set_count": 1,
                             },
                         ],
                     }
@@ -525,7 +532,8 @@ async def get_test_plans_metadata(
 ) -> PaginatedTestPlanMetadataResponse: # pragma: no cover
     """List all test plans with their metadata, paginated.
 
-    Returns each test plan's `id`, `name`, and `created_at` timestamp.
+    Returns each test plan's `id`, `name`, `created_at` timestamp, and
+    `linked_set_count` (the number of test sets currently linked to the plan).
     Use `offset` and `limit` to page through results. The response includes `total`
     so the client can calculate the number of pages.
     """

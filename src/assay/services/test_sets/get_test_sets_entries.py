@@ -64,7 +64,7 @@ async def get_test_sets_linked_tests(
                 input=test.input,
                 expected_output=test.expected_output,
                 model_output=test.model_output,
-                test_type_names=test.test_type_names,
+                test_type_assignments=test.test_type_assignments,
             )
             for test in found
         ]
@@ -99,5 +99,5 @@ async def get_test_set_linked_test_by_entry_id(
         input=found.input,
         expected_output=found.expected_output,
         model_output=found.model_output,
-        test_type_names=found.test_type_names
+        test_type_assignments=found.test_type_assignments,
     )

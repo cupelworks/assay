@@ -22,6 +22,7 @@ def _make_test(
         expected_output: str | None = "expected",
         model_output: str | None = "actual",
         type_names: list[str] | None = None,
+        type_configs: dict[str, dict | None] | None = None,
 ) -> MagicMock:
     test = MagicMock()
     test.id = uuid.uuid4()
@@ -33,6 +34,9 @@ def _make_test(
     for type_name in (type_names or []):
         assignment = MagicMock()
         assignment.test_type_name = type_name
+        assignment.label = type_name
+        assignment.config = (type_configs or {}).get(type_name)
+        assignment.answer_path = None
         assignments.append(assignment)
     test.test_type_assignments = assignments
     return test
@@ -145,9 +149,13 @@ def test_snapshot_fields_copied_correctly():
     assert entry.test_set_id == test_set_id
 
 
-def test_type_names_extracted_correctly():
-    # test_type_names must be built from test_type_assignments, not stored UUIDs
-    test = _make_test(type_names=["accuracy", "hallucination"])
+def test_type_assignments_extracted_correctly():
+    # test_type_assignments must be built from the live test's own
+    # test_type_assignments relationship (name + config), not stored UUIDs
+    test = _make_test(
+        type_names=["Regex Match", "Hallucination"],
+        type_configs={"Regex Match": {"pattern": "^\\d+$"}},
+    )
     test_set_id = uuid.uuid4()
     session = AsyncMock()
 
@@ -159,7 +167,13 @@ def test_type_names_extracted_correctly():
         ))
 
     entry = session.add_all.call_args[0][0][0]
-    assert entry.test_type_names == ["accuracy", "hallucination"]
+    assert entry.test_type_assignments == [
+        # in label order, not the order the test lists them in
+        {"name": "Hallucination", "label": "Hallucination", "config": None,
+         "answer_path": None},
+        {"name": "Regex Match", "label": "Regex Match", "config": {"pattern": "^\\d+$"},
+         "answer_path": None},
+    ]
 
 
 def test_session_add_all_called_with_orm_models():

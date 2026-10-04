@@ -7,7 +7,6 @@ import pytest
 from fastapi import HTTPException
 
 from assay.schemas import DataSetRowSchema
-from assay.services.datasets._common import _check_name_unique
 from assay.services.datasets.upload_full_dataset import (
     _build_dataset_model,
     _build_response,

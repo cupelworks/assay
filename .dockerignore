@@ -12,7 +12,7 @@ tests/
 dist/
 build/
 .gitignore
-README.md
 CLAUDE.md
 Dockerfile
+Dockerfile.worker
 .dockerignore

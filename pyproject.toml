@@ -1,8 +1,8 @@
 [project]
 name = "assay"
-version = "0.9.0"
-authors = ["francescocampanile96@gmail.com"]
-description = "Evaluation toolkit for GenAI-powered applications: NLP metrics, LLM-as-judge, and statistical reporting."
+version = "1.2.0"
+authors = [{ name = "Francesco Campanile", email = "francescocampanile96@gmail.com" }]
+description = "Test how a GenAI-powered application behaves: score its outputs with deterministic checks, NLP metrics and LLM-as-judge verdicts, organise cases into test sets and plans, and keep a reproducible record of every run."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -15,6 +15,19 @@ dependencies = [
     "alembic>=1.13",                           # Database migration tool — tracks schema changes over time
     "asyncpg>=0.30",                           # Async PostgreSQL driver — used in prod via postgresql+asyncpg:// URLs
     "prometheus-fastapi-instrumentator>=7.0",  # Prometheus /metrics endpoint and request instrumentation
+    "celery[redis]>=5.4",                      # API dispatches execute_run via a producer-only send_task() call
+                                                # (services/runs/_common.py) — never imports the worker's task or
+                                                # evaluator modules, see docs/version_1/run_execution/dev_notes.md notes 10-11
+    "jsonpath-ng>=1.6",                        # Validates the application-under-test output path when settings are
+                                                # saved (schemas/settings.py) — the worker also reads the answer with it
+    "regex>=2024.0",                           # Regex Match's engine (worker/evaluators/engines/regex.py): a drop-in
+                                                # for the stdlib `re` with a per-call timeout, so a catastrophically
+                                                # backtracking pattern fails that one check instead of hanging a worker
+                                                # thread. The API compiles a pattern with it when a check is assigned
+                                                # (services/tests/_common.py): the stdlib's syntax differs slightly
+    "jsonschema>=4.18",                        # Matches JSON Schema's engine (worker/evaluators/engines/json_check.py),
+                                                # any draft the schema declares; the API checks a schema is valid with it
+                                                # when the check is assigned
 ]
 
 [project.optional-dependencies]
@@ -24,12 +37,35 @@ dev = [
     "httpx>=0.27",      # Async HTTP client used by FastAPI's TestClient in tests
     "ruff>=0.7",        # Linter and formatter
     "aiosqlite>=0.20",  # Async SQLite driver — local dev only (prod uses asyncpg)
+    "flower>=2.0",      # Web dashboard for Celery task/worker history — celery -A assay.worker flower
+    "rouge-score>=0.1.2", # The worker's ROUGE engine (see the nlp extra) — the test suite
+                          # imports the evaluator engines, so it needs it too
+    "sacrebleu>=2.4",   # Same reason: the worker's BLEU engine (see the nlp extra)
+    "nltk>=3.9",        # Same reason: the worker's METEOR engine (see the nlp extra); its
+                        # scoring tests skip unless WordNet is downloaded
 ]
-anthropic = [
-    "anthropic>=0.28",  # Anthropic Messages API client (used by AnthropicClient in llm.py)
+nlp = [
+    "rouge-score>=0.1.2",  # ROUGE (worker/evaluators/engines/rouge.py): Google's reference
+                           # implementation; imported only when a ROUGE check runs, so a worker
+                           # without this extra fails just that check, with the reason
+    "sacrebleu>=2.4",      # BLEU (worker/evaluators/engines/bleu.py): sentence-level BLEU with
+                           # smoothing; imported only when a BLEU check runs, likewise
+    "nltk>=3.9",           # METEOR (worker/evaluators/engines/meteor.py), likewise. Needs NLTK's
+                           # WordNet data too, downloaded separately:
+                           # python -m nltk.downloader wordnet
+    "sentence-transformers>=3.0",  # Cosine Similarity (engines/embedding_cosine.py), on CPU
+    "transformers>=4.41",  # BERTScore (engines/bertscore.py): the reference algorithm on a
+                           # BERT-style model, on CPU
+    "torch>=2.2",          # Both, through the two above. The worker image installs the CPU-only
+                           # build; the models are Hugging Face downloads (worker/evaluators/
+                           # models.py), cached under HF_HOME
 ]
-openai = [
-    "openai>=1.35",  # OpenAI Chat Completions client (used by OpenAIClient in llm.py)
+worker = [
+    "httpx>=0.27",           # The adapter that calls the application under test (worker/target.py)
+    "psycopg2-binary>=2.9",  # Sync PostgreSQL driver for assay.worker.db — the worker's tasks use a
+                             # sync SQLAlchemy session (see docs/version_1/run_execution/dev_notes.md note 4),
+                             # never asyncpg. Only needed against production Postgres; SQLite's sync
+                             # driver is the stdlib, nothing extra to install for local dev.
 ]
 
 [build-system]
@@ -44,8 +80,14 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+# G / LOG: logging call conventions — %-style lazy formatting (no f-strings),
+# logger.exception() inside except blocks, no logging.getLogger(__file__), ...
+select = ["E", "F", "I", "UP", "B", "SIM", "G", "LOG"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "slow: scores with the real embedding models (the nlp extra, and a download the first time); run with pytest -m slow",
+]
+addopts = "-m 'not slow'"

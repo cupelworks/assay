@@ -140,7 +140,7 @@ def test_delete_entries_happy_path():
             input="Test Set Entry Input",
             expected_output="Test Set Entry Expected Output",
             model_output="Test Set Entry Model Output",
-            test_type_names=["ROUGE"],
+            test_type_assignments=[{"name": "ROUGE", "config": None}],
             snapshot_at=datetime.now().astimezone(),
         ),
         TestSetEntryModel(
@@ -151,7 +151,7 @@ def test_delete_entries_happy_path():
             input="Test Set Entry Input",
             expected_output="Test Set Entry Expected Output",
             model_output="Test Set Entry Model Output",
-            test_type_names=["ROUGE"],
+            test_type_assignments=[{"name": "ROUGE", "config": None}],
             snapshot_at=datetime.now().astimezone(),
         ),
     ]
