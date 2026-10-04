@@ -25,7 +25,7 @@ from assay.services.statistics._batches import (
 )
 from assay.services.statistics._comparisons import describe_many
 from assay.services.statistics.catalogue import _invalid, load_entry, resolve_parameters
-from assay.services.statistics.compare import compare
+from assay.services.statistics.compare import compare, outcome
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ async def create_comparison(request: ComparisonRequest,
         test_plan_id=batch_a.test_plan_id, statistical_test=chosen.id,
         engine=chosen.engine.id.value,
         parameters=parameters, note=(request.note or "").strip() or None,
-        result=result.model_dump(mode="json"),
+        result=result.model_dump(mode="json"), outcome=outcome(result.verdicts).value,
     )
     session.add(comparison)
     await session.commit()

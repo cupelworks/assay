@@ -147,10 +147,13 @@ from assay.schemas.holdings import (
     TestSetHolding,
 )
 from assay.schemas.listing import (
+    BatchFacets,
+    ComparisonFacets,
     DatasetFacets,
     DatasetSort,
     RowRange,
     RunFilter,
+    ScopeCounts,
     ScopeSort,
     TestFacets,
     TestPlanFacets,
@@ -318,6 +321,9 @@ __all__ = [
     "ScopeSort",
     "TestSort",
     "VerdictFilter",
+    "BatchFacets",
+    "ComparisonFacets",
+    "ScopeCounts",
     "DatasetFacets",
     "TestFacets",
     "TestPlanFacets",

@@ -167,5 +167,8 @@ class StatisticalComparisonModel(Base):
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     result: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # its one overall answer (ComparisonOutcome's value), read off `result`'s
+    # verdicts when it's created, a column so the list can filter and count by it
+    outcome: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now().astimezone())

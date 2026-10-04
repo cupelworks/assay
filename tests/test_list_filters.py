@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import update
 
 from assay.models import TestRunModel, TestStatus
+from tests.facet_checks import facets_agree_with_the_list
 
 GOOD = [{"name": "Contains", "label": "Says answer", "config": {"substring": "answer"}}]
 BAD = [{"name": "Contains", "label": "Says refund", "config": {"substring": "refund"}}]
@@ -214,17 +215,7 @@ def test_an_unknown_filter_value_or_sort_is_a_422(db, world):
 # --- facets: each count is what the list gives when filtered by that value ---
 
 def _facets_agree_with_the_list(db, path, **chosen):
-    facets = _ok(db.client.get(f"{path}/facets", params=chosen))
-    checked = 0
-    for facet, counts in facets.items():
-        if counts is None:
-            continue
-        others = {name: value for name, value in chosen.items() if name != facet}
-        for value, count in counts.items():
-            assert _total(db, path, **others, **{facet: value}) == count, (
-                facet, value, count)
-            checked += 1
-    return checked
+    return facets_agree_with_the_list(db.client, path, **chosen)
 
 
 def test_every_facet_count_is_the_lists_total_for_that_value(db, world):

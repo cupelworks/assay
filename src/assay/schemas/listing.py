@@ -98,3 +98,22 @@ class DatasetFacets(BaseModel):
     rows: Counts = Field(description="By row count: `0`, `1-10`, `11-100`, `101+` (`rows`'s "
                                      "values).")
     created: Counts | None = Field(default=None, description=_CREATED)
+
+
+class ScopeCounts(BaseModel):
+    """Statistics within the filters, counted by the test, set or plan they ran:
+    only those with some, keyed by id."""
+    test_id: Counts = Field(description="By standalone test id.")
+    test_set_id: Counts = Field(description="By test set id.")
+    test_plan_id: Counts = Field(description="By test plan id.")
+
+
+class BatchFacets(ScopeCounts):
+    """The batches within the filters, each facet counted within every other
+    filter chosen, but not its own."""
+    status: Counts = Field(description="By status, every status present (0 when none).")
+
+
+class ComparisonFacets(ScopeCounts):
+    """The comparisons within the filters, counted like the batches."""
+    outcome: Counts = Field(description="By outcome, every outcome present (0 when none).")
