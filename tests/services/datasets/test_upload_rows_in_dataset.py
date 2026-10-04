@@ -25,39 +25,42 @@ def test_upload_new_rows_in_existing_dataset_404():
     assert e.value.detail == f"Dataset with id {request.id} not found"
 
 
-def test_upload_new_rows_in_existing_dataset_session():
-    request = MagicMock()
+def _rows(n: int) -> list[DataSetRowSchema]:
+    return [DataSetRowSchema(prompt=f"p{i}", model_output="m", expected_output="e")
+            for i in range(n)]
 
+
+def _add(highest: int | None, rows: list[DataSetRowSchema]) -> AsyncMock:
+    """Add rows to a dataset whose highest row number is `highest`; the session."""
+    request = MagicMock(rows=rows)
     session = AsyncMock()
-
+    session.add_all = MagicMock()
+    # first the dataset's lookup, then its highest row number
+    session.scalar.side_effect = [MagicMock(id=uuid.uuid4()), highest]
     with patch("assay.services.datasets.upload_rows_in_dataset._build_uploaded_dataset_info"):
         asyncio.run(upload_new_rows_in_existing_dataset(request, session))
+    return session
 
-    session.refresh.assert_called_once()
+
+def test_upload_new_rows_in_existing_dataset_session():
+    session = _add(4, _rows(1))
+
+    session.refresh.assert_not_called()  # the dataset's existing rows are never loaded
     session.flush.assert_called_once()
     session.commit.assert_called_once()
 
 
-def test_upload_new_rows_in_existing_dataset_rows_added():
-    request = MagicMock()
-    request.rows = [
-        DataSetRowSchema(
-            prompt="p",
-            model_output="m",
-            expected_output="e")
-        for _ in range(3)
-    ]
+def test_added_rows_are_numbered_after_the_highest():
+    session = _add(4, _rows(3))
 
-    dataset = MagicMock()
-    dataset.rows = []
+    added = session.add_all.call_args[0][0]
+    assert [(row.input, row.position) for row in added] == [("p0", 5), ("p1", 6), ("p2", 7)]
 
-    session = AsyncMock()
-    session.scalar.return_value = dataset
 
-    with patch("assay.services.datasets.upload_rows_in_dataset._build_uploaded_dataset_info"):
-        asyncio.run(upload_new_rows_in_existing_dataset(request, session))
+def test_rows_added_to_an_empty_dataset_start_at_1():
+    session = _add(None, _rows(2))
 
-    assert len(dataset.rows) == 3
+    assert [row.position for row in session.add_all.call_args[0][0]] == [1, 2]
 
 
 # --- _build_uploaded_dataset_info ---

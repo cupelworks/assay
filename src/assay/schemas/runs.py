@@ -15,6 +15,7 @@ from assay.schemas import (
     TestSetEntryID,
     TestSetID,
 )
+from assay.schemas._common import RunCounts
 from assay.schemas.settings import JudgeProvider, JudgeSettings
 
 
@@ -358,6 +359,49 @@ class BatchMembership(BaseModel):
     )
 
 
+class RunChecks(BaseModel):
+    """A run's checks counted: how many met their criterion out of how many the
+    run asked, and the labels of those not met."""
+    met: int = Field(description="Checks that passed.")
+    total: int = Field(description="Checks the run asked (a check a statistical batch left "
+                                   "out isn't asked, so it isn't counted).")
+    not_met: list[str] = Field(description="The labels of the checks that failed or errored, "
+                                           "in label order.")
+
+
+class RunSummary(BaseModel):
+    """What a list shows of a run without opening it."""
+    test_name: str = Field(description="The name of the test the run asked, as frozen when "
+                                       "the run was created: its standalone copy's, or its "
+                                       "set entry's.")
+    checks: RunChecks | None = Field(description="Its checks counted, once it ran: null while "
+                                                 "Pending or Running, and for NotRan.")
+    error: str | None = Field(description="Why it couldn't run, for NotRan; null otherwise.")
+
+
+class ExecutionScopeName(BaseModel):
+    name: str = Field(description="The name of the test set or test plan it ran.")
+
+
+class ExecutionRunCounts(BaseModel):
+    runs: RunCounts = Field(description="The execution's runs by status, every status "
+                                        "present, 0 when none.")
+
+
+class RunSort(StrEnum):
+    newest = "newest"
+    oldest = "oldest"
+
+
+class ExecutionRunSort(StrEnum):
+    """`newest`: by creation, newest first. `worst_first`: NotRan, Red, Amber,
+    Green, Running, Pending, then by test name. `name`: by test name. Names
+    are compared ignoring case, then by id."""
+    newest = "newest"
+    worst_first = "worst_first"
+    name = "name"
+
+
 class StandaloneRunCreationMetadata(BatchMembership, RunID, RunStatus, RunCreationDate):
     test_case_id: TestCaseID = Field(
         ...,
@@ -435,7 +479,7 @@ class TestSetReplayedExecutionCreationMetadata(TestSetLiveRunCreationMetadata):
 
 
 class TestSetExecutionMetadata(BatchMembership, TestSetExecutionID,
-                               TestSetExecutionCreationDate):
+                               TestSetExecutionCreationDate, ExecutionRunCounts):
     test_set_id: TestSetID
     run_count: int = Field(
         ...,
@@ -466,8 +510,14 @@ class TestSetExecutionRunMetadata(BatchMembership, RunID, RunStatus, RunCreation
     test_set_execution_id: TestSetExecutionID
 
 
+class TestSetExecutionRunItem(TestSetExecutionRunMetadata, RunSummary):
+    output_source: OutputSource | None = Field(description="Where the answer it scored came "
+                                                           "from: `recorded` or `application`; "
+                                                           "null until it ran, and for NotRan.")
+
+
 class PaginatedTestSetExecutionRunMetadata(Pagination):
-    items: list[TestSetExecutionRunMetadata]
+    items: list[TestSetExecutionRunItem]
 
 
 class TestSetExecutionRunDetails(TestSetExecutionRunMetadata, RunResults, RunError,
@@ -538,7 +588,7 @@ class TestPlanReplayedExecutionCreationMetadata(TestPlanLiveRunCreationMetadata)
 
 
 class TestPlanExecutionMetadata(BatchMembership, TestPlanExecutionID,
-                                TestPlanExecutionCreationDate):
+                                TestPlanExecutionCreationDate, ExecutionRunCounts):
     test_plan_id: TestPlanID
     run_count: int = Field(
         ...,
@@ -570,8 +620,14 @@ class TestPlanExecutionRunMetadata(BatchMembership, RunID, RunStatus, RunCreatio
     test_plan_execution_id: TestPlanExecutionID
 
 
+class TestPlanExecutionRunItem(TestPlanExecutionRunMetadata, RunSummary):
+    output_source: OutputSource | None = Field(description="Where the answer it scored came "
+                                                           "from: `recorded` or `application`; "
+                                                           "null until it ran, and for NotRan.")
+
+
 class PaginatedTestPlanExecutionRunMetadata(Pagination):
-    items: list[TestPlanExecutionRunMetadata]
+    items: list[TestPlanExecutionRunItem]
 
 
 class TestPlanExecutionRunDetails(TestPlanExecutionRunMetadata, RunResults, RunError,
@@ -587,7 +643,12 @@ class RunOrigin(StrEnum):
     test_plan = "TestPlan"
 
 
-class RunMetadata(BatchMembership, RunID, RunStatus, RunCreationDate):
+class RunMetadata(BatchMembership, RunID, RunStatus, RunCreationDate, RunSummary):
+    scope_name: str | None = Field(
+        default=None,
+        description="The name of the test set or test plan whose execution produced the run; "
+                    "null for a standalone run.",
+    )
     origin: RunOrigin = Field(
         ...,
         description=(
@@ -601,8 +662,9 @@ class RunMetadata(BatchMembership, RunID, RunStatus, RunCreationDate):
     test_case_id: TestCaseID | None = Field(
         ...,
         description=(
-            'ID of the live test this run targets. Set only if `origin` is '
-            '`Standalone`; null otherwise.'
+            'ID of the test the run asked: the live test of a `Standalone` run, '
+            'and for a `TestSet` or `TestPlan` run the test its set entry was '
+            'copied from.'
         ),
     )
     test_set_entry_id: TestSetEntryID | None = Field(
@@ -651,12 +713,19 @@ class PaginatedRunMetadata(Pagination):
     items: list[RunMetadata]
 
 
+class RunFacets(BaseModel):
+    """The runs within the chosen filters, counted by status and by origin;
+    each counted within every other filter chosen, every value present."""
+    status: dict[str, int]
+    origin: dict[str, int]
+
+
 class ExecutionOrigin(StrEnum):
     test_set = "TestSet"
     test_plan = "TestPlan"
 
 
-class ExecutionMetadata(BatchMembership):
+class ExecutionMetadata(BatchMembership, ExecutionRunCounts, ExecutionScopeName):
     id: uuid.UUID = Field(
         ...,
         description=(
@@ -721,3 +790,33 @@ class ExecutionMetadata(BatchMembership):
 
 class PaginatedExecutionMetadata(Pagination):
     items: list[ExecutionMetadata]
+
+
+class ExecutionCheckNotMet(BaseModel):
+    run_id: uuid.UUID
+    test_name: str
+    label: str = Field(description="The check that failed or errored.")
+
+
+class ExecutionRunNotRan(BaseModel):
+    run_id: uuid.UUID
+    test_name: str
+    error: str | None = Field(description="Why it couldn't run.")
+    checks: int = Field(description="How many checks it would have asked (a check a "
+                                    "statistical batch left out isn't asked).")
+
+
+class ExecutionChecks(BaseModel):
+    """An execution's checks over its finished runs: how many were met, each
+    one not met with its run and test, and each run that couldn't run."""
+    met: int
+    not_met: list[ExecutionCheckNotMet]
+    not_ran: list[ExecutionRunNotRan]
+
+
+class TestSetExecutionDetails(TestSetExecutionMetadata, ExecutionScopeName):
+    checks: ExecutionChecks
+
+
+class TestPlanExecutionDetails(TestPlanExecutionMetadata, ExecutionScopeName):
+    checks: ExecutionChecks

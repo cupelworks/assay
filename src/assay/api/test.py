@@ -4,6 +4,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api._filters import (
+    CreatedEdges,
+    CreatedFrom,
+    CreatedTo,
+    Ids,
+    Limit,
+    Membership,
+    Offset,
+    Runs,
+    Verdicts,
+    search,
+)
+from assay.api._standing_examples import SCOPE_RAN, TEST_STANDING
 from assay.db import get_session
 from assay.models import TestTypes
 from assay.schemas import (
@@ -13,7 +26,11 @@ from assay.schemas import (
     CreateTestCaseResponse,
     ModifyTestCaseRequest,
     PaginatedTestCases,
+    PaginatedTestSetHoldings,
     TestCaseID,
+    TestCaseRead,
+    TestFacets,
+    TestSort,
     TestTypesSchema,
 )
 from assay.services import (
@@ -22,13 +39,70 @@ from assay.services import (
     delete_test_by_id,
     get_all_created_tests,
     get_test_case_by_id,
+    get_test_sets_holding_test,
     get_test_types_by_category,
     modify_test_by_id,
 )
+from assay.services.tests.get_tests import TestFilters, get_test_facets
 
 router = APIRouter(tags=["test"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def test_filters(
+        check_type: Annotated[list[str] | None, Query(
+            description="Only tests asking a check of one of these types (catalogue names).")
+        ] = None,
+        latest_verdict: Verdicts = None,
+        latest_run: Runs = None,
+        has_recorded_answer: Annotated[bool | None, Query(
+            description="Only tests with (true) or without (false) a recorded answer.")] = None,
+        in_test_set: Annotated[Membership, Query(
+            description="`any`: tests a set holds; `none`: tests no set holds; a set's id: "
+                        "tests that set holds. Repeatable.")] = None,
+        from_dataset: Annotated[Ids, Query(
+            description="Only tests made from one of these datasets' rows.")] = None,
+        created_from: CreatedFrom = None,
+        created_to: CreatedTo = None,
+        q: Annotated[list[str] | None, search("the test's name, input and checks' labels and "
+                                               "types")] = None,
+) -> TestFilters:
+    return TestFilters(check_type=check_type, latest_verdict=latest_verdict,
+                       latest_run=latest_run, has_recorded_answer=has_recorded_answer,
+                       in_test_set=in_test_set, from_dataset=from_dataset,
+                       created_from=created_from, created_to=created_to, q=q)
+
+
+TestFiltersDep = Annotated[TestFilters, Depends(test_filters)]
+
+
+@router.get(
+    path="/tests/facets",
+    summary="Count the tests within the filters by each filter's values",
+    responses={200: {"content": {"application/json": {"example": {
+        "check_type": {"Contains": 12, "Toxicity": 3},
+        "latest_verdict": {"Pending": 0, "Running": 0, "Passed": 2, "Failed": 1,
+                           "Inconclusive": 0, "Incomplete": 0, "NotRan": 0, "Done": 0,
+                           "none": 59},
+        "latest_run": {"Pending": 0, "Running": 0, "Green": 20, "Amber": 9, "Red": 3,
+                       "NotRan": 2, "never": 28},
+        "has_recorded_answer": {"true": 50, "false": 12},
+        "in_test_set": {"any": 31, "none": 31, "a1b2c3d4-e5f6-7890-abcd-ef1234567890": 12},
+        "from_dataset": {"28bec279-517a-42de-baf6-181041013202": 5},
+        "created": {"2026-10-04T00:00:00+02:00": 2, "2026-09-27T00:00:00+02:00": 10,
+                    "before": 52},
+    }}}}},
+    response_model=TestFacets,
+)
+async def get_tests_facets(session: SessionDep, filters: TestFiltersDep,
+                           created_edges: CreatedEdges = None) -> TestFacets:  # pragma: no cover
+    """The tests `GET /tests` would list with the same filters, counted by each
+    filter's values in one call: each facet within every other filter chosen,
+    but not its own, so picking `latest_run=Red` still counts every run status.
+    Every status is present (0 when none); ids appear when something has them.
+    `created` is counted by the edges sent (`created_edges`), null without."""
+    return await get_test_facets(session, filters, created_edges)
 
 
 @router.get(
@@ -501,6 +575,7 @@ async def update_test(
                             {"name": "ROUGE", "config": {"threshold": "0.8"}},
                             {"name": "BERTScore", "config": {"threshold": "0.8"}},
                         ],
+                        **TEST_STANDING,
                     }
                 }
             },
@@ -516,12 +591,12 @@ async def update_test(
             },
         },
     },
-    response_model=CreateTestCaseResponse,
+    response_model=TestCaseRead,
 )
 async def get_specific_test(
         test_case_id: uuid.UUID,
         session: SessionDep,
-) -> CreateTestCaseResponse: # pragma: no cover
+) -> TestCaseRead: # pragma: no cover
     """Retrieve a single test case by ID.
 
     Returns the test case with all fields and its assigned test type assignments.
@@ -550,6 +625,7 @@ async def get_specific_test(
                                     {"name": "ROUGE", "config": {"threshold": "0.8"}},
                                     {"name": "BERTScore", "config": {"threshold": "0.8"}},
                                 ],
+                                **TEST_STANDING,
                             }
                         ],
                         "total": 1,
@@ -564,16 +640,22 @@ async def get_specific_test(
 )
 async def get_all_tests(
         session: SessionDep,
-        offset: int = Query(default=0, description="Number of records to skip."),
-        limit: int = Query(default=100, description="Maximum number of records to return."),
-) -> PaginatedTestCases: # pragma: no cover
-    """Return a paginated list of all test cases.
-
-    Use `offset` and `limit` to page through results. The response always includes
-    `total` — the count of all tests in the database — so clients can determine
-    whether more pages exist.
-    """
-    return await get_all_created_tests(session, offset, limit)
+        filters: TestFiltersDep,
+        sort: Annotated[TestSort, Query(
+            description="`latest_activity` (the default: the newest of its latest run and "
+                        "latest batch, else its creation), `name` (ignoring case), "
+                        "`created` (newest first) or `dataset_row` (by the row each was made "
+                        "from, in row-number order, a dataset's together; tests made from no "
+                        "row last).")] = TestSort.latest_activity,
+        offset: Offset = 0,
+        limit: Limit = 100,
+) -> PaginatedTestCases:  # pragma: no cover
+    """List the tests within the filters, sorted and paged, each as it's read:
+    its content, and how it stands (`latest_batch`, `latest_run`, `has_runs`,
+    `copy_count`, `test_set_count`, where it came from). A filter given several
+    times means any of its values; different filters narrow together. `total`
+    counts every test within the filters."""
+    return await get_all_created_tests(session, filters, sort, offset, limit)
 
 
 @router.post(
@@ -762,14 +844,20 @@ async def create_test_manually(
 async def create_test_from_dataset(
         request: CreateTestCaseFromDatasetRequest,
         session: SessionDep) -> CreateTestCaseFromDatasetResponse:  # pragma: no cover
-    """Create test cases in bulk from all rows of an existing dataset.
+    """Create test cases in bulk from a dataset's rows: all of them, or only
+    `row_ids` (a row id that isn't one of the dataset's rows is a 422 naming
+    it), in row-number order; each test remembers its row (`dataset_row_id`).
 
-    Each row in the dataset becomes a separate test case, named "New Test <n>"
-    (dataset rows have no name of their own to reuse), numbered globally across
-    every test in the system — re-running this endpoint continues the numbering
-    from the highest "New Test <n>" that already exists, rather than restarting
-    at 1 and duplicating a name already in use. All created tests share the same
-    optional list of evaluation strategies (`test_type_assignments`).
+    `naming`: `numbered` (the default) names each "New Test <n>", numbered
+    globally across every test in the system, so re-running continues from the
+    highest "New Test <n>" that already exists; `prompt` names each after its
+    row's prompt, line breaks and runs of spaces made one space, and over 60
+    characters cut after the last whole word within the first 59 with "…"
+    appended. `recorded_answers`: `keep` (the default) gives each test its
+    row's model output as its recorded answer (a blank one means none);
+    `leave_out` gives none, so every run asks the application under test.
+    All created tests share the same optional list of evaluation strategies
+    (`test_type_assignments`).
 
     Each test copies its row's prompt, expected output and model output. A row whose
     `model_output` is blank (empty or only whitespace) makes a test with no recorded
@@ -859,3 +947,39 @@ async def delete_test(
     """
     await delete_test_by_id(request, session)
     return {}
+
+
+@router.get(
+    path="/tests/{test_case_id}/test-sets",
+    summary="List the test sets holding a copy of a test",
+    responses={
+        200: {"content": {"application/json": {"example": {
+            "total": 1, "offset": 0, "limit": 100, "unlinked_copies": 1,
+            "items": [{
+                "test_set": {
+                    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890", "name": "Support answers",
+                    "created_at": "2026-09-30T10:00:00", "entry_count": 12,
+                    "test_plan_count": 1, **SCOPE_RAN},
+                "entry": {"id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123", "has_runs": True,
+                          "matches_test": False},
+            }],
+        }}}},
+        404: {"description": "No test exists with the given ID.",
+              "content": {"application/json": {"example": {
+                  "detail": "Test with id <test_case_id> not found"}}}},
+    },
+    response_model=PaginatedTestSetHoldings,
+)
+async def get_test_sets_holding(
+        test_case_id: uuid.UUID,
+        session: SessionDep,
+        offset: Offset = 0,
+        limit: Limit = 100,
+) -> PaginatedTestSetHoldings:  # pragma: no cover
+    """The test sets holding a copy of this test, by name, each as the sets list
+    shows it, with its copy: `has_runs` (then it's frozen) and `matches_test`
+    (whether it still asks what the test asks now: the same input, expected
+    answer, recorded answer and checks; the name isn't compared).
+    `unlinked_copies` counts copies whose set link was removed: they're kept,
+    in no set, and still count in the test's `copy_count`."""
+    return await get_test_sets_holding_test(test_case_id, session, offset, limit)

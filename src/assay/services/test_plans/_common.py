@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import TestPlanEntryModel, TestPlanExecutionModel, TestPlanModel
-from assay.schemas import TestPlanName
+from assay.schemas import TestPlanMetadata, TestPlanName
+from assay.services._standing import count_by, plans_with_runs, scope_standing
 
 
 async def _check_unique_test_plan_name_or_409(
@@ -155,15 +156,21 @@ async def _check_test_plan_has_no_runs_or_409(
     Raises:
         HTTPException: 409 if any TestPlanExecutionModel references this plan.
     """
-    found = await session.scalar(
-        select(TestPlanExecutionModel.id)
-        .where(TestPlanExecutionModel.test_plan_id == test_plan_id)
-        .limit(1)
-    )
-
-    if found:
+    if await plans_with_runs(session, [test_plan_id]):
         raise HTTPException(
             status_code=409,
             detail=f"Test plan with ID '{test_plan_id}' has at least one run"
                    f", therefore it cannot be deleted"
         )
+
+
+async def _describe_test_plans(test_plans: list[TestPlanModel],
+                               session: AsyncSession) -> list[TestPlanMetadata]:
+    """Test plans as they're read: their linked sets counted, and how each stands."""
+    ids = [test_plan.id for test_plan in test_plans]
+    linked = await count_by(session, TestPlanEntryModel.test_plan_id, ids)
+    standing = await scope_standing(session, TestPlanExecutionModel, ids)
+    return [TestPlanMetadata(id=test_plan.id, name=test_plan.name,
+                             created_at=test_plan.created_at, linked_set_count=linked[test_plan.id],
+                             **standing[test_plan.id].model_dump())
+            for test_plan in test_plans]

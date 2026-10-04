@@ -36,15 +36,16 @@ def test_delete_blocked_when_entry_has_runs():
     test_set_id = uuid.uuid4()
 
     session = AsyncMock()
-    session.scalar.return_value = uuid.uuid4()
+    with_runs = AsyncMock(return_value={test_set_id})
 
     with patch("assay.services.test_sets.delete_test_set._find_test_set_or_404"), \
+        patch("assay.services.test_sets._common.sets_with_runs", new=with_runs), \
         pytest.raises(HTTPException) as e:
         asyncio.run(delete_test_set_by_id(test_set_id, session))
 
     session.delete.assert_not_called()
     session.commit.assert_not_called()
-    assert session.scalar.call_count == 1
+    with_runs.assert_awaited_once_with(session, [test_set_id])
     assert e.value.status_code == 409
     assert str(test_set_id) in str(e.value.detail)
 
@@ -59,13 +60,15 @@ def test_test_set_deleted():
     )
 
     session = AsyncMock()
-    session.scalar.side_effect = [test_set_to_delete, None]
+    session.scalar.side_effect = [test_set_to_delete]
 
-    asyncio.run(delete_test_set_by_id(test_set_id, session))
+    with patch("assay.services.test_sets._common.sets_with_runs",
+               new=AsyncMock(return_value=set())):
+        asyncio.run(delete_test_set_by_id(test_set_id, session))
 
     session.delete.assert_called_once_with(test_set_to_delete)
     session.commit.assert_called_once()
-    assert session.scalar.call_count == 2
+    assert session.scalar.call_count == 1
 
 # --- delete_test_set_entries_by_id() ---
 

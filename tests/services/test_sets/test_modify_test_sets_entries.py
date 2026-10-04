@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from assay.models import TestSetEntryModel, TestSetModel
 from assay.schemas import ModifyTestCaseRequest, TestTypeAssignment
 from assay.services import modify_entry_by_id
+from tests.services.standing_fakes import neutral_standing
 
 _PATCH_FIND_TEST_SET_OR_404 = "assay.services.test_sets.update_entry._find_test_set_or_404"
 _PATCH_FIND_TEST_SET_ENTRY_IN_SPECIFIC_TEST_SET_OR_404 = \
@@ -17,6 +18,13 @@ _PATCH_CHECK_TEST_SET_ENTRY_HAS_NO_RUNS_OR_409 = \
     "assay.services.test_sets.update_entry._check_test_set_entry_has_no_runs_or_409"
 _PATCH_APPLY_SCALAR_UPDATES = "assay.services.test_sets.update_entry._apply_scalar_updates"
 
+
+
+@pytest.fixture(autouse=True)
+def _neutral_standing():
+    """How entries stand is tested on a real database (tests/test_standing.py)."""
+    with neutral_standing():
+        yield
 
 def test_test_set_not_found():
     session = AsyncMock()
@@ -70,9 +78,10 @@ def test_test_set_entry_has_runs():
         created_at=datetime.now(),
     ), TestSetEntryModel(
         id=entry_id,
-    ), uuid.uuid4()]
+    )]
 
-    with pytest.raises(HTTPException) as e:
+    with patch("assay.services.test_sets._common.entries_with_runs",
+               new=AsyncMock(return_value={entry_id})), pytest.raises(HTTPException) as e:
         asyncio.run(
             modify_entry_by_id(
                 test_set_id, entry_id, MagicMock(), session
@@ -81,7 +90,7 @@ def test_test_set_entry_has_runs():
 
     assert e.value.status_code == 409
     assert f"Test entry with ID '{entry_id}' can't be modified" in str(e.value.detail)
-    assert session.scalar.call_count == 3
+    assert session.scalar.call_count == 2
 
 
 def test_invalid_test_type_assignment():

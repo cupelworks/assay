@@ -68,6 +68,8 @@ def test_build_dataset_model_multiple_rows():
 
     model_rows = _build_dataset_model("", data_rows).rows
     assert len(model_rows) == 3
+    # numbered from 1 in the file's order
+    assert [row.position for row in model_rows] == [1, 2, 3]
 
 
 # --- _raise_if_errors ---

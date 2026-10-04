@@ -4,9 +4,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import contains_eager
 
-from assay.models import TestPlanEntryModel, TestSetEntryModel, TestSetModel
-from assay.schemas import PaginatedTestPlanEntriesDetails, TestPlanEntryDetails, TestSetMetadata
+from assay.models import TestPlanEntryModel, TestSetModel
+from assay.schemas import PaginatedTestPlanEntriesDetails, TestPlanEntryDetails
 from assay.services.test_plans._common import _find_test_plan_by_id_or_404
+from assay.services.test_sets._common import _describe_test_sets
 
 
 async def get_all_test_plan_entries_metadata(
@@ -52,30 +53,10 @@ async def get_all_test_plan_entries_metadata(
         .limit(limit)
     )).all()
 
-    entry_counts = dict(
-        (await session.execute(
-            select(TestSetEntryModel.test_set_id, func.count(TestSetEntryModel.id))
-            .where(TestSetEntryModel.test_set_id.in_(
-                [entry.test_set.id for entry in found_entries]
-            ))
-            .group_by(TestSetEntryModel.test_set_id)
-        )).tuples().all()
-    )
+    test_sets = await _describe_test_sets([entry.test_set for entry in found_entries],
+                                          session)
 
     return PaginatedTestPlanEntriesDetails(
-        total=total,
-        offset=offset,
-        limit=limit,
-        items=[
-            TestPlanEntryDetails(
-                id=entry.id,
-                test_set=TestSetMetadata(
-                    id=entry.test_set.id,
-                    name=entry.test_set.name,
-                    created_at=entry.test_set.created_at,
-                    entry_count=entry_counts.get(entry.test_set.id, 0),
-                )
-            )
-            for entry in found_entries
-        ]
-    )
+        total=total, offset=offset, limit=limit,
+        items=[TestPlanEntryDetails(id=entry.id, test_set=test_set)
+               for entry, test_set in zip(found_entries, test_sets, strict=True)])

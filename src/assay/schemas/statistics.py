@@ -15,7 +15,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from assay.schemas._common import Pagination
+from assay.schemas._common import Pagination, RunCounts
 
 # ── shared vocabulary ────────────────────────────────────────────────────────
 
@@ -683,16 +683,6 @@ class BatchCallCount(BaseModel):
 class BatchCalls(BaseModel):
     application: BatchCallCount = Field(description="Calls to the application under test.")
     judge: BatchCallCount = Field(description="Calls to the judge model.")
-
-
-class RunCounts(BaseModel):
-    """Runs by status: every key always present, 0 when none."""
-    Pending: int = 0
-    Running: int = 0
-    Green: int = 0
-    Amber: int = 0
-    Red: int = 0
-    NotRan: int = 0
 
 
 class SeriesPoint(BaseModel):

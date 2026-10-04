@@ -4,9 +4,9 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import IN_PROGRESS_BATCH_STATUSES, BatchStatus, StatisticalBatchModel
+from assay.models import BatchStatus, StatisticalBatchModel
 from assay.schemas.statistics import BatchList, BatchStatusName
-from assay.services.statistics._batches import describe, refresh, scope_names
+from assay.services.statistics._batches import describe, refresh_in_progress, scope_names
 
 
 async def list_batches(session: AsyncSession, *, offset: int, limit: int,
@@ -23,11 +23,7 @@ async def list_batches(session: AsyncSession, *, offset: int, limit: int,
                           (StatisticalBatchModel.test_plan_id, test_plan_id)):
         if value is not None:
             scope.append(column == value)
-    in_progress = (await session.scalars(
-        select(StatisticalBatchModel)
-        .where(StatisticalBatchModel.status.in_(IN_PROGRESS_BATCH_STATUSES), *scope))).all()
-    for batch in in_progress:
-        await refresh(batch, session)
+    await refresh_in_progress(session, *scope)
 
     filters = list(scope)
     if status is not None:

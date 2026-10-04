@@ -13,7 +13,9 @@ from assay.schemas import (
     CreateTestCaseFromDatasetResponse,
     CreateTestCaseRequest,
     CreateTestCaseResponse,
+    RecordedAnswers,
     TestCaseID,
+    TestNaming,
 )
 from assay.services.datasets._common import _get_all_rows_or_404, _get_dataset_or_404
 from assay.services.tests._common import (
@@ -121,6 +123,22 @@ async def create_new_test(
     )
 
 
+NAME_LENGTH = 60
+
+
+def _name_from_prompt(prompt: str) -> str:
+    """A test's name from its row's prompt: line breaks and runs of spaces made
+    one space; over 60 characters, cut after the last whole word within the
+    first 59 (or at 59 when there's no space), and "…" appended."""
+    text = " ".join(prompt.split())
+    if len(text) <= NAME_LENGTH:
+        return text
+    head = text[:NAME_LENGTH - 1]
+    if text[NAME_LENGTH - 1] != " " and " " in head:
+        head = head[:head.rindex(" ")]
+    return head.rstrip() + "…"
+
+
 def _recorded_answer(model_output: str | None) -> str | None:
     """A dataset row's `model_output` as the test's recorded answer: a blank one (empty or
     only whitespace) is no recorded answer, so the test's runs ask the application under
@@ -161,7 +179,7 @@ async def create_new_test_from_dataset(
             offending row together (all-or-nothing, no partial import).
     """
     await _get_dataset_or_404(request.id, session)
-    rows = await _get_all_rows_or_404(request.id, session)
+    rows = await _get_all_rows_or_404(request.id, session, request.row_ids)
 
     if request.test_type_assignments:
         await _validate_test_type_assignments(session, request.test_type_assignments)
@@ -176,9 +194,11 @@ async def create_new_test_from_dataset(
         TestModel(
             id=uuid.uuid4(),
             dataset_row_id=row.id,
-            name=f"New Test {next_number + offset}",
+            name=(_name_from_prompt(row.input) if request.naming == TestNaming.prompt
+                  else f"New Test {next_number + offset}"),
             input=row.input,
-            model_output=_recorded_answer(row.model_output),
+            model_output=(None if request.recorded_answers == RecordedAnswers.leave_out
+                          else _recorded_answer(row.model_output)),
             expected_output=row.expected_output,
         )
         for offset, row in enumerate(rows)

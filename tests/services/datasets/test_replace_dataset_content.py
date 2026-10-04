@@ -58,6 +58,9 @@ def test_replace_dataset_content_adds_new_rows():
     session.add_all.assert_called_once()
     added_rows = session.add_all.call_args[0][0]
     assert len(added_rows) == 3
+    # the new content is numbered from 1, whatever numbers the old rows had
+    assert [row.position for row in added_rows] == [1, 2, 3]
+    assert {row.dataset_id for row in added_rows} == {dataset.id}
 
 
 def test_replace_dataset_content_commits():

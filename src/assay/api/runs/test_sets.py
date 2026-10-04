@@ -5,10 +5,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.api.runs._batch_filter import BatchFilter
+from assay.api.runs._execution_example import execution_details
 from assay.db import get_session
 from assay.schemas import (
+    ExecutionRunSort,
     PaginatedTestSetExecutionMetadata,
     PaginatedTestSetExecutionRunMetadata,
+    TestSetExecutionDetails,
     TestSetExecutionRunDetails,
     TestSetLiveRunCreationMetadata,
     TestSetReplayedExecutionCreationMetadata,
@@ -17,6 +20,7 @@ from assay.services import (
     create_new_live_test_set_run,
     create_new_replay_test_set_run,
     get_run_details_by_test_set_execution_and_run_id,
+    get_test_set_execution_details,
     get_test_set_execution_metadata_all_executions,
     get_test_set_execution_run_metadata_all_runs,
 )
@@ -24,6 +28,46 @@ from assay.services import (
 router = APIRouter(tags=["run (test-set)"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+_EXECUTION_404 = {
+    "description": (
+        "One of three things: no test set exists with the given ID; "
+        "no test set execution exists with the given ID; or the "
+        "execution exists but belongs to a different test set than "
+        "the one in the path — reading the runs of execution X of "
+        "test set A through test set B's URL is rejected rather "
+        "than silently allowed. The three response examples below "
+        "show each distinct failure."
+    ),
+    "content": {
+        "application/json": {
+            "examples": {
+                "test_set_not_found": {
+                    "summary": "Test set does not exist",
+                    "value": {
+                        "detail": "Test set with ID '<test_set_id>' not found"
+                    },
+                },
+                "execution_not_found": {
+                    "summary": "Test set execution does not exist",
+                    "value": {
+                        "detail": "Test set execution with ID "
+                                  "'<test_set_execution_id>' does not exist"
+                    },
+                },
+                "execution_not_linked_to_test_set": {
+                    "summary": "Execution belongs to a different test set",
+                    "value": {
+                        "detail": "Test set execution with ID "
+                                  "'<test_set_execution_id>' not linked to "
+                                  "test set with ID '<test_set_id>'"
+                    },
+                },
+            }
+        }
+    },
+}
 
 
 _RUN_DETAIL_RECORDED = {
@@ -384,6 +428,8 @@ async def replay_previous_test_set_execution(
                                 },
                                 "run_count": 5,
                                 "replayed_execution_id": None,
+                                "runs": {"Pending": 0, "Running": 0, "Green": 4, "Amber": 1,
+                                         "Red": 0, "NotRan": 0},
                             },
                             {
                                 "id": "d4e5f6a7-b8c9-0123-def4-56789012345a",
@@ -395,6 +441,8 @@ async def replay_previous_test_set_execution(
                                 "replayed_execution_id": {
                                     "id": "c3d4e5f6-a7b8-9012-cdef-123456789012"
                                 },
+                                "runs": {"Pending": 0, "Running": 1, "Green": 2, "Amber": 0,
+                                         "Red": 0, "NotRan": 0},
                             },
                         ],
                     }
@@ -444,6 +492,29 @@ async def get_test_set_execution_metadata(
 
 
 @router.get(
+    path="/runs/test-sets/{test_set_id}/executions/{test_set_execution_id}",
+    summary="Read one test set execution: its runs counted and its checks gathered",
+    responses={
+        200: {"content": {"application/json": {
+            "example": execution_details("test_set_id", "Support answers")}}},
+        404: _EXECUTION_404,
+    },
+    response_model=TestSetExecutionDetails,
+)
+async def get_test_set_execution(
+        test_set_id: uuid.UUID,
+        test_set_execution_id: uuid.UUID,
+        session: SessionDep,
+) -> TestSetExecutionDetails:  # pragma: no cover
+    """One execution of the test set, read whole: when it started and what it
+    replayed, its runs by status, and its checks over the runs that finished —
+    how many were met, each one not met with its run and test, and each run
+    that couldn't run with why. Runs still Pending or Running count only in
+    `runs`. The same guards as its runs list."""
+    return await get_test_set_execution_details(test_set_id, test_set_execution_id, session)
+
+
+@router.get(
     path="/runs/test-sets/{test_set_id}/executions/{test_set_execution_id}/test-runs",
     summary="List runs produced by a specific test set execution",
     responses={
@@ -465,6 +536,10 @@ async def get_test_set_execution_metadata(
                                 "test_set_entry_id": {
                                     "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
                                 },
+                                "test_name": "Reset a password",
+                                "checks": {"met": 1, "total": 2, "not_met": ["Regex Match"]},
+                                "error": None,
+                                "output_source": "recorded",
                                 "test_set_execution_id": {
                                     "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12"
                                 },
@@ -478,6 +553,10 @@ async def get_test_set_execution_metadata(
                                 "test_set_entry_id": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                                 },
+                                "test_name": "Reset a password",
+                                "checks": {"met": 1, "total": 2, "not_met": ["Regex Match"]},
+                                "error": None,
+                                "output_source": "recorded",
                                 "test_set_execution_id": {
                                     "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12"
                                 },
@@ -487,44 +566,7 @@ async def get_test_set_execution_metadata(
                 }
             },
         },
-        404: {
-            "description": (
-                "One of three things: no test set exists with the given ID; "
-                "no test set execution exists with the given ID; or the "
-                "execution exists but belongs to a different test set than "
-                "the one in the path — reading the runs of execution X of "
-                "test set A through test set B's URL is rejected rather "
-                "than silently allowed. The three response examples below "
-                "show each distinct failure."
-            ),
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "test_set_not_found": {
-                            "summary": "Test set does not exist",
-                            "value": {
-                                "detail": "Test set with ID '<test_set_id>' not found"
-                            },
-                        },
-                        "execution_not_found": {
-                            "summary": "Test set execution does not exist",
-                            "value": {
-                                "detail": "Test set execution with ID "
-                                          "'<test_set_execution_id>' does not exist"
-                            },
-                        },
-                        "execution_not_linked_to_test_set": {
-                            "summary": "Execution belongs to a different test set",
-                            "value": {
-                                "detail": "Test set execution with ID "
-                                          "'<test_set_execution_id>' not linked to "
-                                          "test set with ID '<test_set_id>'"
-                            },
-                        },
-                    }
-                }
-            },
-        },
+        404: _EXECUTION_404,
     },
     response_model=PaginatedTestSetExecutionRunMetadata,
 )
@@ -535,6 +577,10 @@ async def get_test_set_execution_run_metadata(
         offset: int = Query(default=0, description="Number of records to skip for pagination."),
         limit: int = Query(
             default=100, description="Maximum number of records to return for pagination."),
+        sort: Annotated[ExecutionRunSort, Query(
+            description="`newest` (the default), `worst_first` (NotRan, Red, Amber, Green, "
+                        "Running, Pending, then by test name) or `name` (by test name, "
+                        "ignoring case).")] = ExecutionRunSort.newest,
 ) -> PaginatedTestSetExecutionRunMetadata: # pragma: no cover
     """List every run produced by a specific test set execution, newest first.
 
@@ -554,7 +600,7 @@ async def get_test_set_execution_run_metadata(
     plus the usual `total`, `offset`, and `limit`.
     """
     return await get_test_set_execution_run_metadata_all_runs(
-        test_set_id, test_set_execution_id, session, offset, limit
+        test_set_id, test_set_execution_id, session, offset, limit, sort
     )
 
 

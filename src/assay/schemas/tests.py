@@ -1,10 +1,12 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from assay.models import Comparison, ConfigFieldKind, TestTypes, TestTypesCost
 from assay.schemas import DataSetID, Pagination
+from assay.schemas.standing import TestStanding
 
 MAX_LABEL_LENGTH = 100
 
@@ -84,12 +86,37 @@ class CreateTestCaseRequest(BaseModel):
     )
 
 
+class TestNaming(StrEnum):
+    """`numbered`: "New Test <n>", numbered past every such name. `prompt`: the
+    row's prompt, its line breaks and runs of spaces made one space; over 60
+    characters, cut after the last whole word within the first 59, and "…"
+    appended."""
+    numbered = "numbered"
+    prompt = "prompt"
+
+
+class RecordedAnswers(StrEnum):
+    """`keep`: each test's recorded answer is its row's model output (a blank one
+    means none). `leave_out`: no test has a recorded answer, so every run asks
+    the application under test."""
+    keep = "keep"
+    leave_out = "leave_out"
+
+
 class CreateTestCaseFromDatasetRequest(DataSetID):
     test_type_assignments: list[TestTypeAssignment] = Field(
         default_factory=list,
         description="Test types to assign to this test case, with any config "
                     "each one needs.",
     )
+    row_ids: list[uuid.UUID] | None = Field(
+        default=None,
+        description="Make tests from these rows only (in row-number order); every row when "
+                    "left out. A row id that isn't one of the dataset's rows is a 422.",
+    )
+    naming: TestNaming = Field(default=TestNaming.numbered, description="How the tests are named.")
+    recorded_answers: RecordedAnswers = Field(
+        default=RecordedAnswers.keep, description="Whether the tests keep their rows' answers.")
 
 
 class TestCaseID(BaseModel):
@@ -149,12 +176,16 @@ class CreateTestCaseResponse(TestCaseID, CreateTestCaseRequest):
     pass
 
 
+class TestCaseRead(CreateTestCaseResponse, TestStanding):
+    """A test as it's read: its content, and how it stands."""
+
+
 class CreateTestCaseFromDatasetResponse(DataSetID):
     test_cases: list[TestCaseID]
 
 
 class PaginatedTestCases(Pagination):
-    test_cases: list[CreateTestCaseResponse]
+    test_cases: list[TestCaseRead]
 
 
 class ConfigFieldDescriptor(BaseModel):

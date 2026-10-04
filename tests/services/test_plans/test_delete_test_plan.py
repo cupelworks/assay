@@ -30,13 +30,14 @@ def test_test_plan_has_runs():
     test_plan_id = uuid.uuid4()
 
     session = AsyncMock()
-    session.scalar.return_value = uuid.uuid4()
+    with_runs = AsyncMock(return_value={test_plan_id})
 
     with patch("assay.services.test_plans.delete_test_plan._find_test_plan_by_id_or_404"), \
+        patch("assay.services.test_plans._common.plans_with_runs", new=with_runs), \
         pytest.raises(HTTPException) as e:
         asyncio.run(delete_test_plan_by_id(test_plan_id, session))
 
-    assert session.scalar.call_count == 1
+    with_runs.assert_awaited_once_with(session, [test_plan_id])
     session.delete.assert_not_called()
     session.commit.assert_not_called()
     assert e.value.status_code == 409
@@ -54,10 +55,12 @@ def test_delete_test_plan_happy_path():
     )
 
     session = AsyncMock()
-    session.scalar.side_effect = [test_plan_to_delete, None]
+    session.scalar.side_effect = [test_plan_to_delete]
 
-    asyncio.run(delete_test_plan_by_id(test_plan_id, session))
+    with patch("assay.services.test_plans._common.plans_with_runs",
+               new=AsyncMock(return_value=set())):
+        asyncio.run(delete_test_plan_by_id(test_plan_id, session))
 
-    assert session.scalar.call_count == 2
+    assert session.scalar.call_count == 1
     session.delete.assert_called_once_with(test_plan_to_delete)
     session.commit.assert_called_once()

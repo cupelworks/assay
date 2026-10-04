@@ -4,8 +4,20 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import select
 
-from assay.models import TestRunModel, TestSetEntryModel, TestSetModel
-from assay.schemas import TestSetEntryID, TestSetName
+from assay.models import TestPlanEntryModel, TestSetEntryModel, TestSetExecutionModel, TestSetModel
+from assay.schemas import (
+    TestCaseID,
+    TestSetEntryDetails,
+    TestSetEntryID,
+    TestSetMetadata,
+    TestSetName,
+)
+from assay.services._standing import (
+    count_by,
+    entries_with_runs,
+    scope_standing,
+    sets_with_runs,
+)
 
 
 async def _check_unique_test_set_name_or_409(
@@ -222,13 +234,7 @@ async def _check_test_set_entry_has_no_runs_or_409(
     Raises:
         HTTPException: 409 if a TestRunModel already references this entry.
     """
-    has_runs = await session.scalar(
-        select(TestRunModel.id)
-        .where(TestRunModel.test_set_entry_id == entry_id)
-        .limit(1)
-    )
-
-    if has_runs is not None:
+    if await entries_with_runs(session, [entry_id]):
         raise HTTPException(
             status_code=409,
             detail=f"Test entry with ID '{entry_id}' can't be modified"
@@ -254,14 +260,7 @@ async def _check_test_set_entries_have_no_runs_or_409(
         HTTPException: 409 if a TestRunModel references any entry belonging
             to this test set.
     """
-    has_runs = await session.scalar(
-        select(TestRunModel.id)
-        .join(TestSetEntryModel, TestRunModel.test_set_entry_id == TestSetEntryModel.id)
-        .where(TestSetEntryModel.test_set_id == test_set_id)
-        .limit(1)
-    )
-
-    if has_runs is not None:
+    if await sets_with_runs(session, [test_set_id]):
         raise HTTPException(
             status_code=409,
             detail=f"Test set with ID '{test_set_id}' can't be deleted "
@@ -290,10 +289,8 @@ async def _check_given_test_set_entries_have_no_runs_or_409(
     """
     ids_only = [entry.id for entry in entries]
 
-    has_runs = (await session.scalars(
-        select(TestRunModel.test_set_entry_id)
-        .where(TestRunModel.test_set_entry_id.in_(ids_only))
-    )).all()
+    with_runs = await entries_with_runs(session, ids_only)
+    has_runs = [entry_id for entry_id in ids_only if entry_id in with_runs]
 
     if has_runs:
         raise HTTPException(
@@ -302,3 +299,30 @@ async def _check_given_test_set_entries_have_no_runs_or_409(
                    f"{[str(_id) for _id in has_runs]} have runs, "
                    f"therefore they can't be deleted"
         )
+
+
+async def _describe_test_sets(test_sets: list[TestSetModel],
+                              session: AsyncSession) -> list[TestSetMetadata]:
+    """Test sets as they're read: their entries counted, and how each stands."""
+    ids = [test_set.id for test_set in test_sets]
+    entries = await count_by(session, TestSetEntryModel.test_set_id, ids)
+    plans = await count_by(session, TestPlanEntryModel.test_set_id, ids)
+    standing = await scope_standing(session, TestSetExecutionModel, ids)
+    return [TestSetMetadata(id=test_set.id, name=test_set.name, created_at=test_set.created_at,
+                            entry_count=entries[test_set.id], test_plan_count=plans[test_set.id],
+                            **standing[test_set.id].model_dump())
+            for test_set in test_sets]
+
+
+async def _describe_entries(entries: list[TestSetEntryModel],
+                            session: AsyncSession) -> list[TestSetEntryDetails]:
+    """Set entries as they're read: their frozen content, the test each was
+    copied from, and whether it has run (frozen)."""
+    with_runs = await entries_with_runs(session, [entry.id for entry in entries])
+    return [TestSetEntryDetails(id=entry.id, test_case_id=TestCaseID(id=entry.test_id),
+                                name=entry.name, input=entry.input,
+                                expected_output=entry.expected_output,
+                                model_output=entry.model_output,
+                                test_type_assignments=entry.test_type_assignments,
+                                has_runs=entry.id in with_runs)
+            for entry in entries]

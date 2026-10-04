@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from assay.models import TestSetEntryModel
 from assay.schemas import TestTypeAssignment
 from assay.services import get_test_set_linked_test_by_entry_id, get_test_sets_linked_tests
+from tests.services.standing_fakes import neutral_standing
 
 _PATCH_FIND_TEST_SET = "assay.services.test_sets.get_test_sets_entries._find_test_set_or_404"
 
@@ -176,10 +177,11 @@ def test_returns_correct_entry():
         test_type_assignments=found_test_type_assignments,
     )
 
-    with patch(_PATCH_FIND_TEST_SET):
+    with patch(_PATCH_FIND_TEST_SET), neutral_standing():
         response = asyncio.run(get_test_set_linked_test_by_entry_id(test_set_id, entry_id, session))
 
     assert response.id == entry_id
+    assert response.has_runs is False
     assert response.test_case_id.id == test_case_id
     assert response.name == found_name
     assert response.input == found_input

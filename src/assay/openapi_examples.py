@@ -13,7 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.routing import APIRoute
 
 
-def _api_routes(routes, prefix: str = "") -> Iterator[tuple[APIRoute, str]]:
+def api_routes(routes, prefix: str = "") -> Iterator[tuple[APIRoute, str]]:
     """Every API route with the prefix it is served under. An included router
     is either flattened into its parent's routes (FastAPI up to 0.136) or kept
     as one nested entry carrying the router and its include prefix (0.137 on);
@@ -26,7 +26,7 @@ def _api_routes(routes, prefix: str = "") -> Iterator[tuple[APIRoute, str]]:
         included = getattr(route, "original_router", None)
         if included is not None:
             context = getattr(route, "include_context", None)
-            yield from _api_routes(included.routes, prefix + getattr(context, "prefix", ""))
+            yield from api_routes(included.routes, prefix + getattr(context, "prefix", ""))
 
 
 def keep_example_nulls(app: FastAPI) -> None:
@@ -36,7 +36,7 @@ def keep_example_nulls(app: FastAPI) -> None:
         if app.openapi_schema:
             return app.openapi_schema
         schema = generate()
-        for route, prefix in _api_routes(app.routes):
+        for route, prefix in api_routes(app.routes):
             operations = schema["paths"].get(prefix + route.path_format, {})
             for method in route.methods:
                 operation = operations.get(method.lower())

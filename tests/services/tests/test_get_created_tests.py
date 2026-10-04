@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from assay.services import get_all_created_tests, get_test_case_by_id
+from tests.services.standing_fakes import neutral_standing
 
 # --- get_all_created_tests ---
 
@@ -48,7 +49,8 @@ def test_correct_mapping_of_test_fields():
     )
     session.scalar.return_value = 1
 
-    test_cases = asyncio.run(get_all_created_tests(session))
+    with neutral_standing():
+        test_cases = asyncio.run(get_all_created_tests(session))
 
     returned_test_case = test_cases.test_cases[0]
     assert returned_test_case.id == mock_id
@@ -76,7 +78,8 @@ def test_no_test_types_returns_empty_list():
     )
     session.scalar.return_value = 1
 
-    test_cases = asyncio.run(get_all_created_tests(session))
+    with neutral_standing():
+        test_cases = asyncio.run(get_all_created_tests(session))
 
     assert test_cases.test_cases[0].test_type_assignments == []
 
@@ -108,7 +111,8 @@ def test_found_test_mapping():
     session = AsyncMock()
     session.scalar.return_value = mock_test
 
-    test_case = asyncio.run(get_test_case_by_id(mock_test.id, session))
+    with neutral_standing():
+        test_case = asyncio.run(get_test_case_by_id(mock_test.id, session))
 
     assert test_case.id == mock_test.id
     assert test_case.name == mock_test.name

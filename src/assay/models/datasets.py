@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from assay.models.base import Base
@@ -27,9 +27,16 @@ class DatasetRowModel(Base):
     """A single row belonging to a dataset — mirrors one line of a .jsonl file."""
 
     __tablename__ = "dataset_rows"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "position", name="uq_dataset_rows_dataset_id_position"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     dataset_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("datasets.id"), index=True)
+    # The row's number within its dataset, from 1: an import numbers its lines,
+    # added rows go after the highest, and a deleted row leaves a gap, so a row
+    # and the tests made from it keep the same number.
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
     input: Mapped[str] = mapped_column(Text)
     expected_output: Mapped[str] = mapped_column(Text)
     model_output: Mapped[str] = mapped_column(Text)

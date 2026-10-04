@@ -1,13 +1,12 @@
 import logging
 import uuid
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from assay.models import TestSetEntryModel
 from assay.schemas import ModifyTestSetMetadataRequest, TestSetMetadata, TestSetName
 from assay.services.test_sets._common import (
     _check_unique_test_set_name_or_409,
+    _describe_test_sets,
     _find_test_set_or_404,
 )
 
@@ -57,14 +56,5 @@ async def update_test_set_metadata_by_id(
             extra={"test_set_id": test_set_id},
         )
 
-    entry_count = await session.scalar(
-        select(func.count(TestSetEntryModel.id))
-        .where(TestSetEntryModel.test_set_id == found.id)
-    ) or 0
-
-    return TestSetMetadata(
-        id=found.id,
-        name=found.name,
-        created_at=found.created_at,
-        entry_count=entry_count,
-    )
+    (described,) = await _describe_test_sets([found], session)
+    return described
