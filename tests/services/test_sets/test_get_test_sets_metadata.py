@@ -8,8 +8,16 @@ from fastapi import HTTPException
 
 from assay.models import TestSetModel
 from assay.services import get_all_test_sets_metadata, get_test_set_metadata_by_id
+from tests.services.standing_fakes import neutral_standing
 
 # --- get_all_test_sets_metadata() ---
+
+
+@pytest.fixture(autouse=True)
+def _neutral_standing():
+    """How items stand is tested on a real database (tests/test_standing.py)."""
+    with neutral_standing({}, default=7):
+        yield
 
 def test_returns_correct_items():
     offset = 1
@@ -37,13 +45,9 @@ def test_returns_correct_items():
             ),
         ]
     ))
-    session.execute.return_value = MagicMock()
-    session.execute.return_value.tuples.return_value.all.return_value = [
-        (first_id, 5),
-        (second_id, 0),
-    ]
 
-    response = asyncio.run(get_all_test_sets_metadata(session, offset, limit))
+    with neutral_standing({first_id: 5, second_id: 0}):
+        response = asyncio.run(get_all_test_sets_metadata(session, offset=offset, limit=limit))
 
     assert response.total == 3
     assert response.offset == offset

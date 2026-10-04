@@ -9,8 +9,16 @@ from fastapi import HTTPException
 from assay.models import TestPlanModel
 from assay.schemas import TestPlanMetadata
 from assay.services import get_all_test_plans_metadata, get_test_plan_metadata_by_id
+from tests.services.standing_fakes import NO_SCOPE_STANDING, neutral_standing
 
 # --- get_all_test_plans_metadata() ---
+
+
+@pytest.fixture(autouse=True)
+def _neutral_standing():
+    """How items stand is tested on a real database (tests/test_standing.py)."""
+    with neutral_standing(default=6):
+        yield
 
 def test_test_plans_metadata_total_none_defaults_to_zero():
     session = AsyncMock()
@@ -50,7 +58,8 @@ def test_test_plans_metadata_happy_path():
         (existing_test_plans[0].id, 3),
     ]
 
-    response = asyncio.run(get_all_test_plans_metadata(session, 1, 2))
+    with neutral_standing({existing_test_plans[0].id: 3}):
+        response = asyncio.run(get_all_test_plans_metadata(session, offset=1, limit=2))
 
     session.scalar.assert_called_once()
     session.scalars.assert_called_once()
@@ -63,12 +72,14 @@ def test_test_plans_metadata_happy_path():
             name=existing_test_plans[0].name,
             created_at=existing_test_plans[0].created_at,
             linked_set_count=3,
+            **NO_SCOPE_STANDING.model_dump(),
         ),
         TestPlanMetadata(
             id=existing_test_plans[1].id,
             name=existing_test_plans[1].name,
             created_at=existing_test_plans[1].created_at,
             linked_set_count=0,
+            **NO_SCOPE_STANDING.model_dump(),
         ),
     ]
 
@@ -105,7 +116,7 @@ def test_test_plan_metadata_happy_path():
 
     response = asyncio.run(get_test_plan_metadata_by_id(test_plan_id, session))
 
-    assert session.scalar.call_count == 2
+    assert session.scalar.call_count == 1
     assert response.id == test_plan_id
     assert response.name == test_plan_name
     assert response.created_at == created_at

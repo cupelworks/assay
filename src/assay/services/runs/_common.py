@@ -1,5 +1,6 @@
 import logging
 import uuid
+from collections.abc import Iterable
 
 from fastapi import HTTPException
 from kombu.exceptions import KombuError
@@ -16,6 +17,7 @@ from assay.models import (
     TestSetEntryModel,
     TestSetExecutionModel,
 )
+from assay.run_check_types import with_check_types
 from assay.worker import app as _celery_app
 
 logger = logging.getLogger(__name__)
@@ -622,6 +624,18 @@ async def _check_test_plan_or_404(test_plan_id: uuid.UUID, session: AsyncSession
             status_code=404,
             detail=f"Test plan with ID '{test_plan_id}' not found"
         )
+
+
+async def _add_runs(session: AsyncSession, runs: list[TestRunModel],
+                   executions: Iterable = ()) -> None:
+    """Add new runs, and the executions they belong to, to the session, each
+    run with its check types. Call it once the runs' skip labels are set."""
+    entry_ids = {run.test_set_entry_id for run in runs if run.test_set_entry_id is not None}
+    assignments = dict((await session.execute(
+        select(TestSetEntryModel.id, TestSetEntryModel.test_type_assignments)
+        .where(TestSetEntryModel.id.in_(entry_ids)))).tuples().all()) if entry_ids else {}
+    with_check_types(runs, assignments)
+    session.add_all([*executions, *runs])
 
 
 def _dispatch_runs(run_ids: list[uuid.UUID]) -> None:

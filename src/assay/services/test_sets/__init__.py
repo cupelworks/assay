@@ -11,6 +11,7 @@ from assay.services.test_sets.get_test_sets_entries import (
 )
 from assay.services.test_sets.get_test_sets_metadata import (
     get_all_test_sets_metadata,
+    get_test_plans_linking_set,
     get_test_set_metadata_by_id,
 )
 from assay.services.test_sets.update_entry import modify_entry_by_id
@@ -22,6 +23,7 @@ __all__ = [
     "delete_test_set_by_id",
     "delete_test_set_entries_by_id",
     "get_all_test_sets_metadata",
+    "get_test_plans_linking_set",
     "get_test_set_metadata_by_id",
     "get_test_sets_linked_tests",
     "get_test_set_linked_test_by_entry_id",

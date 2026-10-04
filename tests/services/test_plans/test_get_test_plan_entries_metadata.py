@@ -6,9 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from assay.models import TestPlanEntryModel, TestSetModel
+from assay.models import TestPlanEntryModel, TestSetEntryModel, TestSetModel
 from assay.schemas import TestPlanEntryDetails, TestSetMetadata
 from assay.services import get_all_test_plan_entries_metadata
+from tests.services.standing_fakes import NO_SCOPE_STANDING, neutral_standing
 
 
 def test_test_plan_not_found():
@@ -75,13 +76,9 @@ def test_returned_test_plan_entries():
         ),
     ]
     session.scalars.return_value = MagicMock(all=MagicMock(return_value=found_entries))
-    session.execute.return_value = MagicMock()
-    session.execute.return_value.tuples.return_value.all.return_value = [
-        (first_test_set_id, 5),
-        (second_test_set_id, 0),
-    ]
 
-    response = asyncio.run(get_all_test_plan_entries_metadata(test_plan_id, session,))
+    with neutral_standing({(TestSetEntryModel.test_set_id, first_test_set_id): 5}):
+        response = asyncio.run(get_all_test_plan_entries_metadata(test_plan_id, session,))
 
     session.scalars.assert_called_once()
     assert session.scalar.call_count == 2
@@ -96,6 +93,8 @@ def test_returned_test_plan_entries():
                 name=found_entries[0].test_set.name,
                 created_at=found_entries[0].test_set.created_at,
                 entry_count=5,
+                test_plan_count=0,
+                **NO_SCOPE_STANDING.model_dump(),
             ),
         ),
         TestPlanEntryDetails(
@@ -105,6 +104,8 @@ def test_returned_test_plan_entries():
                 name=found_entries[1].test_set.name,
                 created_at=found_entries[1].test_set.created_at,
                 entry_count=0,
+                test_plan_count=0,
+                **NO_SCOPE_STANDING.model_dump(),
             ),
         ),
     ]

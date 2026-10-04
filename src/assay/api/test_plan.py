@@ -4,13 +4,27 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from assay.api._filters import (
+    CreatedEdges,
+    CreatedFrom,
+    CreatedTo,
+    Ids,
+    Limit,
+    Offset,
+    Runs,
+    Verdicts,
+    search,
+)
+from assay.api._standing_examples import SCOPE_NEVER_RAN, SCOPE_RAN
 from assay.db import get_session
 from assay.schemas import (
     ModifyTestPlanRequest,
     PaginatedTestPlanEntriesDetails,
     PaginatedTestPlanMetadataResponse,
+    ScopeSort,
     TestPlanCreationResponse,
     TestPlanEntryID,
+    TestPlanFacets,
     TestPlanMetadata,
     TestPlanName,
     TestSetID,
@@ -25,10 +39,48 @@ from assay.services import (
     remove_test_sets_from_test_plan_by_id,
     update_test_plan_by_id,
 )
+from assay.services.test_plans.get_test_plans_metadata import TestPlanFilters, get_test_plan_facets
 
 router = APIRouter(tags=["test plan"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def test_plan_filters(
+        latest_verdict: Verdicts = None,
+        latest_run: Runs = None,
+        holds_test_set: Annotated[Ids, Query(
+            description="Only plans linking one of these test sets.")] = None,
+        created_from: CreatedFrom = None,
+        created_to: CreatedTo = None,
+        q: Annotated[list[str] | None, search("the plan's name")] = None,
+) -> TestPlanFilters:
+    return TestPlanFilters(latest_verdict=latest_verdict, latest_run=latest_run,
+                           holds_test_set=holds_test_set, created_from=created_from,
+                           created_to=created_to, q=q)
+
+
+@router.get(
+    path="/test-plans/facets",
+    summary="Count the test plans within the filters by each filter's values",
+    responses={200: {"content": {"application/json": {"example": {
+        "latest_verdict": {"Pending": 0, "Running": 0, "Passed": 0, "Failed": 0,
+                           "Inconclusive": 0, "Incomplete": 0, "NotRan": 0, "Done": 0,
+                           "none": 4},
+        "latest_run": {"Running": 0, "Green": 1, "Amber": 2, "Red": 0, "NotRan": 1, "never": 0},
+        "holds_test_set": {"4e86003a-9e28-4c93-a08e-f99c6acbaab6": 2},
+        "created": None,
+    }}}}},
+    response_model=TestPlanFacets,
+)
+async def get_test_plans_facets(
+        session: SessionDep,
+        filters: Annotated[TestPlanFilters, Depends(test_plan_filters)],
+        created_edges: CreatedEdges = None,
+) -> TestPlanFacets:  # pragma: no cover
+    """The test plans `GET /test-plans` would list with the same filters, counted
+    by each filter's values: each facet within every other filter chosen."""
+    return await get_test_plan_facets(session, filters, created_edges)
 
 
 @router.delete(
@@ -305,6 +357,7 @@ async def add_test_sets_to_a_test_plan(
                         "name": "Renamed regression plan",
                         "created_at": "2026-07-03T15:43:09.032480",
                         "linked_set_count": 3,
+                        **SCOPE_RAN,
                     }
                 }
             },
@@ -397,6 +450,8 @@ async def update_a_test_plan_metadata(
                                     "name": "Regression suite",
                                     "created_at": "2026-07-03T15:43:09.032480",
                                     "entry_count": 12,
+                                    "test_plan_count": 1,
+                                    **SCOPE_RAN,
                                 },
                             },
                             {
@@ -406,6 +461,8 @@ async def update_a_test_plan_metadata(
                                     "name": "Smoke tests",
                                     "created_at": "2026-07-03T16:00:00.000000",
                                     "entry_count": 4,
+                                    "test_plan_count": 0,
+                                    **SCOPE_NEVER_RAN,
                                 },
                             },
                         ],
@@ -463,6 +520,7 @@ async def get_all_test_sets_metadata_in_a_test_plan(
                         "name": "Regression plan",
                         "created_at": "2026-07-03T15:43:09.032480",
                         "linked_set_count": 3,
+                        **SCOPE_RAN,
                     }
                 }
             },
@@ -509,12 +567,14 @@ async def get_single_test_plan_metadata(
                                 "name": "Regression plan",
                                 "created_at": "2026-07-03T15:43:09.032480",
                                 "linked_set_count": 3,
+                                **SCOPE_RAN,
                             },
                             {
                                 "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                                 "name": "Smoke plan",
                                 "created_at": "2026-07-03T16:00:00.000000",
                                 "linked_set_count": 1,
+                                **SCOPE_NEVER_RAN,
                             },
                         ],
                     }
@@ -526,18 +586,17 @@ async def get_single_test_plan_metadata(
 )
 async def get_test_plans_metadata(
         session: SessionDep,
-        offset: int = Query(default=0, description="Number of records to skip for pagination."),
-        limit: int = Query(default=100, description="Maximum number of records to "
-                                                    "return for pagination.")
-) -> PaginatedTestPlanMetadataResponse: # pragma: no cover
-    """List all test plans with their metadata, paginated.
-
-    Returns each test plan's `id`, `name`, `created_at` timestamp, and
-    `linked_set_count` (the number of test sets currently linked to the plan).
-    Use `offset` and `limit` to page through results. The response includes `total`
-    so the client can calculate the number of pages.
-    """
-    return await get_all_test_plans_metadata(session, offset, limit)
+        filters: Annotated[TestPlanFilters, Depends(test_plan_filters)],
+        sort: Annotated[ScopeSort, Query(
+            description="`latest_run` (the default), `created` (newest first) or `name` "
+                        "(ignoring case).")] = ScopeSort.latest_run,
+        offset: Offset = 0,
+        limit: Limit = 100,
+) -> PaginatedTestPlanMetadataResponse:  # pragma: no cover
+    """List the test plans within the filters, sorted and paged, each with its
+    linked sets counted and how it stands. `total` counts every plan within
+    the filters."""
+    return await get_all_test_plans_metadata(session, filters, sort, offset, limit)
 
 
 @router.post(

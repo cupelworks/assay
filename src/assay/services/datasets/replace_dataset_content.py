@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.models import DatasetRowModel
 from assay.schemas import DataSetImportedData, DataSetImportingData
-from assay.services.datasets._common import _get_dataset_or_404
+from assay.services.datasets._common import _get_dataset_or_404, _new_rows
 from assay.services.datasets.upload_rows_in_dataset import _build_uploaded_dataset_info
 
 logger = logging.getLogger(__name__)
@@ -38,15 +38,8 @@ async def replace_dataset_content_by_dataset_id(
         .where(DatasetRowModel.dataset_id == dataset.id)
     )
 
-    new_rows = [
-        DatasetRowModel(
-            dataset_id=dataset.id,
-            input=row.prompt,
-            expected_output=row.expected_output,
-            model_output=row.model_output,
-        )
-        for row in request.rows
-    ]
+    # the new content is numbered from 1, as a new import would be
+    new_rows = _new_rows(request.rows, dataset_id=dataset.id)
 
     session.add_all(new_rows)
     await session.commit()

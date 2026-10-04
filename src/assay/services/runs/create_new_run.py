@@ -24,6 +24,7 @@ from assay.schemas import (
     TestSetReplayedExecutionID,
 )
 from assay.services.runs._common import (
+    _add_runs,
     _check_test_plan_execution_id_linked_to_specific_test_plan_id_or_404,
     _check_test_plan_execution_or_404,
     _check_test_set_entries_have_test_types_or_409,
@@ -176,7 +177,7 @@ async def create_new_standalone_run(
     
     test_run_model = _new_standalone_run(found)
 
-    session.add(test_run_model)
+    await _add_runs(session, [test_run_model])
     await session.commit()
 
     logger.info(
@@ -239,8 +240,7 @@ async def create_new_live_test_set_run(
 
     test_set_execution_model, test_runs = _new_test_set_execution(test_set_id, entries_ids)
 
-    session.add(test_set_execution_model)
-    session.add_all(test_runs)
+    await _add_runs(session, test_runs, [test_set_execution_model])
     await session.commit()
 
     logger.info(
@@ -315,8 +315,7 @@ async def create_new_replay_test_set_run(
     test_set_execution_model, test_runs = _new_test_set_execution(
         test_set_id, found_entries, replayed_execution_id=test_set_execution_id)
 
-    session.add(test_set_execution_model)
-    session.add_all(test_runs)
+    await _add_runs(session, test_runs, [test_set_execution_model])
     await session.commit()
 
     logger.info(
@@ -396,8 +395,7 @@ async def create_new_live_test_plan_run(
     test_plan_execution_model, test_runs = _new_test_plan_execution(
         test_plan_id, test_sets_entries_ids)
 
-    session.add(test_plan_execution_model)
-    session.add_all(test_runs)
+    await _add_runs(session, test_runs, [test_plan_execution_model])
     await session.commit()
 
     logger.info(
@@ -478,8 +476,7 @@ async def create_new_replay_test_plan_run(
     test_plan_execution_model, test_runs = _new_test_plan_execution(
         test_plan_id, found_entries, replayed_execution_id=test_plan_execution_id)
 
-    session.add(test_plan_execution_model)
-    session.add_all(test_runs)
+    await _add_runs(session, test_runs, [test_plan_execution_model])
     await session.commit()
 
     logger.info(

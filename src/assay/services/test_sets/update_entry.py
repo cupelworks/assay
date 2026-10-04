@@ -5,9 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.assignment_labels import in_label_order
 from assay.assignment_labels import labelled as _labelled
-from assay.schemas import ModifyTestCaseRequest, TestCaseID, TestSetEntryDetails, TestTypeAssignment
+from assay.schemas import ModifyTestCaseRequest, TestSetEntryDetails, TestTypeAssignment
 from assay.services.test_sets._common import (
     _check_test_set_entry_has_no_runs_or_409,
+    _describe_entries,
     _find_test_set_entry_in_specific_test_set_or_404,
     _find_test_set_or_404,
 )
@@ -97,12 +98,5 @@ async def modify_entry_by_id(
         entry_id, test_set_id, ", ".join(changed_fields),
         extra={"test_set_id": test_set_id, "entry_id": entry_id, "fields": changed_fields},
     )
-    return TestSetEntryDetails(
-        id=found.id,
-        test_case_id=TestCaseID(id=found.test_id),
-        name=found.name,
-        input=found.input,
-        expected_output=found.expected_output,
-        model_output=found.model_output,
-        test_type_assignments=found.test_type_assignments,
-    )
+    (described,) = await _describe_entries([found], session)
+    return described

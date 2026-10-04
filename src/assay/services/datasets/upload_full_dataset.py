@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-from assay.models import DatasetModel, DatasetRowModel
+from assay.models import DatasetModel
 from assay.schemas import (
     DataRowInfo,
     DataSetImportViaPathRequest,
@@ -15,7 +15,7 @@ from assay.schemas import (
     DataSetInfo,
     DataSetRowSchema,
 )
-from assay.services.datasets._common import _check_name_unique
+from assay.services.datasets._common import _check_name_unique, _new_rows
 
 logger = logging.getLogger(__name__)
 
@@ -97,21 +97,12 @@ def _check_file_exists(path: str) -> None:
 
 
 def _build_dataset_model(name: str, rows: list[DataSetRowSchema]) -> DatasetModel:
-    """Build a DatasetModel with its rows from validated schema objects.
+    """Build a DatasetModel with its rows from validated schema objects, the
+    rows numbered from 1 in the file's order.
 
     Pure function — no DB or HTTP dependencies, fully unit-testable.
     """
-    return DatasetModel(
-        name=name,
-        rows=[
-            DatasetRowModel(
-                input=row.prompt,
-                expected_output=row.expected_output,
-                model_output=row.model_output,
-            )
-            for row in rows
-        ],
-    )
+    return DatasetModel(name=name, rows=_new_rows(rows))
 
 
 def _raise_if_errors(errors: list[tuple[int, str, list]]) -> None:

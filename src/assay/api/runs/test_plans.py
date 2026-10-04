@@ -5,10 +5,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.api.runs._batch_filter import BatchFilter
+from assay.api.runs._execution_example import execution_details
 from assay.db import get_session
 from assay.schemas import (
+    ExecutionRunSort,
     PaginatedTestPlanExecutionMetadata,
     PaginatedTestPlanExecutionRunMetadata,
+    TestPlanExecutionDetails,
     TestPlanExecutionRunDetails,
     TestPlanLiveRunCreationMetadata,
     TestPlanReplayedExecutionCreationMetadata,
@@ -17,6 +20,7 @@ from assay.services import (
     create_new_live_test_plan_run,
     create_new_replay_test_plan_run,
     get_run_details_by_test_plan_execution_and_run_id,
+    get_test_plan_execution_details,
     get_test_plan_execution_metadata_all_executions,
     get_test_plan_execution_run_metadata_all_runs,
 )
@@ -24,6 +28,46 @@ from assay.services import (
 router = APIRouter(tags=["run (test plan)"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+_EXECUTION_404 = {
+    "description": (
+        "One of three things: no test plan exists with the given ID; "
+        "no test plan execution exists with the given ID; or the "
+        "execution exists but belongs to a different test plan than "
+        "the one in the path — reading the runs of execution X of "
+        "test plan A through test plan B's URL is rejected rather "
+        "than silently allowed. The three response examples below "
+        "show each distinct failure."
+    ),
+    "content": {
+        "application/json": {
+            "examples": {
+                "test_plan_not_found": {
+                    "summary": "Test plan does not exist",
+                    "value": {
+                        "detail": "Test plan with ID '<test_plan_id>' not found"
+                    },
+                },
+                "execution_not_found": {
+                    "summary": "Test plan execution does not exist",
+                    "value": {
+                        "detail": "Test plan execution with ID "
+                                  "'<test_plan_execution_id>' does not exist"
+                    },
+                },
+                "execution_not_linked_to_test_plan": {
+                    "summary": "Execution belongs to a different test plan",
+                    "value": {
+                        "detail": "Test plan execution with ID "
+                                  "'<test_plan_execution_id>' not linked to "
+                                  "test plan with ID '<test_plan_id>'"
+                    },
+                },
+            }
+        }
+    },
+}
 
 
 _RUN_DETAIL_RECORDED = {
@@ -405,6 +449,8 @@ async def replay_previous_test_plan_execution(
                                 },
                                 "run_count": 5,
                                 "replayed_execution_id": None,
+                                "runs": {"Pending": 0, "Running": 0, "Green": 4, "Amber": 1,
+                                         "Red": 0, "NotRan": 0},
                             },
                             {
                                 "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0",
@@ -416,6 +462,8 @@ async def replay_previous_test_plan_execution(
                                 "replayed_execution_id": {
                                     "id": "a2b3c4d5-e6f7-8901-ab23-456789abcdef"
                                 },
+                                "runs": {"Pending": 0, "Running": 1, "Green": 2, "Amber": 0,
+                                         "Red": 0, "NotRan": 0},
                             },
                         ],
                     }
@@ -466,6 +514,29 @@ async def get_test_plan_execution_metadata(
 
 
 @router.get(
+    path="/runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}",
+    summary="Read one test plan execution: its runs counted and its checks gathered",
+    responses={
+        200: {"content": {"application/json": {
+            "example": execution_details("test_plan_id", "Release gate")}}},
+        404: _EXECUTION_404,
+    },
+    response_model=TestPlanExecutionDetails,
+)
+async def get_test_plan_execution(
+        test_plan_id: uuid.UUID,
+        test_plan_execution_id: uuid.UUID,
+        session: SessionDep,
+) -> TestPlanExecutionDetails:  # pragma: no cover
+    """One execution of the test plan, read whole: when it started and what it
+    replayed, its runs by status, and its checks over the runs that finished —
+    how many were met, each one not met with its run and test, and each run
+    that couldn't run with why. Runs still Pending or Running count only in
+    `runs`. The same guards as its runs list."""
+    return await get_test_plan_execution_details(test_plan_id, test_plan_execution_id, session)
+
+
+@router.get(
     path="/runs/test-plans/{test_plan_id}/executions/{test_plan_execution_id}/test-runs",
     summary="List runs produced by a specific test plan execution",
     responses={
@@ -487,6 +558,10 @@ async def get_test_plan_execution_metadata(
                                 "test_set_entry_id": {
                                     "id": "d4e5f6a7-b8c9-0123-def4-56789012345a"
                                 },
+                                "test_name": "Reset a password",
+                                "checks": {"met": 1, "total": 2, "not_met": ["Regex Match"]},
+                                "error": None,
+                                "output_source": "recorded",
                                 "test_plan_execution_id": {
                                     "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0"
                                 },
@@ -500,6 +575,10 @@ async def get_test_plan_execution_metadata(
                                 "test_set_entry_id": {
                                     "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                                 },
+                                "test_name": "Reset a password",
+                                "checks": {"met": 1, "total": 2, "not_met": ["Regex Match"]},
+                                "error": None,
+                                "output_source": "recorded",
                                 "test_plan_execution_id": {
                                     "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0"
                                 },
@@ -509,44 +588,7 @@ async def get_test_plan_execution_metadata(
                 }
             },
         },
-        404: {
-            "description": (
-                "One of three things: no test plan exists with the given ID; "
-                "no test plan execution exists with the given ID; or the "
-                "execution exists but belongs to a different test plan than "
-                "the one in the path — reading the runs of execution X of "
-                "test plan A through test plan B's URL is rejected rather "
-                "than silently allowed. The three response examples below "
-                "show each distinct failure."
-            ),
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "test_plan_not_found": {
-                            "summary": "Test plan does not exist",
-                            "value": {
-                                "detail": "Test plan with ID '<test_plan_id>' not found"
-                            },
-                        },
-                        "execution_not_found": {
-                            "summary": "Test plan execution does not exist",
-                            "value": {
-                                "detail": "Test plan execution with ID "
-                                          "'<test_plan_execution_id>' does not exist"
-                            },
-                        },
-                        "execution_not_linked_to_test_plan": {
-                            "summary": "Execution belongs to a different test plan",
-                            "value": {
-                                "detail": "Test plan execution with ID "
-                                          "'<test_plan_execution_id>' not linked to "
-                                          "test plan with ID '<test_plan_id>'"
-                            },
-                        },
-                    }
-                }
-            },
-        },
+        404: _EXECUTION_404,
     },
     response_model=PaginatedTestPlanExecutionRunMetadata,
 )
@@ -558,6 +600,10 @@ async def get_test_plan_execution_run_metadata(
         limit: int = Query(
             default=100, description="Maximum number of records to return for pagination."
         ),
+        sort: Annotated[ExecutionRunSort, Query(
+            description="`newest` (the default), `worst_first` (NotRan, Red, Amber, Green, "
+                        "Running, Pending, then by test name) or `name` (by test name, "
+                        "ignoring case).")] = ExecutionRunSort.newest,
 ) -> PaginatedTestPlanExecutionRunMetadata: # pragma: no cover
     """List every run produced by a specific test plan execution, newest first.
 
@@ -577,7 +623,7 @@ async def get_test_plan_execution_run_metadata(
     plus the usual `total`, `offset`, and `limit`.
     """
     return await get_test_plan_execution_run_metadata_all_runs(
-        test_plan_id, test_plan_execution_id, session, offset, limit
+        test_plan_id, test_plan_execution_id, session, offset, limit, sort
     )
 
 
