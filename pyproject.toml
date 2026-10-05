@@ -5,7 +5,8 @@ authors = [{ name = "Francesco Campanile", email = "francescocampanile96@gmail.c
 description = "Test how a GenAI-powered application behaves: score its outputs with deterministic checks, NLP metrics and LLM-as-judge verdicts, organise cases into test sets and plans, and keep a reproducible record of every run."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
 dependencies = [
     "fastapi>=0.115",                          # HTTP framework — routes, request/response handling, OpenAPI docs
     "uvicorn[standard]>=0.32",                 # ASGI server — runs the FastAPI app
