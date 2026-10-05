@@ -9,7 +9,7 @@ Create Date: 2026-10-02 09:00:00.000000
 Run with statistics: a `statistical_batches` row per
 batch — the scope (exactly one of a test, a test set, a test plan), the
 statistical test and its parameters, the times requested, the plan (floor and
-calls per time), the status (its own enum, note 17) and, once every run has
+calls per time), the status (its own enum) and, once every run has
 finished, the result. The runs and executions a batch creates carry its id and
 the time (1-based) they belong to.
 

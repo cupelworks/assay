@@ -357,7 +357,7 @@ def test_wilcoxon_matches_scipys_wilcoxon(differences, method, statistic, p):
 
 
 def test_six_same_sign_differences_are_the_least_that_can_conclude():
-    # note 5: the maths can conclude from 6 (p = 0.031)
+    # the maths can conclude from 6 (p = 0.031)
     assert m.wilcoxon_signed_rank([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]).p_value == pytest.approx(
         0.03125)
     assert m.wilcoxon_signed_rank([0.1, 0.2, 0.3, 0.4, 0.5]).p_value == pytest.approx(0.0625)
@@ -386,7 +386,7 @@ def test_runs_needed_for_means():
     assert m.runs_needed_for_means(0.1, 0.0, 0.95) is None
 
 
-# --- the odds of an answer before running (notes 30-32) ---
+# --- the odds of an answer before running ---
 
 
 def test_the_beta_binomial_sums_to_one_and_matches_its_mean():
@@ -401,7 +401,7 @@ def test_the_beta_binomial_sums_to_one_and_matches_its_mean():
 ])
 def test_the_averaged_chance_of_an_answer_matches_numerical_integration(n, passed, failed,
                                                                           chance):
-    # the figures of note 32, checked there against a 400-point integration
+    # figures checked against a 400-point integration
     assert m.gate_answer_chance(n, 0.9, 0.95, passed, failed).answer == pytest.approx(
         chance, abs=0.001)
 

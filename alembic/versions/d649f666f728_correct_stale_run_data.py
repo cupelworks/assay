@@ -13,15 +13,15 @@ keeping what older code wrote "as the record".
 Every result in test_runs.results:
 - has every current key - passed, score, detail, engine, engine_settings,
   answer_path, rubric, judge - with null where nothing was recorded;
-- of a deterministic type has score null (run_execution note 16: pass/fail
-  checks report no score; Exact Match, Contains and Regex Match once wrote
+- of a deterministic type has score null (pass/fail checks report no
+  score; Exact Match, Contains and Regex Match once wrote
   1.0/0.0);
 - of an Exact Match, Contains or Regex Match type records
   normalize_lookalikes: false when its settings predate it - which is how it
   was scored;
 - is keyed "Exact Match (whitespace-sensitive)" where it was still
   "Exact Match (strict)", the type's old name;
-- has a detail starting with a capital letter (run_execution note 17).
+- has a detail starting with a capital letter.
 
 Every run's error and every target and judge check's error starts with a
 capital letter, and the application adapter's old wording, which named

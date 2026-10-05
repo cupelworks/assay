@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""The trial (note 32): a few runs with no verdict, offered when a check has
+"""The trial: a few runs with no verdict, offered when a check has
 never run, ending Done, and its runs the history the next estimate plans
 from."""
 

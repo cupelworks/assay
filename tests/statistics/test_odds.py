@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""The estimate planned from the checks' history (notes 30-32): the canvas's
+"""The estimate planned from the checks' history: the design's
 states, through the real endpoint, against the numbers checked by hand."""
 import uuid
 

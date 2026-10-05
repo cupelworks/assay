@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""Run until there's an answer (notes 30-32): the waves, their exact
+"""Run until there's an answer: the waves, their exact
 boundaries, the worker advancing a batch after each wave, and the estimate."""
 import uuid
 
