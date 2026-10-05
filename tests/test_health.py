@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 from fastapi.testclient import TestClient
 
 from assay.main import app

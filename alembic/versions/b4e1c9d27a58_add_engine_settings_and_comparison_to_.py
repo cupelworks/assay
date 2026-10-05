@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """add engine, engine_settings and comparison to test_types; native threshold ranges
 
 Revision ID: b4e1c9d27a58

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Swagger examples for the second-wave statistical tests, computed by the very
 functions that compute real results, on fixed plain data — so an example can
 never drift from what the API returns. Series are cut to three points: a real

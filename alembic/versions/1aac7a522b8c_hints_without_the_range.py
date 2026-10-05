@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """drop the "0 to 1:" range from the ROUGE threshold hints
 
 Revision ID: 1aac7a522b8c

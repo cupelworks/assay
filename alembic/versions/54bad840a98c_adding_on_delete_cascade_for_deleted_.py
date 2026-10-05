@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """adding on delete cascade for deleted tests against test type assignments
 
 Revision ID: 54bad840a98c

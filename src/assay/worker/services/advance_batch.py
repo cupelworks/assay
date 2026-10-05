@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Advancing a batch that runs until there's an answer: after each wave, run
 the next one or stop (docs/version_1/statistics/dev_notes.md notes 30-32)."""
 import logging

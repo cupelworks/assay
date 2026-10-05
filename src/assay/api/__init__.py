@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 from fastapi import APIRouter
 
 from assay.api.datasets import router as datasets_router

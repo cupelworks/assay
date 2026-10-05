@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """One execution of a test set or plan, read whole (its runs counted and its
 checks gathered), and its runs listed with their names, checks and sorts.
 Sets and plans differ only in their tables, guards and id fields, which an

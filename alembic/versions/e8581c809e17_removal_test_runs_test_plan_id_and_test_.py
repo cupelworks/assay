@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """removal test_runs.test_plan_id and test_runs.test_plan
 
 Revision ID: e8581c809e17

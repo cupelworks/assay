@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """List batches, newest first, by scope and status, and count them by both."""
 from dataclasses import dataclass
 

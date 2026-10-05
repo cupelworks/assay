@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """METEOR: how much of the expected output the answer covers, counting other
 forms of a word and synonyms as matches.
 

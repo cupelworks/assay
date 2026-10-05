@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Time in Assay, one rule for the API and the worker: every timestamp is
 stored in UTC without an offset (the database columns hold none), and every
 response sends it in UTC with one ("2026-09-27T12:36:59.928077Z"). UTC has no

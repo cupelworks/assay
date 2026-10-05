@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """give the JSON and length fields their kinds, placeholders and hints
 
 Revision ID: 812acbc349ad

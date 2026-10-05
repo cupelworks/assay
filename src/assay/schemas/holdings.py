@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Which test sets hold a copy of a test, and which test plans link a test
 set: the reverse of a set's entries and a plan's linked sets."""
 import uuid

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """the judge's URL is the full endpoint, called as written
 
 Revision ID: b795f3711490

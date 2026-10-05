@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Search, filters and sort on the tests, test sets, test plans and datasets
 lists and a dataset's rows, on a real database."""
 import json

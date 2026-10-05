@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 from assay.services.test_sets.add_tests_to_test_set import add_tests_to_test_set_by_test_id
 from assay.services.test_sets.create_test_set import create_new_test_set
 from assay.services.test_sets.delete_test_set import (

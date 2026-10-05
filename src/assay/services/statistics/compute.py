@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """A finished batch's statistics, computed from its runs (docs/version_1/statistics/
 dev_notes.md notes 3, 7, 15–17, 21). Pure: the caller loads the runs and the
 entries they ran; nothing here touches the database, so every rule is tested

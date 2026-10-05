@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Response examples in the OpenAPI document exactly as written, nulls included.
 
 FastAPI encodes the whole document with `exclude_none=True`, which also strips

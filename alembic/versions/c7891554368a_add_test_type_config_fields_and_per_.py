@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """add test type config fields and per-assignment config
 
 Revision ID: c7891554368a

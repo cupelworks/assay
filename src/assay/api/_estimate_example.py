@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The estimate's Swagger example with a history: the FE canvas's state (a),
 a set entry whose four checks ran 40 times — Relevance passed 38, Correctness
 39, the other two every time. Taken from a real response

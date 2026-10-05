@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The arithmetic behind "run with statistics": pure functions on the
 standard library, no numpy or scipy (docs/version_1/statistics/dev_notes.md note 9 —
 scipy would add some 30 MB plus NumPy to an API image of about 48 MB, for

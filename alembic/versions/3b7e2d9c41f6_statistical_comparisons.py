@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """statistical comparisons: two finished batches compared check by check
 
 Revision ID: 3b7e2d9c41f6

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Whether the parts of Assay outside the API can do their work."""
 from enum import StrEnum
 

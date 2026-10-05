@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """version 2 foundations: indexes, a dataset row's position, a run's check types
 
 Revision ID: a7c3e1f5b9d2

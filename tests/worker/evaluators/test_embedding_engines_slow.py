@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Cosine Similarity and BERTScore on the real models: excluded by default,
 run with `pytest -m slow`. Needs the nlp extra, and downloads the models
 (about 800 MB) the first time. The BERTScore values are the reference

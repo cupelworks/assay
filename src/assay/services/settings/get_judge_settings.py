@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.judge_settings import resolve_judge_settings

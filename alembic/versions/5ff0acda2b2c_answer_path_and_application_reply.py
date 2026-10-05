@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """add test_type_assignments.answer_path and test_runs.application_reply
 
 Revision ID: 5ff0acda2b2c

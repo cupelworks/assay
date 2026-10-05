@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """One module per engine, each exposing evaluate(EvaluationInput) -> TestTypeResult.
 
 An engine is a pure function of its EvaluationInput: no database, no ORM

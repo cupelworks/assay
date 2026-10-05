@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """What a batch would run: a test, a test set or a test plan resolved into its
 entries and their checks, with the run-creation guards applied, so the
 estimate and the batch refuse exactly what an ordinary run would.

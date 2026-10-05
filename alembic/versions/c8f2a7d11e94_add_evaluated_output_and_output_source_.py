@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """add evaluated_output and output_source to test_runs
 
 Revision ID: c8f2a7d11e94

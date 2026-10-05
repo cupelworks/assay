@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """statistical batches, batch_id and batch_index on runs and executions, errored on results
 
 Revision ID: 90b64c0a5c27

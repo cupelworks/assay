@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """the trial: a statistical test with no verdict, and the status Done
 
 Revision ID: d6e8f0a2c4b5

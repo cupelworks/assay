@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """the statistical tests as rows: statistical_tests, and the engine on batches
 
 Revision ID: 7a3c5e9f1b2d

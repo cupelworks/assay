@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Which judge settings are in effect, and where from.
 
 The `judge` group's row in the settings table, when there is one, is the

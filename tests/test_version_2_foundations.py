@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Version 2's foundations on a real database: every run is created with its
 check types, dataset rows carry their number, and every list has an order."""
 import json

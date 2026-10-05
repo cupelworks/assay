@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Exact Match: the answer equals the expected output.
 
 Row settings: `trim` strips leading

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """How tests, test sets, test plans, entries, datasets and rows stand, on a real
 database: what their lists and pages read, and that the delete guards refuse
 exactly what the lists say can't be deleted."""

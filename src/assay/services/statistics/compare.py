@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Two finished batches compared check by check (docs/version_1/statistics/dev_notes.md
 notes 18, 22 and 24). Pure, like compute.py: the caller loads both batches'
 entries and runs, and the catalogue rows of their checks.

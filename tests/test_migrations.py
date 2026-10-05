@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Migrations that hand-write data changes, run against a scratch SQLite
 database — the one kind of contract the mocked-session unit tests can't see.
 

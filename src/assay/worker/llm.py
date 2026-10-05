@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The client that asks a judge model for a verdict.
 
 Plain HTTP (`httpx`), one request shape per provider, each posted to the

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Sync SQLAlchemy engine/session for the Celery worker — separate from
 assay/db.py's async one, because a Celery task is a plain synchronous
 callable, not running inside an asyncio event loop.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Shared fixtures. `db` is a real database: a template migrated once per test
 session (the catalogue of check types is seeded by the migrations), copied for
 every test, with an API client bound to it and a worker-side session to

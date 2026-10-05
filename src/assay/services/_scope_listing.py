@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The test set and test plan lists' declarations, built by one factory:
 the two differ only in their tables and their membership filters."""
 from collections.abc import Callable, Mapping

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """normalize look-alike characters in the text checks
 
 Revision ID: 3f8cecd2afff

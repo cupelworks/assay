@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Contains: the answer includes the assignment's `substring` — or, with
 `negate`, doesn't.
 

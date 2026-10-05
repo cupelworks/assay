@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Every timestamp is stored in UTC and sent in UTC with its offset."""
 from datetime import UTC, datetime, timedelta, timezone
 

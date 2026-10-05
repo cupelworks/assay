@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """give METEOR NLTK's parameters and plain texts, and seed METEOR (balanced)
 
 Revision ID: 6774a3279590

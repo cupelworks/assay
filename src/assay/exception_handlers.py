@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Exception handlers registered on the app.
 
 Two jobs. For the errors FastAPI already turns into responses (HTTPException,

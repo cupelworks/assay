@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Celery application for the run-execution worker.
 
 The Celery app itself, configured against Redis (or the local SQLite

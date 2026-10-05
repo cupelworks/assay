@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """correct stale run data: results, messages and runs a fixed bug spoiled
 
 Revision ID: d649f666f728

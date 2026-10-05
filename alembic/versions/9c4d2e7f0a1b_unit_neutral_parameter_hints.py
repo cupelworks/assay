@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """word the statistical tests' parameter hints without a unit
 
 Revision ID: 9c4d2e7f0a1b

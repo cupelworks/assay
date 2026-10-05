@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """seed the JSON checks: Is Valid JSON, Matches JSON Schema, JSON Field Equals
 
 Revision ID: 43a7467fc3bf

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """How a test, test set or test plan stands, read on its list without opening
 it: its latest batch, its latest run or execution outside a batch, and
 whether it has runs (what makes it impossible to delete, or an entry

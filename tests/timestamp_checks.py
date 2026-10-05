@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Finds timestamps sent without an offset: RFC 3339, the spec's `date-time`,
 requires one."""
 import re

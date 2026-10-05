@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The words the lists filter and sort by, the same on every list."""
 from enum import StrEnum
 

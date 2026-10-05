@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """regex and json_schema field kinds, and whole-number length bounds
 
 Revision ID: 45dabe26c054

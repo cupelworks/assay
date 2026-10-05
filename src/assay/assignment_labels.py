@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Labels that tell a test's assignments apart.
 
 A type can be assigned to a test more than once, so each assignment has a

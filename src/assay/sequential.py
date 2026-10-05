@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Run until there's an answer (docs/version_1/statistics/dev_notes.md notes 30–32): a
 batch that runs in waves and stops as soon as every check has one.
 

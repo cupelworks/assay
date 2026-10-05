@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 from assay.services.statistics.catalogue import catalogue, load_catalogue
 from assay.services.statistics.create_batch import create_batch
 from assay.services.statistics.create_comparison import create_comparison

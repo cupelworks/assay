@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Regex Match: the assignment's `pattern` matches the answer — or, with
 `negate`, doesn't.
 

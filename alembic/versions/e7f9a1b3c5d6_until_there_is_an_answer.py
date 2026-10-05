@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """run until there's an answer: two catalogue rows, and a batch's waves
 
 Revision ID: e7f9a1b3c5d6

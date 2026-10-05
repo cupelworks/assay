@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The second wave end to end on a real database: judge stability, the
 failures-by-entry diagnostic, and the comparisons of scores and pairs. Judge
 and metric outcomes are written as the worker would write them: this
