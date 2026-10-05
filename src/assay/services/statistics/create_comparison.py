@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""Compare two finished batches of the same scope, check by check
-(docs/version_1/statistics/dev_notes.md notes 18, 22). Computed at once and stored."""
+"""Compare two finished batches of the same scope, check by check.
+Computed at once and stored."""
 import logging
 import uuid
 

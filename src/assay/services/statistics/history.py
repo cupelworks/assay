@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
 """What earlier runs showed about each check of a scope — the history the
-estimate plans a batch from (docs/version_1/statistics/dev_notes.md notes 30–32).
+estimate plans a batch from.
 
 A check's history is its results in the runs that asked exactly the question
 the batch would ask: a set entry's runs (its content is frozen once it has

@@ -13,7 +13,7 @@ from assay.timestamps import utc_now
 
 
 class BatchStatus(StrEnum):
-    """A batch's lifecycle and outcome (docs/version_1/statistics/dev_notes.md note 17).
+    """A batch's lifecycle and outcome.
 
     Its own enum, not an extension of TestStatus, so a run's status and a
     batch's can't be mixed up in a query. The words a run uses mean the same
@@ -76,8 +76,7 @@ class StatisticalTestModel(Base):
 class StatisticalBatchModel(Base):
     """
     One "run with statistics": a scope run N times as one batch, and the
-    statistical test computed over those runs once they've all finished
-    (docs/version_1/statistics/).
+    statistical test computed over those runs once they've all finished.
 
     The scope is exactly one of test_id, test_set_id, test_plan_id. The runs
     and executions it created carry this batch's id and their 1-based
@@ -85,7 +84,7 @@ class StatisticalBatchModel(Base):
     is one run, for a set or plan one execution with a run per entry.
 
     `result` is computed by the API the first time a read finds every run
-    finished, then stored and returned as is (note 19, decision 4): what was
+    finished, then stored and returned as is: what was
     verified, with what, when — the statistical claim kept like a run's
     outcome. `status` follows the runs until then. A batch is history: no
     endpoint deletes one.
@@ -142,7 +141,7 @@ class StatisticalBatchModel(Base):
 class StatisticalComparisonModel(Base):
     """
     Two finished batches of the same scope compared check by check: "did my
-    change help?" (docs/version_1/statistics/ notes 8, 18, 22). Computed when created,
+    change help?". Computed when created,
     stored, and read back as is — like a batch's result, the record of what
     was compared, with what, when.
 

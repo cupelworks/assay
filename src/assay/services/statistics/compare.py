@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""Two finished batches compared check by check (docs/version_1/statistics/dev_notes.md
-notes 18, 22 and 24). Pure, like compute.py: the caller loads both batches'
-entries and runs, and the catalogue rows of their checks.
+"""Two finished batches compared check by check. Pure, like compute.py: the
+caller loads both batches' entries and runs, and the catalogue rows of their
+checks.
 
 Entries are matched by entry id (a standalone test's single entry matches
 itself), checks by label. Whatever only one batch has is listed as unmatched,
@@ -39,7 +39,7 @@ from assay.services.statistics.catalogue import MAX_TIMES, POWER, sure
 from assay.services.statistics.compute import BatchEntry, fold, make_interval, r4
 
 # the fewest scores per batch Mann–Whitney can conclude with at 95%, and the
-# fewest pairs a paired comparison can (note 5)
+# fewest pairs a paired comparison can
 MANN_WHITNEY_FLOOR = 4
 PAIRED_FLOOR = 6
 

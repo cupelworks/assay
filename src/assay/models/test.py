@@ -478,8 +478,8 @@ class TestSetExecutionModel(Base):
     replayed_execution_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_set_executions.id"), nullable=True, index=True
     )
-    # Set when the execution is one time of a statistical batch
-    # (docs/version_1/statistics/): the batch, and which time (1-based) it is
+    # Set when the execution is one time of a statistical batch: the batch,
+    # and which time (1-based) it is
     batch_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("statistical_batches.id"), nullable=True, index=True
     )
@@ -613,8 +613,8 @@ class TestPlanExecutionModel(Base):
     replayed_execution_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("test_plan_executions.id"), nullable=True, index=True
     )
-    # Set when the execution is one time of a statistical batch
-    # (docs/version_1/statistics/): the batch, and which time (1-based) it is
+    # Set when the execution is one time of a statistical batch: the batch,
+    # and which time (1-based) it is
     batch_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("statistical_batches.id"), nullable=True, index=True
     )

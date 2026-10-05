@@ -2,8 +2,7 @@
 # Copyright (C) 2026 Francesco Campanile
 """What every batch endpoint shares: finding a batch, loading its runs and the
 entries they ran, its progress and spend, bringing its status up to date, and
-computing its result the first time a read finds every run finished
-(docs/version_1/statistics/dev_notes.md note 19, decision 4; note 21).
+computing its result the first time a read finds every run finished.
 """
 import logging
 import uuid

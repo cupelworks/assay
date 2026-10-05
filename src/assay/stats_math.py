@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
 """The arithmetic behind "run with statistics": pure functions on the
-standard library, no numpy or scipy (docs/version_1/statistics/dev_notes.md note 9 —
-scipy would add some 30 MB plus NumPy to an API image of about 48 MB, for
-functions this short).
+standard library, no numpy or scipy (scipy would add some 30 MB plus NumPy
+to an API image of about 48 MB, for functions this short).
 
 Every function here works on plain numbers and returns plain numbers or small
 frozen dataclasses; nothing reads the database or knows about runs. The
@@ -13,7 +12,7 @@ full precision.
 
 Conventions:
 - `confidence` is the confidence level (0.95), `alpha` is 1 - confidence.
-- Verdicts are three-way (note 7): `pass` when the data prove the claim at
+- Verdicts are three-way: `pass` when the data prove the claim at
   the confidence level, `fail` when they prove the opposite, `inconclusive`
   otherwise. A one-sided test is run in each direction; at most one of the
   two can reject at a confidence above 50%.
@@ -306,7 +305,7 @@ def binomial_gate_runs_to_decide(passes: int, n: int, target: float,
     × N) passes, the most likely count) would prove the side the rate is on:
     above the target → pass, below → fail. 27 of 29 against 90% → about 239;
     28 of 29 → 61. A new batch, never an extension: pooling batches until one
-    passes would make the stated confidence untrue (note 18). None when the
+    passes would make the stated confidence untrue. None when the
     observed rate is exactly the target (no batch size would decide it), or
     nothing was observed, or it would take more than `limit` runs — the
     caller passes the most a batch may run: a bigger answer can't be acted
@@ -672,7 +671,7 @@ def newcombe_interval(passes_a: int, n_a: int, passes_b: int, n_b: int,
 @dataclass(frozen=True)
 class ProportionComparison:
     """B against A on a pass rate. The verdict comes from the Newcombe
-    interval of B − A alone (decided, note 18): better when it lies above 0,
+    interval of B − A alone: better when it lies above 0,
     worse when below, no real difference at this sample size otherwise. The
     p-value is shown beside it, chi-square's when every expected count is at
     least 5, Fisher's exact otherwise — it informs, it never decides."""
@@ -729,7 +728,7 @@ def runs_needed_for_proportions(rate_a: float, rate_b: float, confidence: float,
     return max(2, math.ceil(numerator ** 2 / (rate_a - rate_b) ** 2))
 
 
-# ── the second wave (docs/version_1/statistics/dev_notes.md note 24) ───────────────────
+# ── the second wave ──────────────────────────────────────────────────────────────────
 
 
 def regularized_upper_gamma(a: float, x: float) -> float:

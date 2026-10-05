@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""Run with statistics (docs/version_1/statistics/): the catalogue of statistical tests,
+"""Run with statistics: the catalogue of statistical tests,
 the estimate shown before a batch is created, batches, and comparisons."""
 import inspect
 import uuid
