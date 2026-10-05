@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """JSON checks: the answer is JSON, and — depending on the row — matches a
 schema or has an expected value at a path.
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """add cascade delete for test set entries
 
 Revision ID: 03a774b2b416

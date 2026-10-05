@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """describe what the ROUGE row measures: ROUGE-L F1
 
 Revision ID: 1d1fddd1a247

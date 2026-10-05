@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """a batch's per-check targets and left-out checks; runs that skip checks
 
 Revision ID: c5d7e9a1b3f4

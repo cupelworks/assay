@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Every run in the system, filtered, searched, sorted and paged, and the same
 runs counted by status and by origin: one declaration (`RUNS`) for both."""
 import uuid

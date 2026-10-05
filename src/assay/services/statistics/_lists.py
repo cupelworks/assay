@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """What the batches and comparisons lists share: filtering and counting by the
 test, test set or test plan they ran. Both tables carry the three scope
 columns, so the declarations are built per table."""

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """A fingerprint of the code this process runs, taken when it starts.
 
 A worker keeps running the code it started with until it's restarted, while

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Run with statistics: the catalogue of statistical tests, the estimate shown
 before a batch is created, batches and their results, and comparisons of two
 batches (docs/version_1/statistics/).

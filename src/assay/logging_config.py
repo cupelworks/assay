@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Logging setup, applied once per process: by create_app() in the API, and
 by Celery's setup_logging signal in the worker and Beat (assay/worker/
 celery_app.py), so all three emit the same records.

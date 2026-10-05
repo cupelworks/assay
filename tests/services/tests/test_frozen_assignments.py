@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 from types import SimpleNamespace
 
 from assay.services.tests._common import _frozen_test_type_assignments

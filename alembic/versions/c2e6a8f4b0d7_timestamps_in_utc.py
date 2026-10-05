@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """every timestamp stored in UTC
 
 Revision ID: c2e6a8f4b0d7

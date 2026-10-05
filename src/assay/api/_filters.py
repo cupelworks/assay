@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The query parameters every list shares, declared once: paging, a created
 range, search phrases, and the status and membership filters. A filter given
 several times means any of its values; different filters narrow together."""

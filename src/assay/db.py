@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import event

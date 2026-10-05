@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """seed deterministic variants: case-insensitive, strict, full match and negated checks
 
 Revision ID: dbc67550f049

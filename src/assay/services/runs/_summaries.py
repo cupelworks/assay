@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """What run and execution lists show without opening a run: the test it asked
 and the set or plan it ran in (joined from its frozen copy and its
 execution), its checks counted, runs counted by status, and the worst-first

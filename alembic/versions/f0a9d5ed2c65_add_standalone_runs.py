@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """add standalone_runs: a frozen copy of the test for every standalone run
 
 Revision ID: f0a9d5ed2c65

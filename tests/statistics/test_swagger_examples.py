@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Every example the statistics endpoints show in Swagger is a valid response:
 an example that drifted from the schema would teach the FE the wrong shape."""
 import pytest

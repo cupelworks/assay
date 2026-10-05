@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """BLEU: how much of the answer's wording, in runs of up to four words,
 appears in the expected output.
 

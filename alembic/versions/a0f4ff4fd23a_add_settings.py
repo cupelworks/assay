@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """add settings: settings saved from the UI, one row per group
 
 Revision ID: a0f4ff4fd23a

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 from assay.services.datasets.delete_dataset_rows import delete_dataset_rows_by_ids
 from assay.services.datasets.delete_full_dataset import delete_dataset_by_id
 from assay.services.datasets.get_dataset_rows import get_dataset_rows_by_id

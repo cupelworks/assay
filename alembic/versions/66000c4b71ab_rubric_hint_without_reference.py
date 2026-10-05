@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """say in the rubric hint of the judges that never see the expected output
 
 Revision ID: 66000c4b71ab

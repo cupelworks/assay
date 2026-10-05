@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The check types a run asks, written when the run is created: its frozen
 copy's checks, without the labels a statistical batch left out. One row per
 type (`TestRunCheckTypeModel`), so runs can be filtered by check type with a

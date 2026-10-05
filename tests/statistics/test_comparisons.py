@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Comparisons end to end on a real database."""
 from assay.models import TestStatus
 

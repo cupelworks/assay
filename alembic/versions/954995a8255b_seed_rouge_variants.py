@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """seed the ROUGE variants and give every ROUGE threshold a placeholder and hint
 
 Revision ID: 954995a8255b

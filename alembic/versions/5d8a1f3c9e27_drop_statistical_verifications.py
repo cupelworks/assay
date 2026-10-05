@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """drop statistical_verifications: the z-test calculator is gone
 
 Revision ID: 5d8a1f3c9e27

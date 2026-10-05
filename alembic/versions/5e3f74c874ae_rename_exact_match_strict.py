@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """rename Exact Match (strict) to Exact Match (whitespace-sensitive)
 
 Revision ID: 5e3f74c874ae

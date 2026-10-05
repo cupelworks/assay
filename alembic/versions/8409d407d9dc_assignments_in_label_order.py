@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """store assignment copies and results in label order
 
 Revision ID: 8409d407d9dc

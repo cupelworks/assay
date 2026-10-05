@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Two batches compared on plain data: the matching, the verdicts against
 published 2×2 examples, and what can't be compared."""
 import uuid

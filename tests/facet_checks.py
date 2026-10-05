@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The check every facets endpoint must pass: each count is the `total` its
 list gives with that value picked, within the other filters chosen."""
 

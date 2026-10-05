@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 # pydantic-settings extends pydantic for app configuration: reads values from
 # environment variables and .env files, then validates and coerces their types.
 # Distinct from pydantic's use in schemas.py, which validates API request/response bodies.

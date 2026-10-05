@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 import uuid
 
 from assay.models import StandaloneRunModel, TestRunCheckTypeModel, TestRunModel

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """What a check of a settings group does on the worker, whichever group:
 claim it atomically, expire it if it waited too long, write its outcome —
 and if anything goes wrong once it's claimed, write that as its outcome

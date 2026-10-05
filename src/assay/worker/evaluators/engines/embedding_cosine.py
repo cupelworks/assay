@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Cosine Similarity: how close in meaning the answer is to the expected
 output, as a whole, whatever the wording.
 

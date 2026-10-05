@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The batch result's arithmetic on plain data: the fold of runs into a check's
 sample, the verdicts, the roll-up to a batch status and its sentence."""
 import uuid

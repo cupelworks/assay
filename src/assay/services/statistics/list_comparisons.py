@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """List comparisons, newest first, by batch, scope and outcome, and count them
 by scope and outcome."""
 import uuid

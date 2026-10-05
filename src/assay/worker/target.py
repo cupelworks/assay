@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The adapter that asks the application under test for an answer.
 
 Assay tests an application, not a bare model, so when a test has no

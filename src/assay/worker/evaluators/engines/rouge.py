@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """ROUGE: how much of the expected output's wording the answer shares.
 
 Scored with Google's reference implementation (`rouge-score`, in the `nlp`

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Swagger example fragments for how a test, test set or test plan stands,
 written once and spread into every example that shows one, so the lists, the
 details and the reverse lookups can't show it differently."""

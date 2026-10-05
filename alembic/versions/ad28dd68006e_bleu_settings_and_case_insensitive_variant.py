@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """give BLEU the sacreBLEU settings and texts, and seed BLEU (case-insensitive)
 
 Revision ID: ad28dd68006e

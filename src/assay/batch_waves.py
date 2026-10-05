@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The runs of a batch that runs in waves ("until there's an answer"): which
 checks it judges, what each check's runs showed so far, and the runs of its
 next wave. The worker advances such a batch after each wave; the API reads

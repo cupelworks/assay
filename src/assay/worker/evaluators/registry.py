@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Per-assignment dispatch, by engine.
 
 Called once per assigned test type from execute_run's loop, never once per

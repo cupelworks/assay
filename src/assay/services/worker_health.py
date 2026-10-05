@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 
 from assay.code_fingerprint import CODE_FINGERPRINT, CODE_VERSION
 from assay.messages import sentence

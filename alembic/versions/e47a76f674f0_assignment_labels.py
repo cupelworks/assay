@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """assignment labels: a test type can be assigned more than once
 
 Revision ID: e47a76f674f0

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """RequestContextMiddleware + the exception handlers, end to end through the
 real app. The routes added here are test-only: none of them touch the
 database, so the suite stays hermetic.

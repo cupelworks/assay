@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """What the comparison endpoints share: finding one, and the response."""
 import uuid
 

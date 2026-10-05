@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """say the statistical tests in plain words: names, questions, labels, hints
 
 Revision ID: b2e8f4a6c0d3

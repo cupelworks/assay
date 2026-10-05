@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 import pytest
 
 from assay.services.statistics.catalogue import MAX_RUNS, MAX_TIMES

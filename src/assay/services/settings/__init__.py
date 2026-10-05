@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 from assay.services.settings.create_judge_check import create_judge_check
 from assay.services.settings.create_target_check import create_target_check
 from assay.services.settings.get_judge_check import get_judge_check

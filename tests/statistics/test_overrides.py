@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """A check's own target and checks left out of a batch (note 32): checked
 against the scope, stored on the batch, skipped by the runs, honoured by the
 result."""

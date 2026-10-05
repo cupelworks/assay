@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """test_set_id nullable=True
 
 Revision ID: e7dd644e8fc5

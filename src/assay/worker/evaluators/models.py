@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Models the scoring engines load once per process and share.
 
 A worker runs its tasks in threads (`--pool=threads`), so a model is loaded

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Read one batch: its progress while it runs, its result once every run has
 finished — computed and stored by the first read that finds them all done."""
 import uuid

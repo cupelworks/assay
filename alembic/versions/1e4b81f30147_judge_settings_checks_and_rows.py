@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """add the judge settings group and judge_checks, and ready the judge rows
 
 Revision ID: 1e4b81f30147

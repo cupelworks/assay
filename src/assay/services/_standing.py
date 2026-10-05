@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """How a page of tests, test sets or test plans stands, in a fixed number of
 queries per page, never one per item: counts per key, the keys that have
 something, and the latest row per key. The delete guards ask the same "has

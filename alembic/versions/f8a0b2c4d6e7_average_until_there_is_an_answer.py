@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """the average, until there's an answer: a catalogue row
 
 Revision ID: f8a0b2c4d6e7

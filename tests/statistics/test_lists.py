@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The batches and comparisons lists: repeatable filters, the outcome filter
 and their facets, on a real database."""
 import uuid

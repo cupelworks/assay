@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The Swagger example of one execution read whole, for a test set's and a
 test plan's alike: the two differ only in the key naming their scope."""
 from assay.api._standing_examples import run_counts

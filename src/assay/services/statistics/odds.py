@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Planning a batch from what the checks have already shown
 (docs/version_1/statistics/dev_notes.md notes 30–32): each check's chance of an answer
 at each size, the batch's chance that every check gets one, the size worth

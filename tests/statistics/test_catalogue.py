@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The catalogue of statistical tests as rows: what the seed gives, what editing
 a row changes, what a row the code can't run does, and what the engine
 recorded on a batch protects."""

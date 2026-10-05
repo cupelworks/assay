@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The catalogue of statistical tests: engines in code, rows configuring them.
 
 An engine (ENGINES, one per StatisticalEngine) is the arithmetic and its

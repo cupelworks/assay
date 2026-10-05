@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """replace scores with per-type results and rework test run status
 
 Revision ID: c3e6b3074e69

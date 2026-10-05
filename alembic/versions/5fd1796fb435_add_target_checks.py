@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """add target_checks: checks of the application-under-test settings
 
 Revision ID: 5fd1796fb435

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """LLM judge: a model reads the answer and gives a verdict against a rubric.
 
 The judge model is the one chosen in the judge settings (a settings group

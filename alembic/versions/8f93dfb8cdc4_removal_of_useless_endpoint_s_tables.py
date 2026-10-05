@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """removal of useless endpoint's tables
 
 Revision ID: 8f93dfb8cdc4

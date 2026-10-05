@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The history the estimate plans from: per entry and check, the recent runs
 that asked the same question and gave the check a result."""
 import uuid

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The run and execution lists on a real database: what each item says without
 opening a run, every filter of `GET /runs` and its facets, the executions'
 runs counted, and one execution read whole."""

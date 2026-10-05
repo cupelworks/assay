@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Length limits: the answer's length is within the assignment's bounds.
 
 Row settings: `unit` is `words` or `characters`. Words are runs of

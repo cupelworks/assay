@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Batches end to end on a real database: creation across the three scopes, the
 runs executed in-process by the worker's own service, the result computed on
 read and stored, the listing, and the stop."""

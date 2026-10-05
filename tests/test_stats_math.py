@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """The statistics maths against published values. Every reference value
 below was produced by scipy 1.x / statsmodels (exact binomial, Clopper–Pearson,
 Wilson, Student's t, chi-square, Fisher, Newcombe) or is quoted in

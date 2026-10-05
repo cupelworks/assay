@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """seed the length limits: Word Count Limit, Character Count Limit
 
 Revision ID: fc7d91b00c18

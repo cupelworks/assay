@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Settings users see and change from the UI.
 
 TargetSettings is the one definition of the application-under-test

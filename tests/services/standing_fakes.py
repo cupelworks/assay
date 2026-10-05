@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Francesco Campanile
 """Neutral standing for service tests on a mocked session: the describe
 helpers' own mapping still runs, while the queries for how items stand
 (tested on a real database in tests/test_standing.py) answer with nothing
