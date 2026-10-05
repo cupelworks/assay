@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""Stop a batch midway (docs/version_1/statistics/dev_notes.md note 16): every run
+"""Stop a batch midway: every run
 still Pending becomes Not Ran, in one statement; runs already executing
 finish and count. The batch is then Incomplete once none is running."""
 import logging

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""A finished batch's statistics, computed from its runs (docs/version_1/statistics/
-dev_notes.md notes 3, 7, 15–17, 21). Pure: the caller loads the runs and the
+"""A finished batch's statistics, computed from its runs. Pure: the caller loads the runs and the
 entries they ran; nothing here touches the database, so every rule is tested
 on plain data.
 
@@ -605,7 +604,7 @@ def compute(name: StatisticalEngine, parameters: dict[str, float], floor: int,
 
 def roll_up(result: BatchResult, stopped: bool, runs: list[BatchRun],
             engine: StatisticalEngine | None = None) -> BatchStatus:
-    """The batch's outcome (note 17): stopped → Incomplete; nothing evaluated —
+    """The batch's outcome: stopped → Incomplete; nothing evaluated —
     every run Not Ran, or every applicable check errored in every run (no
     judge chosen, an engine not installed), so not one verdict could be drawn
     → NotRan, since no batch size would change it; one proven failure fails
