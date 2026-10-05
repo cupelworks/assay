@@ -7,7 +7,7 @@ Revises: b2e8f4a6c0d3
 Create Date: 2026-10-03 12:00:00.000000
 
 A batch can set one check's own target ("Relevance at 8 in 10") and leave
-checks out (docs/version_1/statistics/dev_notes.md note 32): `statistical_batches.
+checks out: `statistical_batches.
 overrides` keeps them as the request gave them, `{"targets": [{"entry_id",
 "label", "target"}], "leave_out": [{"entry_id", "label"}]}`, null for a
 batch with neither. A left-out check isn't evaluated at all, so its judge

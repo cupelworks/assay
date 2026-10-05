@@ -6,8 +6,7 @@ Revision ID: d6e8f0a2c4b5
 Revises: c5d7e9a1b3f4
 Create Date: 2026-10-03 13:00:00.000000
 
-A check that has never run gives the estimate nothing to plan from
-(docs/version_1/statistics/dev_notes.md note 32): a trial runs the scope a few times
+A check that has never run gives the estimate nothing to plan from: a trial runs the scope a few times
 to learn how each check behaves, and gives no verdict. It's a catalogue row
 on its own engine, `trial` ("Learn how it behaves": 10 times by default, 50
 at most), and a finished trial's status is a new word, `Done` — it asked no

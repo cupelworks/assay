@@ -7,8 +7,7 @@ Revises: 3b7e2d9c41f6
 Create Date: 2026-10-02 15:00:00.000000
 
 The one-sample z-test endpoint never wrote this table (0 rows everywhere); the
-one-sample t-test of a statistical batch does its job properly
-(docs/version_1/statistics/dev_notes.md notes 10 and 19, decision 2). The downgrade
+one-sample t-test of a statistical batch does its job properly. The downgrade
 recreates the table as the migrations that built it left it (39de048bc57a,
 dd380d11e3fa, a32c5cc3f97a), empty.
 

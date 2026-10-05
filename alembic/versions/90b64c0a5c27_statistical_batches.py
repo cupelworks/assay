@@ -6,7 +6,7 @@ Revision ID: 90b64c0a5c27
 Revises: 8409d407d9dc
 Create Date: 2026-10-02 09:00:00.000000
 
-Run with statistics (docs/version_1/statistics/ note 8): a `statistical_batches` row per
+Run with statistics: a `statistical_batches` row per
 batch — the scope (exactly one of a test, a test set, a test plan), the
 statistical test and its parameters, the times requested, the plan (floor and
 calls per time), the status (its own enum, note 17) and, once every run has
@@ -16,7 +16,7 @@ the time (1-based) they belong to.
 Every stored check result also gains `errored` (false): the worker now marks
 a check that raised an error, so statistics can count it apart from a real
 failure. Results written before can't be told apart; they read as evaluated,
-as they always did (dev_notes.md note 21).
+as they always did.
 
 """
 from collections.abc import Sequence
