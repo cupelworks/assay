@@ -12,10 +12,8 @@ the Free Software Foundation. It is distributed in the hope that it will be usef
 WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full terms.
 
-Every source file starts with the same notice in two lines (`SPDX-License-Identifier:
-AGPL-3.0-only` and the copyright); `tests/test_license_headers.py` checks it, and new
-migrations get it from `alembic/script.py.mako`. If you run a modified Assay for others to
-use over a network, the AGPL asks you to offer them its source code.
+Every source file carries this notice in its first two lines. If you run a modified Assay
+for others to use over a network, the AGPL asks you to offer them its source code.
 
 ## Status
 
