@@ -1,5 +1,7 @@
 # Assay
 
+<p align="center"><img src=".github/assets/assay.gif" alt="Assay" width="640"></p>
+
 Test how a GenAI-powered application behaves, and keep a reproducible record of it.
 
 Bring the prompts you send your application, the answers it gave and the answers you
