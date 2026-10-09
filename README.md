@@ -26,6 +26,13 @@ PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full terms.
 Every source file carries this notice in its first two lines. If you run a modified Assay
 for others to use over a network, the AGPL asks you to offer them its source code.
 
+## Contributing
+
+Assay is open source, but it doesn't accept pull requests or other code contributions.
+Issues are welcome: open one to report a bug or suggest an idea. See
+[CONTRIBUTING.md](CONTRIBUTING.md). Report security vulnerabilities privately, as
+[SECURITY.md](SECURITY.md) explains, never in a public issue.
+
 ## Contents
 
 - [What it does](#what-it-does)
