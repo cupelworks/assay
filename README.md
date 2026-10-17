@@ -14,7 +14,7 @@ expected. Assay scores each case with the checks you assign — deterministic ru
 metrics against a threshold, LLM-as-judge verdicts against a rubric — organises cases into
 stable test sets and plans, and records every run's outcome.
 
-See how Assay works, step by step, at [cupel.works/assay](https://cupel.works/assay).
+See how Assay works, step by step, at [cupel.works/assay/how-it-works](https://cupel.works/assay/how-it-works).
 
 **This repository is Assay's backend**: the HTTP API and the worker that scores runs. No web
 interface is part of the open-source release; you use Assay through its API, whose
@@ -30,7 +30,7 @@ the Free Software Foundation. It is distributed in the hope that it will be usef
 WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full terms.
 
-Every source file carries this notice in its first two lines. If you run a modified Assay
+Every Python source file carries this notice in its first two lines. If you run a modified Assay
 for others to use over a network, the AGPL asks you to offer them its source code.
 
 ## Contributing
@@ -92,8 +92,8 @@ A run's status moves from `Pending` to `Running`, then to one of:
 | Status | Meaning |
 |---|---|
 | `Green` | Every check passed. |
-| `Amber` | Some checks passed, some didn't. |
-| `Red` | Every check was evaluated and none passed. |
+| `Amber` | Some checks passed, some didn't. A check that couldn't run counts as not passed. |
+| `Red` | No check passed. |
 | `NotRan` | Nothing could be evaluated (e.g. the application didn't answer); `error` says why. |
 
 ## Quickstart
@@ -241,7 +241,7 @@ OpenAPI description at `/openapi.json`.
 
 | Area | Endpoints |
 |---|---|
-| Health | `GET /health`, `GET /health/worker` (broker and workers: ready, outdated, unreachable) |
+| Health | `GET /health`, `GET /health/worker` (broker and workers: ready, outdated, no_worker, broker_unreachable) |
 | Datasets | `GET`/`DELETE /datasets`, `GET /datasets/facets`, `GET /datasets/{id}`, `GET /datasets/{id}/rows`, `POST /datasets/path` (import a `.jsonl`), `POST`/`PUT`/`PATCH`/`DELETE /datasets/rows`, `PATCH /datasets/name` |
 | Tests | `GET /tests/types`, `GET`/`POST`/`DELETE /tests`, `GET /tests/facets`, `GET`/`PATCH /tests/{id}`, `GET /tests/{id}/test-sets`, `POST /tests/from-dataset` |
 | Test sets | `GET`/`POST /test-sets`, `GET /test-sets/facets`, `GET`/`PATCH`/`DELETE /test-sets/{id}`, `GET /test-sets/{id}/test-plans`, entries: `GET`/`POST`/`PATCH`/`DELETE /test-sets/{id}/entries`, `GET`/`PATCH /test-sets/{id}/entries/{entry_id}` |
