@@ -1,6 +1,11 @@
 # Assay
 
-<p align="center"><img src=".github/assets/assay.gif" alt="Assay" width="640"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cupelworks/assay/main/.github/assets/assay-dark.png">
+    <img src="https://raw.githubusercontent.com/cupelworks/assay/main/.github/assets/assay-light.png" alt="Assay, cast by CupelWorks: write the test once, run it as often as you choose, get a verdict" width="640">
+  </picture>
+</p>
 
 Test how a GenAI-powered application behaves, and keep a reproducible record of it.
 
