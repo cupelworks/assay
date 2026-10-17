@@ -44,7 +44,7 @@ Issues are welcome: open one to report a bug or suggest an idea. See
 
 - [What it does](#what-it-does)
 - [Concepts](#concepts)
-- [Quickstart](#quickstart)
+- [Getting started](#getting-started)
 - [Configuration](#configuration)
 - [Testing your application](#testing-your-application)
 - [Judging with an LLM](#judging-with-an-llm)
@@ -96,7 +96,25 @@ A run's status moves from `Pending` to `Running`, then to one of:
 | `Red` | No check passed. |
 | `NotRan` | Nothing could be evaluated (e.g. the application didn't answer); `error` says why. |
 
-## Quickstart
+## Getting started
+
+### Try it: Docker Compose
+
+Requires [Docker](https://docs.docker.com/get-docker/). From the repository's root:
+
+```bash
+docker compose up --build
+```
+
+This starts PostgreSQL, Redis, the database migrations, the API, the worker and Beat.
+Open <http://localhost:8000/docs> for the interactive API. The first build takes a while:
+the worker's image includes PyTorch and the NLP models (about 3.5 GB).
+
+To configure the application under test or the judge, put the `ASSAY_*` variables and
+the judge's key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) in a `.env` file next to
+`docker-compose.yml`. Stop with `docker compose down`; add `-v` to delete the database.
+
+### Develop: Python on your machine
 
 Requires Python 3.11+. With pip:
 
@@ -110,10 +128,9 @@ uvicorn assay.main:app --reload
 Or with [uv](https://docs.astral.sh/uv/): `uv sync --extra dev`, then prefix the commands
 with `uv run`.
 
-Open <http://127.0.0.1:8000/docs> for the interactive API.
-
-Runs are scored by a separate worker process, which needs Redis — see [Worker](#worker).
-Without one, the API works and runs wait as `Pending`.
+Open <http://127.0.0.1:8000/docs> for the interactive API. Runs are scored by a separate
+worker process, which needs Redis: see [Worker](#worker). Without one, the API works and
+runs wait as `Pending`.
 
 ## Configuration
 
