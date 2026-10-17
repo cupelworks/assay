@@ -3,7 +3,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cupelworks/assay/main/.github/assets/assay-dark.png">
-    <img src="https://raw.githubusercontent.com/cupelworks/assay/main/.github/assets/assay-light.png" alt="Assay, cast by CupelWorks: write the test once, run it as often as you choose, get a verdict" width="640">
+    <img src="https://raw.githubusercontent.com/cupelworks/assay/main/.github/assets/assay-light.png" alt="Assay, cast by CupelWorks: write the test once, run it as often as you choose, get a verdict" width="100%">
   </picture>
 </p>
 
