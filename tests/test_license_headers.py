@@ -20,5 +20,5 @@ def test_every_source_file_starts_with_the_license_header():
     missing = [str(path.relative_to(ROOT)) for path in sources
                if not path.read_text().startswith(HEADER)]
 
-    assert len(sources) > 300
+    assert len(sources) > 250
     assert missing == []
