@@ -14,6 +14,8 @@ expected. Assay scores each case with the checks you assign — deterministic ru
 metrics against a threshold, LLM-as-judge verdicts against a rubric — organises cases into
 stable test sets and plans, and records every run's outcome.
 
+See how Assay works, step by step, at [cupel.works/assay](https://cupel.works/assay).
+
 **This repository is Assay's backend**: the HTTP API and the worker that scores runs. No web
 interface is part of the open-source release; you use Assay through its API, whose
 interactive reference is served at `/docs`.
