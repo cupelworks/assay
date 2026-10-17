@@ -10,6 +10,11 @@ COPY src/ ./src/
 
 RUN uv pip install --system --no-cache .
 
+# The migrations, so the same image can run `alembic upgrade head` before a
+# release (Docker Compose's `migrate` service, the Azure migration job)
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
+
 # This image is only used for deployments, where a log collector reads stdout —
 # JSON makes every field (request_id, status_code, ...) filterable there.
 # Locally the app runs via uvicorn directly and keeps the `text` default.

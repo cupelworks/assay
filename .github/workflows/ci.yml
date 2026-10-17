@@ -42,3 +42,50 @@ jobs:
 
       - name: Tests
         run: pytest -q -rs
+
+  # The tests migrate SQLite; production runs PostgreSQL, which is stricter.
+  migrations:
+    name: Migrations on PostgreSQL (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: assay
+          POSTGRES_PASSWORD: assay
+          POSTGRES_DB: assay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U assay -d assay"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ASSAY_DATABASE_URL: postgresql+asyncpg://assay:assay@localhost:5432/assay
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Upgrade an empty database
+        run: alembic upgrade head
+
+      - name: The database matches the models
+        run: alembic check
+
+      - name: Downgrade to empty and upgrade again
+        run: |
+          alembic downgrade base
+          alembic upgrade head

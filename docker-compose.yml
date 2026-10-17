@@ -1,0 +1,104 @@
+# Assay on your machine in one command: PostgreSQL, Redis, the database
+# migrations, the API, the worker and Beat.
+#
+#   docker compose up --build
+#
+# Then open http://localhost:8000/docs. The first build takes a while: the
+# worker's image includes PyTorch and the NLP models (about 3.5 GB).
+#
+# Settings: put ASSAY_* variables (the application under test, the judge) and
+# the judge's key (ANTHROPIC_API_KEY or OPENAI_API_KEY) in a `.env` file next to
+# this one; every Assay service reads it. Stop with `docker compose down`
+# (add `-v` to delete the database too).
+
+name: assay
+
+x-assay-environment: &assay-environment
+  ASSAY_DATABASE_URL: postgresql+asyncpg://assay:assay@postgres:5432/assay
+  ASSAY_CELERY_BROKER_URL: redis://redis:6379/0
+  ASSAY_CELERY_RESULT_BACKEND: redis://redis:6379/0
+  ASSAY_LOG_FORMAT: text
+
+x-env-file: &env-file
+  - path: .env
+    required: false
+
+x-worker-build: &worker-build
+  context: .
+  dockerfile: Dockerfile.worker
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: assay
+      POSTGRES_PASSWORD: assay
+      POSTGRES_DB: assay
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assay -d assay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.2-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Brings the database up to date, then exits; the API and the worker start
+  # only after it succeeds.
+  migrate:
+    build: .
+    image: assay-api
+    command: ["alembic", "upgrade", "head"]
+    env_file: *env-file
+    environment: *assay-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    image: assay-api
+    env_file: *env-file
+    environment: *assay-environment
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: *worker-build
+    image: assay-worker
+    env_file: *env-file
+    environment: *assay-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # Re-sends runs whose dispatch was lost; exactly one.
+  beat:
+    build: *worker-build
+    image: assay-worker
+    command: ["celery", "-A", "assay.worker", "beat", "--loglevel=info"]
+    env_file: *env-file
+    environment: *assay-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-data:

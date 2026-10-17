@@ -16,3 +16,13 @@ CLAUDE.md
 Dockerfile
 Dockerfile.worker
 .dockerignore
+# Not part of any image
+.github/
+infra/
+docs/
+demo/
+sample.jsonl
+uv.lock
+*.db
+htmlcov/
+.coverage
