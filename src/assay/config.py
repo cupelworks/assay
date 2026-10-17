@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from dotenv import dotenv_values
-from pydantic import ValidationError, field_validator, model_validator
+from pydantic import PositiveInt, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from assay.schemas.settings import JudgeSettings, TargetSettings, describe_validation_error
@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     # runs, and a plain comma-separated string isn't valid JSON — raises
     # SettingsError instead of falling back to the string validator below.
     cors_allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:4200"]
+    # The largest dataset file POST /datasets/upload accepts, in megabytes; a
+    # larger one is refused with 413 before it's parsed.
+    dataset_upload_max_mb: PositiveInt = 10
     # Celery's broker (task queue) and result backend. Only read by the worker
     # process (assay.worker) — the API process never imports celery and works
     # fine with these unset/unreachable. Local default is Redis (brew install

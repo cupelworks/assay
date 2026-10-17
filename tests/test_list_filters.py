@@ -2,7 +2,6 @@
 # Copyright (C) 2026 Francesco Campanile
 """Search, filters and sort on the tests, test sets, test plans and datasets
 lists and a dataset's rows, on a real database."""
-import json
 from datetime import datetime, timedelta
 
 import pytest
@@ -32,22 +31,13 @@ def _total(db, path, **params) -> int:
 
 
 @pytest.fixture
-def world(db, tmp_path):
+def world(db):
     """Tests: Alpha (green, in Good set), Beta (amber: one met of two, in Mixed
     set), Gamma (never run, no recorded answer, in no set), Delta (made from a
     dataset, a passed trial-free gate batch). Sets: Good (green), Mixed
     (amber), Unrun (never run). Plans: Release (Good), Spare (nothing)."""
-    path = tmp_path / "rows.jsonl"
-    path.write_text("".join(json.dumps({"prompt": p, "expected_output": "answer",
-                                        "model_output": "answer"}) + "\n"
-                            for p in ("How do I pay a bill?", "Where is my refund?")))
-    dataset = _ok(db.client.post("/datasets/path", json={"path": str(path),
-                                                          "dataset_name": "Banking"}))
-    empty_path = tmp_path / "empty.jsonl"
-    empty_path.write_text(json.dumps({"prompt": "unused", "expected_output": "e",
-                                      "model_output": "m"}) + "\n")
-    _ok(db.client.post("/datasets/path", json={"path": str(empty_path),
-                                               "dataset_name": "Spare rows"}))
+    dataset = db.dataset("Banking", ["How do I pay a bill?", "Where is my refund?"])
+    db.dataset("Spare rows", ["unused"], expected_output="e", model_output="m")
     made = _ok(db.client.post("/tests/from-dataset", json={
         "id": dataset["dataset"]["id"], "test_type_assignments": GOOD}))["test_cases"]
     delta_id = made[0]["id"]

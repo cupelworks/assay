@@ -78,7 +78,7 @@ Issues are welcome: open one to report a bug or suggest an idea. See
 
 | Term | Meaning |
 |---|---|
-| **Dataset** | Rows of `prompt`, `expected_output` and `model_output`, imported from a `.jsonl` file. Tests can be made from its rows. |
+| **Dataset** | Rows of `prompt`, `expected_output` and `model_output`, uploaded as a `.jsonl` file. Tests can be made from its rows. |
 | **Test** | An input, an optional expected answer, an optional recorded answer, and the checks assigned to it. Always editable. |
 | **Check** | A check type from the catalogue with its settings (a threshold, a pattern, a rubric…) and a label unique within the test. |
 | **Test set** | A named group of **entries**: copies of tests. An entry freezes once it has run. |
@@ -153,6 +153,7 @@ Copy `.env.example` to `.env`. Every variable is optional; the defaults work loc
 | `ASSAY_LOG_FORMAT` | `text` | `text` for a terminal, `json` for a log collector |
 | `ASSAY_HOST` / `ASSAY_PORT` | `127.0.0.1` / `8000` | Where `python -m assay.main` listens |
 | `ASSAY_CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated origins allowed to call the API from a browser |
+| `ASSAY_DATASET_UPLOAD_MAX_MB` | `10` | The largest dataset file `POST /datasets/upload` accepts, in MB |
 | `ASSAY_TARGET_URL` | *(unset)* | Your application's endpoint — see [Testing your application](#testing-your-application) |
 | `ASSAY_TARGET_METHOD` | `POST` | `POST`, `PUT` or `PATCH` |
 | `ASSAY_TARGET_HEADERS` | `{}` | JSON headers; values may reference `${ENV_VAR}` |
@@ -269,7 +270,7 @@ OpenAPI description at `/openapi.json`.
 | Area | Endpoints |
 |---|---|
 | Health | `GET /health`, `GET /health/worker` (broker and workers: ready, outdated, no_worker, broker_unreachable) |
-| Datasets | `GET`/`DELETE /datasets`, `GET /datasets/facets`, `GET /datasets/{id}`, `GET /datasets/{id}/rows`, `POST /datasets/path` (import a `.jsonl`), `POST`/`PUT`/`PATCH`/`DELETE /datasets/rows`, `PATCH /datasets/name` |
+| Datasets | `GET`/`DELETE /datasets`, `GET /datasets/facets`, `GET /datasets/{id}`, `GET /datasets/{id}/rows`, `POST /datasets/upload` (upload a `.jsonl` file), `GET /datasets/upload` (its size limit), `POST`/`PUT`/`PATCH`/`DELETE /datasets/rows`, `PATCH /datasets/name` |
 | Tests | `GET /tests/types`, `GET`/`POST`/`DELETE /tests`, `GET /tests/facets`, `GET`/`PATCH /tests/{id}`, `GET /tests/{id}/test-sets`, `POST /tests/from-dataset` |
 | Test sets | `GET`/`POST /test-sets`, `GET /test-sets/facets`, `GET`/`PATCH`/`DELETE /test-sets/{id}`, `GET /test-sets/{id}/test-plans`, entries: `GET`/`POST`/`PATCH`/`DELETE /test-sets/{id}/entries`, `GET`/`PATCH /test-sets/{id}/entries/{entry_id}` |
 | Test plans | `GET`/`POST /test-plans`, `GET /test-plans/facets`, `GET`/`PATCH`/`DELETE /test-plans/{id}`, `GET`/`POST`/`DELETE /test-plans/{id}/entries` |
