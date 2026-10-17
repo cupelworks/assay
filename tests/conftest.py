@@ -6,6 +6,7 @@ every test, with an API client bound to it and a worker-side session to
 execute runs in-process. Dispatch to the broker is captured, never sent. For
 services that fold rows from several tables together, which a mocked session
 can't show."""
+import json
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -65,6 +66,16 @@ class Database:
             "name": name, "input": input, "model_output": model_output,
             "expected_output": expected_output, "test_type_assignments": checks})
         assert response.status_code in (200, 201), response.text
+        return response.json()
+
+    def dataset(self, name, prompts, expected_output="answer", model_output="answer") -> dict:
+        """A dataset uploaded with one row per prompt; the upload's response."""
+        content = "".join(json.dumps({"prompt": prompt, "expected_output": expected_output,
+                                      "model_output": model_output}) + "\n"
+                          for prompt in prompts)
+        response = self.client.post("/datasets/upload", data={"dataset_name": name},
+                                    files={"file": (f"{name}.jsonl", content)})
+        assert response.status_code == 201, response.text
         return response.json()
 
     def test_set(self, name, tests) -> dict:

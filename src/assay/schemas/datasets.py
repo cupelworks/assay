@@ -1,32 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
 import uuid
-from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from assay.schemas import Pagination
 from assay.timestamps import Timestamp
-
-
-class DataSetImportViaPathRequest(BaseModel):
-    path: str = Field(
-        ...,
-        description="Path to the dataset to be imported.",
-    )
-    dataset_name: str = Field(
-        ...,
-        min_length=1,
-        max_length=255,
-        description="The name of the dataset.",
-    )
-
-    @field_validator('path')
-    @classmethod
-    def must_be_jsonl(cls, v: str) -> str:
-        if Path(v).suffix != '.jsonl':
-            raise ValueError("Path must point to a jsonl file.")
-        return v
 
 
 class DataSetID(BaseModel):
@@ -63,11 +42,54 @@ class DataSetImportedData(BaseModel):
     loaded: DataRowInfo
 
 
-class DataSetImportViaPathResponse(DataSetImportedData):
-    path: str = Field(
-        ...,
-        description="Path to the dataset to be imported.",
-    )
+class DataSetUploadLimits(BaseModel):
+    max_bytes: int = Field(description="The largest file `POST /datasets/upload` accepts, in "
+                                       "bytes; a larger one is refused with 413.")
+
+
+class DataSetLineProblem(BaseModel):
+    """One thing wrong with a line, as the validation found it."""
+    loc: list[str | int] = Field(description="The field it concerns (`[\"prompt\"]`), or "
+                                             "`[]` for the line as a whole.")
+    msg: str = Field(description="The validation's own message.")
+    type: str = Field(description="The kind of problem: `json_invalid`, `model_type`, "
+                                  "`missing`, `string_type`, ...")
+
+
+class DataSetLineError(BaseModel):
+    """A line of an uploaded file that isn't a valid dataset row."""
+    line: int = Field(description="Its line in the file, from 1, counting blank lines, as "
+                                  "an editor shows it.")
+    msg: str = Field(description="What's wrong with it, ready to show: \"expected_output is "
+                                 "missing.\"")
+    errors: list[DataSetLineProblem]
+
+
+class DataSetInvalidLines(BaseModel):
+    """The detail of a 422 for an upload with invalid lines: nothing was imported."""
+    msg: str = Field(description="A summary, ready to show: \"3 lines aren't valid dataset "
+                                 "rows. Nothing was imported.\"")
+    invalid_lines: int = Field(description="How many lines are invalid, all of them.")
+    lines: list[DataSetLineError] = Field(
+        description="The first 100 invalid lines, in the file's order.")
+
+
+class RequestValidationItem(BaseModel):
+    """One of FastAPI's own validation errors: `loc`, `msg` and `type` always, and
+    whatever else FastAPI adds (`input`, `ctx`)."""
+    model_config = ConfigDict(extra="allow")
+
+    loc: list[str | int] = Field(description="Where in the request: `[\"body\", \"file\"]`.")
+    msg: str = Field(description="What's wrong: `Field required`.")
+    type: str = Field(description="The kind of problem: `missing`, `string_too_long`, ...")
+
+
+class DataSetUploadRefused(BaseModel):
+    """A 422 from `POST /datasets/upload`: nothing was imported."""
+    detail: DataSetInvalidLines | str | list[RequestValidationItem] = Field(
+        description="An object when lines are invalid, a string when the file isn't UTF-8 "
+                    "text, FastAPI's usual list of `{loc, msg, type}` when a part is missing "
+                    "or invalid.")
 
 
 class DataSetDeletedData(BaseModel):

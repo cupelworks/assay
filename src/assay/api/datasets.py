@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from assay.api._filters import CreatedEdges, CreatedFrom, CreatedTo, Limit, Offset, search
@@ -15,13 +15,13 @@ from assay.schemas import (
     DataSetID,
     DataSetImportedData,
     DataSetImportingData,
-    DataSetImportViaPathRequest,
-    DataSetImportViaPathResponse,
     DataSetInfo,
     DataSetMetadata,
     DataSetRow,
     DataSetRowUpdatedData,
     DatasetSort,
+    DataSetUploadLimits,
+    DataSetUploadRefused,
     PaginatedDataSetResponse,
     PaginatedDataSetRowResponse,
     RowRange,
@@ -35,7 +35,8 @@ from assay.services import (
     replace_dataset_content_by_dataset_id,
     update_dataset_name_by_id,
     update_dataset_rows_by_id,
-    upload_dataset_via_path,
+    upload_dataset,
+    upload_limits,
     upload_new_rows_in_existing_dataset,
 )
 from assay.services.datasets.get_datasets_metadata import DatasetFilters, get_dataset_facets
@@ -79,6 +80,109 @@ async def get_datasets_facets(
     each filter's values: each facet within every other filter chosen. `rows`
     counts by row count: `0`, `1-10`, `11-100`, `101+`."""
     return await get_dataset_facets(session, filters, created_edges)
+
+
+_DETAIL_SCHEMA = {
+    "type": "object",
+    "properties": {"detail": {"type": "string"}},
+    "required": ["detail"],
+}
+
+
+@router.get(
+    path="/datasets/upload",
+    summary="The largest file a dataset upload accepts",
+    responses={200: {"content": {"application/json": {"example": {"max_bytes": 10485760}}}}},
+    response_model=DataSetUploadLimits,
+)
+async def get_dataset_upload_limits() -> DataSetUploadLimits:  # pragma: no cover
+    """How large a file `POST /datasets/upload` accepts, in bytes, so a client can say so and
+    refuse a larger file before sending it. Set by `ASSAY_DATASET_UPLOAD_MAX_MB` (10 MB by
+    default)."""
+    return upload_limits()
+
+
+@router.post(
+    path="/datasets/upload",
+    status_code=201,
+    summary="Create a dataset from an uploaded .jsonl file",
+    responses={
+        201: {"content": {"application/json": {"example": {
+            "dataset": {"id": "6f1c2a9e-8b7d-4c3e-9a1f-2d5e8c7b4a10", "name": "Support, English"},
+            "loaded": {"n": 2, "ids": ["0b5d3f7e-1c2a-4e9b-8d6f-3a7c9e1b5d20",
+                                       "9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c30"]},
+        }}}},
+        409: {
+            "description": "A dataset with this name already exists; the file wasn't read.",
+            "content": {"application/json": {
+                "example": {"detail": "Dataset name 'Support, English' already exists."},
+                "schema": _DETAIL_SCHEMA,
+            }},
+        },
+        413: {
+            "description": "The file is larger than the limit `GET /datasets/upload` gives.",
+            "content": {"application/json": {
+                "example": {"detail": "The file is larger than 10 MB."},
+                "schema": _DETAIL_SCHEMA,
+            }},
+        },
+        422: {
+            "model": DataSetUploadRefused,
+            "description": "Nothing was imported. `detail` is an object when lines are "
+                           "invalid, a string when the file isn't UTF-8 text, and FastAPI's "
+                           "usual list when `file` or `dataset_name` is missing or invalid.",
+            "content": {"application/json": {"examples": {
+                "invalid_lines": {"summary": "Lines that aren't valid rows", "value": {
+                    "detail": {
+                        "msg": "2 lines aren't valid dataset rows. Nothing was imported.",
+                        "invalid_lines": 2,
+                        "lines": [
+                            {"line": 3, "msg": "expected_output is missing.", "errors": [
+                                {"loc": ["expected_output"], "msg": "Field required",
+                                 "type": "missing"}]},
+                            {"line": 7, "msg": "Not valid JSON (near character 2).",
+                             "errors": [{"loc": [],
+                                         "msg": "Invalid JSON: expected ident at line 1 "
+                                                "column 2",
+                                         "type": "json_invalid"}]},
+                        ],
+                    }}},
+                "not_utf8": {"summary": "A file that isn't UTF-8 text",
+                             "value": {"detail": "The file isn't UTF-8 text."}},
+                "missing_part": {"summary": "A part missing", "value": {"detail": [
+                    {"type": "missing", "loc": ["body", "dataset_name"],
+                     "msg": "Field required"}]}},
+            }}},
+        },
+    },
+    response_model=DataSetImportedData,
+)
+async def create_dataset_from_upload(
+        file: Annotated[UploadFile, File(
+            description="The `.jsonl` file: UTF-8 text, one JSON object per line with "
+                        "`prompt`, `expected_output` and `model_output`, all strings. Blank "
+                        "lines are skipped; the file's name doesn't matter.")],
+        dataset_name: Annotated[str, Form(
+            min_length=1, max_length=255,
+            description="The new dataset's name, unique among datasets.")],
+        session: SessionDep) -> DataSetImportedData:  # pragma: no cover
+    """Create a dataset from an uploaded `.jsonl` file, one row per non-blank line, in the
+    file's order.
+
+    Every line is checked before anything is written: one invalid line and nothing is
+    imported, and the 422 says which lines and why (the first 100, counting them all). The
+    name is checked first, before the file is read. A file with only blank lines creates an
+    empty dataset.
+
+    **Example line:**
+    ```json
+    {"prompt": "How do I reset my password?", "expected_output": "Go to Settings, then Security.",
+     "model_output": "Open Settings and choose Security."}
+    ```
+    A blank `model_output` means no recorded answer: a test made from that row asks the
+    application under test instead.
+    """
+    return await upload_dataset(file, dataset_name, session)
 
 
 @router.get(
@@ -161,89 +265,6 @@ async def get_dataset_rows(
     """List a dataset's rows by number, each with its number and how many tests
     were made from it; `q` narrows them. `total` counts the rows within `q`."""
     return await get_dataset_rows_by_id(dataset_id, session, offset, limit, q)
-
-
-@router.post(
-    path="/datasets/path",
-    responses={
-        404: {
-            "description": "File not found at the given path.",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "File not found: /path/to/file.jsonl"},
-                    "schema": {
-                        "type": "object",
-                        "properties": {"detail": {"type": "string"}},
-                        "required": ["detail"],
-                    },
-                }
-            },
-        },
-        409: {
-            "description": "A dataset with the same name already exists.",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Dataset name 'my_dataset' already exists."},
-                    "schema": {
-                        "type": "object",
-                        "properties": {"detail": {"type": "string"}},
-                        "required": ["detail"],
-                    },
-                }
-            },
-        },
-        422: {
-            "description": "One or more lines in the .jsonl file failed schema validation.",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": [
-                            {
-                                "line": 2,
-                                "content": '{"prompt": "missing model_output field"}',
-                                "errors": [
-                                    {
-                                        "type": "missing",
-                                        "loc": ["model_output"],
-                                        "msg": "Field required",
-                                    }
-                                ],
-                            }
-                        ]
-                    },
-                }
-            },
-        },
-    },
-    response_model=DataSetImportViaPathResponse,
-)
-async def create_dataset_from_path(
-        request: DataSetImportViaPathRequest,
-        session: SessionDep):  # pragma: no cover
-    """Load a dataset from a local `.jsonl` file and persist it as a Dataset with its rows.
-
-    Each line must be a valid JSON object matching the dataset schema (`prompt`, `model_output`,
-    and `expected_output`). All lines are validated before any data is written —
-    the whole file is rejected if any line is invalid (fail fast, no partial imports).
-
-    The dataset name must be unique — if a dataset with the same name already exists, the
-    request is rejected before any file I/O is performed.
-
-    On success, one `Dataset` record and one `DatasetRow` per line are created in a single
-    transaction. The response includes the dataset ID, name, total row count, and the list
-    of generated row IDs.
-
-    **Example line:**
-    ```json
-    {"prompt": "Summarize this article...", "model_output": "Short summary.",
-     "expected_output": "A brief summary."}
-    ```
-
-    **Note:** the file must be accessible from the server's filesystem.
-    Remote URLs and cloud storage paths are not supported.
-    """
-
-    return await upload_dataset_via_path(request, session)
 
 
 @router.post(

@@ -9,7 +9,8 @@ from assay.services.datasets import (
     replace_dataset_content_by_dataset_id,
     update_dataset_name_by_id,
     update_dataset_rows_by_id,
-    upload_dataset_via_path,
+    upload_dataset,
+    upload_limits,
     upload_new_rows_in_existing_dataset,
 )
 from assay.services.runs import (
@@ -139,7 +140,8 @@ __all__ = [
     "delete_dataset_rows_by_ids",
     "update_judge_settings",
     "upload_new_rows_in_existing_dataset",
-    "upload_dataset_via_path",
+    "upload_dataset",
+    "upload_limits",
     "delete_dataset_by_id",
     "modify_test_by_id",
     "replace_dataset_content_by_dataset_id",

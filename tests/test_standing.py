@@ -3,7 +3,6 @@
 """How tests, test sets, test plans, entries, datasets and rows stand, on a real
 database: what their lists and pages read, and that the delete guards refuse
 exactly what the lists say can't be deleted."""
-import json
 import uuid
 
 import pytest
@@ -21,16 +20,11 @@ def _by_name(items) -> dict:
 
 
 @pytest.fixture
-def world(db, tmp_path):
+def world(db):
     """A dataset of three rows, tests made from two of them, a test made by
     hand, a set holding two tests (one copy since unlinked), a plan linking
     the set, a standalone run, a set run, a plan run, a batch of the set."""
-    path = tmp_path / "d.jsonl"
-    path.write_text("".join(json.dumps({"prompt": p, "expected_output": "answer",
-                                        "model_output": "answer"}) + "\n"
-                            for p in ("first", "second", "third")))
-    dataset = _ok(db.client.post("/datasets/path", json={"path": str(path),
-                                                          "dataset_name": "Questions"}))
+    dataset = db.dataset("Questions", ["first", "second", "third"])
     made = _ok(db.client.post("/tests/from-dataset", json={
         "id": dataset["dataset"]["id"], "test_type_assignments": GOOD}))
     by_hand = db.test(name="By hand", checks=GOOD)
@@ -263,12 +257,8 @@ def test_the_defaults_keep_numbered_names_and_the_recorded_answers(db, world):
     assert all(t["name"].startswith("New Test ") and t["model_output"] == "answer" for t in made)
 
 
-def test_a_row_of_another_dataset_is_a_422_naming_it(db, world, tmp_path):
-    other = tmp_path / "other.jsonl"
-    other.write_text(json.dumps({"prompt": "p", "expected_output": "e",
-                                 "model_output": "m"}) + "\n")
-    stranger = _ok(db.client.post("/datasets/path", json={"path": str(other),
-                                                           "dataset_name": "Other"}))
+def test_a_row_of_another_dataset_is_a_422_naming_it(db, world):
+    stranger = db.dataset("Other", ["p"], expected_output="e", model_output="m")
     stranger_row = stranger["loaded"]["ids"][0]
 
     response = db.client.post("/tests/from-dataset", json={

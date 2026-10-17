@@ -10,7 +10,7 @@ from assay.services.datasets.get_datasets_metadata import (
 from assay.services.datasets.replace_dataset_content import replace_dataset_content_by_dataset_id
 from assay.services.datasets.update_dataset_name import update_dataset_name_by_id
 from assay.services.datasets.update_dataset_rows import update_dataset_rows_by_id
-from assay.services.datasets.upload_full_dataset import upload_dataset_via_path
+from assay.services.datasets.upload_dataset import upload_dataset, upload_limits
 from assay.services.datasets.upload_rows_in_dataset import upload_new_rows_in_existing_dataset
 
 __all__ = [
@@ -19,7 +19,8 @@ __all__ = [
     "get_dataset_rows_by_id",
     "update_dataset_name_by_id",
     "update_dataset_rows_by_id",
-    "upload_dataset_via_path",
+    "upload_dataset",
+    "upload_limits",
     "upload_new_rows_in_existing_dataset",
     "delete_dataset_rows_by_ids",
     "delete_dataset_by_id",

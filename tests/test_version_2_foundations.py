@@ -2,7 +2,6 @@
 # Copyright (C) 2026 Francesco Campanile
 """Version 2's foundations on a real database: every run is created with its
 check types, dataset rows carry their number, and every list has an order."""
-import json
 import uuid
 
 from sqlalchemy import select
@@ -99,12 +98,8 @@ def test_a_batchs_next_wave_records_check_types_too(db):
 # --- dataset rows carry their number ---
 
 
-def _import(db, tmp_path, name, prompts) -> dict:
-    path = tmp_path / f"{name}.jsonl"
-    path.write_text("".join(json.dumps({"prompt": p, "expected_output": "e",
-                                        "model_output": "m"}) + "\n" for p in prompts))
-    return _created(db.client.post("/datasets/path",
-                                   json={"path": str(path), "dataset_name": name}))
+def _import(db, name, prompts) -> dict:
+    return db.dataset(name, prompts, expected_output="e", model_output="m")
 
 
 def _numbers(db, dataset_id) -> list[tuple[str, int]]:
@@ -119,8 +114,8 @@ def _row(prompt) -> dict:
     return {"prompt": prompt, "expected_output": "e", "model_output": "m"}
 
 
-def test_an_import_numbers_its_lines_and_added_rows_go_after_the_highest(db, tmp_path):
-    imported = _import(db, tmp_path, "d", ["a", "b", "c"])
+def test_an_import_numbers_its_lines_and_added_rows_go_after_the_highest(db):
+    imported = _import(db, "d", ["a", "b", "c"])
     dataset_id = imported["dataset"]["id"]
     assert _numbers(db, dataset_id) == [("a", 1), ("b", 2), ("c", 3)]
 
@@ -134,16 +129,16 @@ def test_an_import_numbers_its_lines_and_added_rows_go_after_the_highest(db, tmp
     assert _numbers(db, dataset_id) == [("a", 1), ("b", 2), ("d", 3)]
 
 
-def test_a_deleted_rows_gap_is_kept(db, tmp_path):
-    imported = _import(db, tmp_path, "d", ["a", "b", "c"])
+def test_a_deleted_rows_gap_is_kept(db):
+    imported = _import(db, "d", ["a", "b", "c"])
     db.client.request("DELETE", "/datasets/rows",
                       json={"row_ids": [imported["loaded"]["ids"][1]]})
 
     assert _numbers(db, imported["dataset"]["id"]) == [("a", 1), ("c", 3)]
 
 
-def test_replacing_the_content_numbers_the_new_rows_from_1(db, tmp_path):
-    imported = _import(db, tmp_path, "d", ["a", "b", "c"])
+def test_replacing_the_content_numbers_the_new_rows_from_1(db):
+    imported = _import(db, "d", ["a", "b", "c"])
     dataset_id = imported["dataset"]["id"]
 
     replaced = db.client.put("/datasets/rows",
@@ -153,8 +148,8 @@ def test_replacing_the_content_numbers_the_new_rows_from_1(db, tmp_path):
     assert _numbers(db, dataset_id) == [("x", 1), ("y", 2)]
 
 
-def test_rows_are_listed_by_their_number(db, tmp_path):
-    imported = _import(db, tmp_path, "d", [f"p{i}" for i in range(12)])
+def test_rows_are_listed_by_their_number(db):
+    imported = _import(db, "d", [f"p{i}" for i in range(12)])
 
     rows = db.client.get(f"/datasets/{imported['dataset']['id']}/rows",
                          params={"offset": 0, "limit": 100}).json()["items"]
@@ -165,10 +160,10 @@ def test_rows_are_listed_by_their_number(db, tmp_path):
 # --- every list has an order ---
 
 
-def test_tests_test_sets_and_datasets_are_listed_newest_first(db, tmp_path):
+def test_tests_test_sets_and_datasets_are_listed_newest_first(db):
     names = [db.test(name=f"t{i}")["name"] for i in range(3)]
     sets = [db.test_set(f"s{i}", [])["name"] for i in range(3)]
-    datasets = [_import(db, tmp_path, f"d{i}", ["a"])["dataset"]["name"] for i in range(3)]
+    datasets = [_import(db, f"d{i}", ["a"])["dataset"]["name"] for i in range(3)]
 
     assert [t["name"] for t in db.client.get("/tests").json()["test_cases"]] == names[::-1]
     assert [s["name"] for s in db.client.get("/test-sets").json()["items"]] == sets[::-1]

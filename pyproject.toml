@@ -1,6 +1,6 @@
 [project]
 name = "assay"
-version = "2.2.0"
+version = "2.3.0"
 authors = [{ name = "Francesco Campanile" }]
 description = "Test how a GenAI-powered application behaves: score its outputs with deterministic checks, NLP metrics and LLM-as-judge verdicts, organise cases into test sets and plans, and keep a reproducible record of every run."
 readme = "README.md"
@@ -29,6 +29,8 @@ dependencies = [
     "jsonschema>=4.18",                        # Matches JSON Schema's engine (worker/evaluators/engines/json_check.py),
                                                 # any draft the schema declares; the API checks a schema is valid with it
                                                 # when the check is assigned
+    "python-multipart>=0.0.20",                # Reads multipart/form-data: FastAPI needs it for POST /datasets/upload's
+                                                # file and form fields
 ]
 
 [project.optional-dependencies]
