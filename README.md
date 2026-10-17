@@ -112,7 +112,17 @@ the worker's image includes PyTorch and the NLP models (about 3.5 GB).
 
 To configure the application under test or the judge, put the `ASSAY_*` variables and
 the judge's key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) in a `.env` file next to
-`docker-compose.yml`. Stop with `docker compose down`; add `-v` to delete the database.
+`docker-compose.yml`.
+
+Ctrl+C stops it and keeps everything for the next `docker compose up`. Add `-d` to run it
+in the background instead, and `docker compose stop` stops it. To clean up, from the same
+folder:
+
+| Command | Removes |
+|---|---|
+| `docker compose down` | The containers; the database is kept |
+| `docker compose down -v` | The containers and the database |
+| `docker compose down -v --rmi all` | Everything, the images too (about 4.3 GB); the next `docker compose up --build` builds them again |
 
 ### Develop: Python on your machine
 
