@@ -276,7 +276,7 @@ OpenAPI description at `/openapi.json`.
 | Test sets | `GET`/`POST /test-sets`, `GET /test-sets/facets`, `GET`/`PATCH`/`DELETE /test-sets/{id}`, `GET /test-sets/{id}/test-plans`, entries: `GET`/`POST`/`PATCH`/`DELETE /test-sets/{id}/entries`, `GET`/`PATCH /test-sets/{id}/entries/{entry_id}` |
 | Test plans | `GET`/`POST /test-plans`, `GET /test-plans/facets`, `GET`/`PATCH`/`DELETE /test-plans/{id}`, `GET`/`POST`/`DELETE /test-plans/{id}/entries` |
 | Runs | `POST /runs/standalone/{test_id}`, `POST /runs/test-sets/{id}` (live), `POST /runs/test-sets/{id}/executions/{execution_id}` (replay), the same two for `/runs/test-plans/{id}`, `GET /runs`, `GET /runs/facets`, `GET /runs/executions`, and each scope's executions, runs and run details |
-| Settings | `GET`/`PATCH`/`DELETE /settings/target` and `/settings/judge`, `POST /settings/{target,judge}/checks`, `GET /settings/{target,judge}/checks/{id}` |
+| Settings | `GET`/`PATCH`/`DELETE /settings/target` and `/settings/judge`, `POST /settings/{target,judge}/checks`, `GET /settings/{target,judge}/checks/{id}`, `GET /settings/operations` (how the deployment is set up, read-only) |
 | Statistics | `GET /statistics/tests`, `POST /statistics/estimate`, `GET`/`POST /statistics/batches`, `GET /statistics/batches/facets`, `GET /statistics/batches/{id}`, `POST /statistics/batches/{id}/stop`, `GET`/`POST /statistics/comparisons`, `GET /statistics/comparisons/facets`, `GET /statistics/comparisons/{id}` |
 
 What is protected, and why:
