@@ -16,8 +16,8 @@ stable test sets and plans, and records every run's outcome.
 
 See how Assay works, step by step, at [cupel.works/assay/how-it-works](https://cupel.works/assay/how-it-works).
 
-**This repository is Assay's backend**: the HTTP API and the worker that scores runs. No web
-interface is part of the open-source release; you use Assay through its API, whose
+**This repository is Assay's backend**: the HTTP API and the worker that scores runs. The
+web interface is [cupelworks/assayfe](https://github.com/cupelworks/assayfe); the API's
 interactive reference is served at `/docs`.
 
 ## License
