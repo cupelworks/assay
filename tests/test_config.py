@@ -21,6 +21,20 @@ def test_log_format_only_accepts_text_or_json():
         Settings(_env_file=None, log_format="xml")
 
 
+# --- the root path (ASSAY_ROOT_PATH) ---
+
+
+@pytest.mark.parametrize("root_path", ["", "/api", "/assay/api"])
+def test_a_root_path_is_empty_or_a_path(root_path):
+    assert Settings(_env_file=None, root_path=root_path).root_path == root_path
+
+
+@pytest.mark.parametrize("root_path", ["api", "/api/", "/"])
+def test_a_root_path_without_a_leading_slash_or_with_a_trailing_one_is_refused(root_path):
+    with pytest.raises(ValidationError, match="must start with / and not end with one"):
+        Settings(_env_file=None, root_path=root_path)
+
+
 # --- the application under test (ASSAY_TARGET_*) ---
 
 
