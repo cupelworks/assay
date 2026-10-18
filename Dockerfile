@@ -21,6 +21,14 @@ COPY alembic/ ./alembic/
 # An App Setting / env var on the host still overrides this.
 ENV ASSAY_LOG_FORMAT=json
 
+# Where the API listens, read by uvicorn below and reported by
+# GET /settings/operations: every address in the container, port 8000. A
+# different port is ASSAY_PORT; a local .env's ASSAY_HOST=127.0.0.1 would
+# make the API unreachable from outside the container (Docker Compose pins
+# both for that reason).
+ENV ASSAY_HOST=0.0.0.0 ASSAY_PORT=8000
+
 EXPOSE 8000
 
-CMD ["uvicorn", "assay.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# exec: uvicorn replaces the shell, so it receives the container's stop signal
+CMD ["sh", "-c", "exec uvicorn assay.main:app --host \"$ASSAY_HOST\" --port \"$ASSAY_PORT\""]

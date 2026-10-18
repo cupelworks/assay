@@ -493,9 +493,11 @@ class JudgeCheck(BaseModel):
 
 
 class ApiOperations(BaseModel):
-    host: str = Field(description="The address the API process listens on (`0.0.0.0` in "
-                                  "a container).")
-    port: int = Field(description="The port it listens on.")
+    host: str = Field(description="The address the API listens on, `ASSAY_HOST`: "
+                                  "`0.0.0.0` in Assay's image. uvicorn started by hand "
+                                  "with its own `--host` overrides it unseen.")
+    port: int = Field(description="The port it listens on, `ASSAY_PORT`; likewise, "
+                                  "uvicorn's own `--port` overrides it unseen.")
     root_path: str = Field(description="The path it's served under behind a proxy, e.g. "
                                        "`/api`; empty when it's reached directly.")
 
@@ -521,8 +523,11 @@ class DatabaseConnection(BaseModel):
 
 
 class QueueConnection(BaseModel):
-    kind: str = Field(description="What it connects to: `redis` or `sqlite`.")
-    tls: bool = Field(description="Whether the connection is encrypted (`rediss://`).")
+    kind: str = Field(description="What it connects to: its URL's scheme without Celery's "
+                                  "`sqla+`/`db+` prefix or a driver, e.g. `redis`, "
+                                  "`sqlite`, `amqp`.")
+    tls: bool = Field(description="Whether the connection is encrypted: `rediss://` or "
+                                  "`amqps://`.")
 
 
 class OperationsSettings(BaseModel):

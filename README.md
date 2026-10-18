@@ -151,7 +151,7 @@ Copy `.env.example` to `.env`. Every variable is optional; the defaults work loc
 | `ASSAY_DATABASE_URL` | `sqlite+aiosqlite:///./assay.db` | The database; `postgresql+asyncpg://…` in production |
 | `ASSAY_LOG_LEVEL` | `INFO` | Level of Assay's own loggers; `DEBUG` also logs SQL |
 | `ASSAY_LOG_FORMAT` | `text` | `text` for a terminal, `json` for a log collector |
-| `ASSAY_HOST` / `ASSAY_PORT` | `127.0.0.1` / `8000` | Where `python -m assay.main` listens |
+| `ASSAY_HOST` / `ASSAY_PORT` | `127.0.0.1` / `8000` | Where the API listens, with `python -m assay.main` and in the Docker image (`0.0.0.0` / `8000` there); `uvicorn` started by hand takes its own `--host` / `--port` |
 | `ASSAY_ROOT_PATH` | *(empty)* | The path the API is served under when a proxy removes it before passing requests on, e.g. `/api`: the docs then load and send requests under it |
 | `ASSAY_CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated origins allowed to call the API from a browser |
 | `ASSAY_DATASET_UPLOAD_MAX_MB` | `10` | The largest dataset file `POST /datasets/upload` accepts, in MB |

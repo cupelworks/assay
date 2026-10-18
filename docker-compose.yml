@@ -67,7 +67,12 @@ services:
     build: .
     image: assay-api
     env_file: *env-file
-    environment: *assay-environment
+    environment:
+      <<: *assay-environment
+      # The container's own address and port, whatever .env says for running
+      # the API on this machine directly
+      ASSAY_HOST: 0.0.0.0
+      ASSAY_PORT: "8000"
     ports:
       - "8000:8000"
     depends_on:
