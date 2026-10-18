@@ -73,6 +73,9 @@ services:
       # the API on this machine directly
       ASSAY_HOST: 0.0.0.0
       ASSAY_PORT: "8000"
+      # Served under /api, as in production: the docs work directly on port
+      # 8000 and through the FE's container (/api/docs) alike
+      ASSAY_ROOT_PATH: /api
     ports:
       - "8000:8000"
     depends_on:
