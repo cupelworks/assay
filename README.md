@@ -151,7 +151,8 @@ Copy `.env.example` to `.env`. Every variable is optional; the defaults work loc
 | `ASSAY_DATABASE_URL` | `sqlite+aiosqlite:///./assay.db` | The database; `postgresql+asyncpg://…` in production |
 | `ASSAY_LOG_LEVEL` | `INFO` | Level of Assay's own loggers; `DEBUG` also logs SQL |
 | `ASSAY_LOG_FORMAT` | `text` | `text` for a terminal, `json` for a log collector |
-| `ASSAY_HOST` / `ASSAY_PORT` | `127.0.0.1` / `8000` | Where `python -m assay.main` listens |
+| `ASSAY_HOST` / `ASSAY_PORT` | `127.0.0.1` / `8000` | Where the API listens, with `python -m assay.main` and in the Docker image (`0.0.0.0` / `8000` there); `uvicorn` started by hand takes its own `--host` / `--port` |
+| `ASSAY_ROOT_PATH` | *(empty)* | The path the API is served under when a proxy removes it before passing requests on, e.g. `/api`: the docs then load and send requests under it |
 | `ASSAY_CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Comma-separated origins allowed to call the API from a browser |
 | `ASSAY_DATASET_UPLOAD_MAX_MB` | `10` | The largest dataset file `POST /datasets/upload` accepts, in MB |
 | `ASSAY_TARGET_URL` | *(unset)* | Your application's endpoint — see [Testing your application](#testing-your-application) |
@@ -275,7 +276,7 @@ OpenAPI description at `/openapi.json`.
 | Test sets | `GET`/`POST /test-sets`, `GET /test-sets/facets`, `GET`/`PATCH`/`DELETE /test-sets/{id}`, `GET /test-sets/{id}/test-plans`, entries: `GET`/`POST`/`PATCH`/`DELETE /test-sets/{id}/entries`, `GET`/`PATCH /test-sets/{id}/entries/{entry_id}` |
 | Test plans | `GET`/`POST /test-plans`, `GET /test-plans/facets`, `GET`/`PATCH`/`DELETE /test-plans/{id}`, `GET`/`POST`/`DELETE /test-plans/{id}/entries` |
 | Runs | `POST /runs/standalone/{test_id}`, `POST /runs/test-sets/{id}` (live), `POST /runs/test-sets/{id}/executions/{execution_id}` (replay), the same two for `/runs/test-plans/{id}`, `GET /runs`, `GET /runs/facets`, `GET /runs/executions`, and each scope's executions, runs and run details |
-| Settings | `GET`/`PATCH`/`DELETE /settings/target` and `/settings/judge`, `POST /settings/{target,judge}/checks`, `GET /settings/{target,judge}/checks/{id}` |
+| Settings | `GET`/`PATCH`/`DELETE /settings/target` and `/settings/judge`, `POST /settings/{target,judge}/checks`, `GET /settings/{target,judge}/checks/{id}`, `GET /settings/operations` (how the deployment is set up, read-only) |
 | Statistics | `GET /statistics/tests`, `POST /statistics/estimate`, `GET`/`POST /statistics/batches`, `GET /statistics/batches/facets`, `GET /statistics/batches/{id}`, `POST /statistics/batches/{id}/stop`, `GET`/`POST /statistics/comparisons`, `GET /statistics/comparisons/facets`, `GET /statistics/comparisons/{id}` |
 
 What is protected, and why:

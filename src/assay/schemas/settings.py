@@ -7,6 +7,9 @@ settings, JudgeSettings of the LLM judge's: their shape, defaults and
 rules. Each validates its group's environment fallback (config.py), what
 PATCH saves, a check's proposed settings, and a stored row read back — so a
 value refused in one place can't get in through another.
+
+OperationsSettings is the read-only rest: how the deployment itself is set
+up, from the ASSAY_* environment, never changed from the UI.
 """
 import re
 import uuid
@@ -487,6 +490,65 @@ class JudgeCheck(BaseModel):
         description="Why the check failed, when not `ok`: the reason a judge check in a "
                     "run would get.",
     )
+
+
+class ApiOperations(BaseModel):
+    host: str = Field(description="The address the API listens on, `ASSAY_HOST`: "
+                                  "`0.0.0.0` in Assay's image. uvicorn started by hand "
+                                  "with its own `--host` overrides it unseen.")
+    port: int = Field(description="The port it listens on, `ASSAY_PORT`; likewise, "
+                                  "uvicorn's own `--port` overrides it unseen.")
+    root_path: str = Field(description="The path it's served under behind a proxy, e.g. "
+                                       "`/api`; empty when it's reached directly.")
+
+
+class LoggingOperations(BaseModel):
+    level: str = Field(description="The level of Assay's own loggers: `INFO`, `DEBUG`, ...")
+    format: str = Field(description="`text` for a terminal, `json` for a log collector.")
+
+
+class WorkerDbPool(BaseModel):
+    size: int = Field(description="Database connections each worker process keeps open.")
+    max_overflow: int = Field(description="Connections it may open beyond that, briefly.")
+
+
+class ReconciliationOperations(BaseModel):
+    interval_minutes: int = Field(description="How often the scan runs.")
+    pending_threshold_minutes: int = Field(
+        description="How long a run stays `Pending` before the scan publishes it again.")
+
+
+class DatabaseConnection(BaseModel):
+    kind: str = Field(description="What it connects to: `postgresql` or `sqlite`.")
+
+
+class QueueConnection(BaseModel):
+    kind: str = Field(description="What it connects to: its URL's scheme without Celery's "
+                                  "`sqla+`/`db+` prefix or a driver, e.g. `redis`, "
+                                  "`sqlite`, `amqp`.")
+    tls: bool = Field(description="Whether the connection is encrypted: `rediss://` or "
+                                  "`amqps://`.")
+
+
+class OperationsSettings(BaseModel):
+    """How this deployment is set up: read from its ASSAY_* environment at
+    start-up, never changed from the UI. Connection strings are never
+    returned, only what each one connects to."""
+    api: ApiOperations
+    cors_allowed_origins: list[str] = Field(
+        description="The browser origins allowed to call the API from another address; "
+                    "empty when the FE is served from the API's own address.")
+    logging: LoggingOperations
+    dataset_upload_max_mb: int = Field(
+        description="The largest dataset file `POST /datasets/upload` accepts, in MB.")
+    worker_db_pool: WorkerDbPool
+    reconciliation: ReconciliationOperations = Field(
+        description="The scan that publishes runs again when their dispatch was lost.")
+    database: DatabaseConnection
+    broker: QueueConnection = Field(
+        description="The queue that hands runs and checks to the workers.")
+    result_backend: QueueConnection = Field(
+        description="Where the workers record whether each job finished.")
 
 
 def _contains_placeholder(value: Any) -> bool:

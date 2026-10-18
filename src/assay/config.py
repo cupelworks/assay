@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     log_format: Literal["text", "json"] = "text"
     host: str = "127.0.0.1"
     port: int = 8000
+    # The path the API is served under when a proxy in front of it removes
+    # that prefix before passing a request on: "/api" behind the FE's nginx.
+    # The docs then load /api/openapi.json and send their requests under it.
+    # Empty when clients reach the API directly; a request that still
+    # carries the prefix is routed all the same.
+    root_path: str = ""
     # sqlite+aiosqlite locally; postgresql+asyncpg in production
     database_url: str = "sqlite+aiosqlite:///./assay.db"
     # comma-separated in the env, e.g. ASSAY_CORS_ALLOWED_ORIGINS=http://localhost:3000,https://app.example.com
@@ -114,6 +120,15 @@ class Settings(BaseSettings):
     def _split_cors_origins(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @field_validator("root_path")
+    @classmethod
+    def _validate_root_path(cls, value: str) -> str:
+        if value and (not value.startswith("/") or value.endswith("/")):
+            raise ValueError(
+                f"root path {value!r} must start with / and not end with one, e.g. /api"
+            )
         return value
 
     @field_validator("target_method")

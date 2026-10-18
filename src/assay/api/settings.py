@@ -12,6 +12,7 @@ from assay.schemas import (
     JudgeCheckRequest,
     JudgeSettingsRead,
     JudgeSettingsUpdate,
+    OperationsSettings,
     TargetCheck,
     TargetCheckRequest,
     TargetSettingsRead,
@@ -22,6 +23,7 @@ from assay.services import (
     create_target_check,
     get_judge_check,
     get_judge_settings,
+    get_operations_settings,
     get_target_check,
     get_target_settings,
     reset_judge_settings,
@@ -493,3 +495,54 @@ async def read_judge_check(
     """One check, as far as it has got: `pending`, `running` (a worker is
     asking the judge) or `completed` with its outcome."""
     return await get_judge_check(check_id, session)
+
+
+_OPERATIONS_ON_AZURE = {
+    "api": {"host": "0.0.0.0", "port": 8000, "root_path": "/api"},
+    "cors_allowed_origins": [],
+    "logging": {"level": "INFO", "format": "json"},
+    "dataset_upload_max_mb": 10,
+    "worker_db_pool": {"size": 10, "max_overflow": 10},
+    "reconciliation": {"interval_minutes": 60, "pending_threshold_minutes": 15},
+    "database": {"kind": "postgresql"},
+    "broker": {"kind": "redis", "tls": False},
+    "result_backend": {"kind": "redis", "tls": False},
+}
+_OPERATIONS_LOCAL = {
+    "api": {"host": "127.0.0.1", "port": 8000, "root_path": ""},
+    "cors_allowed_origins": ["http://localhost:4200"],
+    "logging": {"level": "INFO", "format": "text"},
+    "dataset_upload_max_mb": 10,
+    "worker_db_pool": {"size": 10, "max_overflow": 10},
+    "reconciliation": {"interval_minutes": 60, "pending_threshold_minutes": 15},
+    "database": {"kind": "sqlite"},
+    "broker": {"kind": "redis", "tls": False},
+    "result_backend": {"kind": "redis", "tls": False},
+}
+
+
+@router.get(
+    path="/settings/operations",
+    summary="Read how this deployment is set up",
+    responses={200: {
+        "description": "The deployment's own settings, as the API read them from its "
+                       "`ASSAY_*` environment at start-up. Connection strings are never "
+                       "returned, only what each one connects to.",
+        "content": {"application/json": {"examples": {
+            "deployed": {"summary": "Behind the FE's proxy, on PostgreSQL",
+                         "value": _OPERATIONS_ON_AZURE},
+            "local": {"summary": "On a developer's machine", "value": _OPERATIONS_LOCAL},
+        }}},
+    }},
+)
+async def read_operations_settings() -> OperationsSettings:
+    """How this deployment is set up: where the API listens and the path
+    it's served under, the browser origins it allows, logging, the dataset
+    upload limit, the worker's database pool, the reconciliation scan, and
+    what the database, the broker and the result backend are.
+
+    Read-only: these come from the `ASSAY_*` environment variables (README,
+    Configuration) and change with a restart, never from the UI. The worker
+    and Beat read the same variables; this is what the API process runs
+    with."""
+    return get_operations_settings()

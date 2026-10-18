@@ -1,3 +1,3 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-__version__ = "2.3.0"
+__version__ = "2.4.1"

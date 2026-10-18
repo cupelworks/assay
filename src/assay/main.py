@@ -95,6 +95,7 @@ def create_app() -> FastAPI:
         summary="Test how a GenAI application behaves — and keep a reproducible record of it.",
         description=_DESCRIPTION,
         version=__version__,
+        root_path=settings.root_path,
         responses={
             500: {
                 "description": (
@@ -132,11 +133,12 @@ def create_app() -> FastAPI:
     Instrumentator().instrument(app).expose(app)
 
     logger.info(
-        "Assay %s starting: log_level=%s log_format=%s database=%s",
+        "Assay %s starting: log_level=%s log_format=%s database=%s root_path=%s",
         __version__,
         settings.log_level,
         settings.log_format,
         make_url(settings.database_url).render_as_string(hide_password=True),
+        settings.root_path or "(none)",
         extra={"version": __version__, "log_level": settings.log_level},
     )
     return app
