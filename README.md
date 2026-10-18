@@ -108,7 +108,10 @@ docker compose up --build
 
 This starts PostgreSQL, Redis, the database migrations, the API, the worker and Beat.
 Open <http://localhost:8000/docs> for the interactive API. The first build takes a while:
-the worker's image includes PyTorch and the NLP models (about 3.5 GB).
+the worker's image includes PyTorch and the NLP models (about 3.5 GB). The API is served
+under `/api` too, as in production, so the web interface's own Docker Compose
+([cupelworks/assayfe](https://github.com/cupelworks/assayfe)) can run next to it, with the
+docs at <http://localhost:8080/api/docs>.
 
 To configure the application under test or the judge, put the `ASSAY_*` variables and
 the judge's key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) in a `.env` file next to
