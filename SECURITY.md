@@ -18,5 +18,8 @@ Include what you can of:
 - the version (`GET /health/worker` returns it) and how Assay was run (database,
   worker, settings that matter).
 
+Please describe the problem rather than send a fix: the maintainer writes every fix
+independently.
+
 You'll get an answer within a week. Once the problem is confirmed, we'll agree on a date to
 publish it together with the fix, and credit you unless you'd rather not be named.
