@@ -1,0 +1,284 @@
+# Deploys Assay (the BE and its FE) to your own Azure subscription with the
+# Terraform in infra/azure.
+#
+# A TEMPLATE: it does nothing in the Assay repository itself (the job skips
+# there). Copy it into your own PRIVATE deployment repository as
+# .github/workflows/deploy.yml, next to your environments/<name>/ folders (the
+# layout of example/), and set it up as
+# infra/azure/README.md explains: a GitHub environment per Azure environment
+# with its variables and secrets, an Azure identity GitHub logs in as (OIDC, no
+# stored password), and a storage account for Terraform's state.
+#
+# Which releases run where is written in environments/<name>/main.tf: the
+# BE's in the module's source (?ref=vX.Y.Z), the FE's in fe_version. To release,
+# change them and push to main: staging deploys. Production deploys only when
+# started by hand (Run workflow → production), from main.
+#
+# What one run does:
+#   1. reads the two versions and checks out cupelworks/assay and
+#      cupelworks/assayfe at those tags;
+#   2. checks that this FE works with this API (the FE's own check);
+#   3. terraform apply with the images already running, so the registry and
+#      everything else exist (on the very first run: placeholder images);
+#   4. builds assay-api, assay-worker and assay-fe in the registry, tagged with
+#      their versions (az acr build: no Docker on the runner); a version
+#      already built is reused, never built again over;
+#   5. runs the database migrations with the new API image, and stops if they
+#      fail;
+#   6. terraform apply with the new versions: every app moves to them;
+#   7. waits until Azure reports each app's new revision ready.
+#
+# Both applies go through a guard: if a plan would delete or replace the
+# resource group, the database server, its database or the Key Vault (a
+# change Azure can't make in place, such as the region or the geo-redundant
+# backup setting), the run stops before applying anything. Make such a change
+# deliberately, from your machine, after a backup.
+
+name: Deploy Assay to Azure
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Where to deploy
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+
+concurrency:
+  # one deployment per environment at a time, never cancelled halfway
+  group: deploy-${{ inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # the template's own repository never deploys
+    if: github.repository != 'cupelworks/assay'
+    runs-on: ubuntu-latest
+    # its variables, secrets and Azure login are this environment's only
+    environment: ${{ inputs.environment || 'staging' }}
+    permissions:
+      contents: read
+      id-token: write # log in to Azure with OIDC
+    env:
+      DEPLOY_ENV: ${{ inputs.environment || 'staging' }}
+      TF_DIR: environments/${{ inputs.environment || 'staging' }}
+      ASSAY_REPOSITORY: ${{ vars.ASSAY_REPOSITORY || 'cupelworks/assay' }}
+      ASSAY_FE_REPOSITORY: ${{ vars.ASSAY_FE_REPOSITORY || 'cupelworks/assayfe' }}
+      TF_IN_AUTOMATION: "true"
+      # azurerm and azapi: log in with the OIDC token GitHub gives this job
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_entra_client_id: ${{ vars.ENTRA_CLIENT_ID }}
+      TF_VAR_entra_client_secret: ${{ secrets.ENTRA_CLIENT_SECRET }}
+      TF_VAR_judge_api_key: ${{ secrets.JUDGE_API_KEY }}
+    steps:
+      - name: Production only from main
+        if: env.DEPLOY_ENV == 'production' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Production deploys from main only, not from ${GITHUB_REF}."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: The releases this environment runs
+        id: versions
+        run: |
+          main="$TF_DIR/main.tf"
+          be=$(sed -nE 's/^[[:space:]]*source[[:space:]]*=[[:space:]]*".*\?ref=v([0-9][^"]*)".*/\1/p' "$main" | head -1)
+          fe=$(sed -nE 's/^[[:space:]]*fe_version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$main" | head -1)
+          [ -n "$be" ] || { echo "::error file=$main::The module's source names no release: end it with ?ref=vX.Y.Z."; exit 1; }
+          [ -n "$fe" ] || { echo "::error file=$main::No fe_version: set the FE release this environment runs."; exit 1; }
+          echo "be=$be" >> "$GITHUB_OUTPUT"
+          echo "fe=$fe" >> "$GITHUB_OUTPUT"
+          echo "Deploying Assay $be with its FE $fe to $DEPLOY_ENV."
+
+      - name: Check out the BE at v${{ steps.versions.outputs.be }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.ASSAY_REPOSITORY }}
+          ref: v${{ steps.versions.outputs.be }}
+          path: assay
+          persist-credentials: false
+
+      - name: Check out the FE at v${{ steps.versions.outputs.fe }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.ASSAY_FE_REPOSITORY }}
+          ref: v${{ steps.versions.outputs.fe }}
+          path: assay-fe
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: assay-fe/package-lock.json
+
+      - name: This FE works with this API
+        working-directory: assay-fe
+        env:
+          BE: ${{ steps.versions.outputs.be }}
+          FE: ${{ steps.versions.outputs.fe }}
+        run: |
+          grep -q "^version = \"$BE\"" ../assay/pyproject.toml \
+            || { echo "::error::The BE's tag v$BE doesn't hold version $BE."; exit 1; }
+          [ "$(node -p 'require("./package.json").version')" = "$FE" ] \
+            || { echo "::error::The FE's tag v$FE doesn't hold version $FE."; exit 1; }
+          npm ci --ignore-scripts
+          node scripts/check-api-version.mjs "$BE"
+
+      - name: Log in to Azure
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: >
+          terraform init -input=false
+          -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}"
+          -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}"
+          -backend-config="container_name=${{ vars.TF_STATE_CONTAINER }}"
+          -backend-config="key=${{ vars.TF_STATE_KEY }}"
+          -backend-config="use_azuread_auth=true"
+          -backend-config="use_oidc=true"
+
+      - name: The guard against losing data
+        run: |
+          # guarded-apply <terraform plan arguments>: plan, stop if the plan would
+          # delete or replace what holds the data, then apply exactly that plan
+          cat > "$RUNNER_TEMP/guarded-apply" <<'GUARD'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          terraform plan -input=false -out=tfplan "$@"
+          kept='["azurerm_resource_group", "azurerm_postgresql_flexible_server",
+                 "azurerm_postgresql_flexible_server_database", "azurerm_key_vault"]'
+          lost=$(terraform show -json tfplan | jq -r --argjson kept "$kept" '
+            .resource_changes[]?
+            | select((.type as $t | $kept | index($t)) and (.change.actions | index("delete")))
+            | "\(.address) (\(.change.actions | join(" then ")))"')
+          if [ -n "$lost" ]; then
+            echo "::error::This plan would delete or replace what holds the data:"
+            echo "$lost" | sed 's/^/  /'
+            echo "Nothing was applied. Make this change deliberately, from your machine, after a backup."
+            exit 1
+          fi
+          terraform apply -input=false tfplan
+          GUARD
+          chmod +x "$RUNNER_TEMP/guarded-apply"
+
+      - name: Infrastructure, with the images already running
+        id: infra
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          running_be=$(terraform output -raw image_tag 2>/dev/null || true)
+          running_fe=$(terraform output -raw fe_image_tag 2>/dev/null || true)
+          "$RUNNER_TEMP/guarded-apply" -var "image_tag=${running_be}" -var "fe_image_tag=${running_fe}"
+          for name in registry_name registry_login_server resource_group_name \
+                      fe_app_name api_app_name worker_app_name beat_app_name \
+                      migrate_job_name fe_url; do
+            echo "${name}=$(terraform output -raw "$name")" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Build the images in the registry
+        env:
+          REGISTRY: ${{ steps.infra.outputs.registry_name }}
+          BE: ${{ steps.versions.outputs.be }}
+          FE: ${{ steps.versions.outputs.fe }}
+        run: |
+          # A version is built once: its tag is never built over
+          build() {
+            local image="$1" context="$2"; shift 2
+            if az acr repository show --name "$REGISTRY" --image "$image" >/dev/null 2>&1; then
+              echo "$image is already in the registry: reused."
+            else
+              az acr build --registry "$REGISTRY" --image "$image" "$@" "$context"
+            fi
+          }
+          build "assay-api:$BE" assay --file Dockerfile
+          build "assay-worker:$BE" assay --file Dockerfile.worker
+          build "assay-fe:$FE" assay-fe --file Dockerfile \
+            --build-arg "VERSION=$FE" --build-arg "REVISION=$(git -C assay-fe rev-parse HEAD)"
+
+      - name: Run the migrations with the new API image
+        env:
+          RG: ${{ steps.infra.outputs.resource_group_name }}
+          JOB: ${{ steps.infra.outputs.migrate_job_name }}
+          IMAGE: ${{ steps.infra.outputs.registry_login_server }}/assay-api:${{ steps.versions.outputs.be }}
+        run: |
+          # The new image first, then a plain start: start --image would replace
+          # the job's container, dropping its settings and secrets
+          az containerapp job update --name "$JOB" --resource-group "$RG" \
+            --image "$IMAGE" --container-name migrate --output none
+          execution=$(az containerapp job start --name "$JOB" --resource-group "$RG" \
+            --query name --output tsv)
+          echo "Migration execution: $execution"
+          for _ in $(seq 1 90); do
+            status=$(az containerapp job execution show --name "$JOB" --resource-group "$RG" \
+              --job-execution-name "$execution" --query properties.status --output tsv)
+            echo "status: $status"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Degraded) echo "::error::The migrations failed; see the job's logs in Log Analytics."; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::The migrations didn't finish in 15 minutes."
+          exit 1
+
+      - name: Release the new versions
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          BE: ${{ steps.versions.outputs.be }}
+          FE: ${{ steps.versions.outputs.fe }}
+        run: |
+          "$RUNNER_TEMP/guarded-apply" -var "image_tag=$BE" -var "fe_image_tag=$FE"
+
+      - name: Wait for every app's new revision
+        env:
+          RG: ${{ steps.infra.outputs.resource_group_name }}
+          BE: ${{ steps.versions.outputs.be }}
+          FE: ${{ steps.versions.outputs.fe }}
+          FE_URL: ${{ steps.infra.outputs.fe_url }}
+          APPS: >-
+            ${{ steps.infra.outputs.api_app_name }}
+            ${{ steps.infra.outputs.worker_app_name }}
+            ${{ steps.infra.outputs.beat_app_name }}
+            ${{ steps.infra.outputs.fe_app_name }}
+        run: |
+          # Ready: Azure provisioned the revision and its probes pass (the
+          # API's /health, the FE's /healthz). Read from Azure, so nothing
+          # needs to get past the sign-in.
+          for app in $APPS; do
+            for _ in $(seq 1 60); do
+              read -r latest ready <<< "$(az containerapp show --name "$app" --resource-group "$RG" \
+                --query '[properties.latestRevisionName, properties.latestReadyRevisionName]' --output tsv)"
+              if [ -n "$latest" ] && [ "$latest" = "$ready" ]; then
+                health=$(az containerapp revision show --name "$app" --resource-group "$RG" \
+                  --revision "$latest" --query properties.healthState --output tsv)
+                if [ "$health" != "Unhealthy" ]; then
+                  echo "$app: revision $latest ready (${health:-no probes})."
+                  continue 2
+                fi
+              fi
+              sleep 10
+            done
+            echo "::error::$app's new revision isn't ready after 10 minutes; see its logs."
+            exit 1
+          done
+          echo "Assay $BE with its FE $FE runs at $FE_URL"
