@@ -89,3 +89,33 @@ jobs:
         run: |
           alembic downgrade base
           alembic upgrade head
+
+  terraform:
+    name: Terraform (format, validate, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Format
+        run: terraform fmt -check -recursive infra/azure
+
+      # Plans the module against a mocked Azure provider: no account needed
+      - name: Module tests
+        working-directory: infra/azure/modules/assay
+        run: |
+          terraform init -backend=false -input=false
+          terraform test
+
+      - name: Validate the example
+        run: |
+          for dir in infra/azure/example/environments/staging \
+                     infra/azure/example/environments/production; do
+            echo "== $dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+
+      - name: The entra-app script parses
+        run: bash -n infra/azure/scripts/entra-app.sh
