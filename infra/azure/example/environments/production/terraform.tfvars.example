@@ -1,0 +1,9 @@
+# From your machine: copy to terraform.tfvars (git-ignored) and fill in. The
+# pipeline sets the same values from the GitHub environment instead.
+# Never put a secret here; pass them as environment variables:
+#   export TF_VAR_entra_client_secret=...   # from scripts/entra-app.sh create
+#   export TF_VAR_judge_api_key=...         # optional
+# The images to run are passed when applying: -var image_tag=... -var fe_image_tag=...
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+entra_client_id = "00000000-0000-0000-0000-000000000000"
