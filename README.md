@@ -145,6 +145,16 @@ Open <http://127.0.0.1:8000/docs> for the interactive API. Runs are scored by a 
 worker process, which needs Redis: see [Worker](#worker). Without one, the API works and
 runs wait as `Pending`.
 
+### Deploy: Azure with Terraform
+
+[`infra/azure/`](infra/azure/README.md) creates everything Assay and its FE need in your
+own Azure subscription (Container Apps, PostgreSQL, Key Vault, a container registry,
+logs, alerts, a private network), with a GitHub Actions pipeline template for staging and
+production from a private deployment repository of your own. Assay has no users of its
+own: the FE is the only thing reachable from the internet, behind Entra ID sign-in, and
+the API has no address outside the private network. What it creates, why, and what it
+costs: [infra/azure/AZURE-INFO.md](infra/azure/AZURE-INFO.md).
+
 ## Configuration
 
 Copy `.env.example` to `.env`. Every variable is optional; the defaults work locally.

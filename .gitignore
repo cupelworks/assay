@@ -56,3 +56,14 @@ flower.db
 /CLAUDE.md
 /sample.jsonl
 /uv.lock
+
+# Terraform: providers, state and your own values stay local
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+terraform.tfvars
+*.auto.tfvars
+backend.hcl

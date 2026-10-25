@@ -26,11 +26,12 @@ RUN python -m nltk.downloader -d /usr/share/nltk_data wordnet
 # BERTScore; ~800 MB), readable by every user; the worker then never goes online
 # for them. A row naming another model needs it added here.
 ENV HF_HOME=/opt/huggingface
-RUN python -c "from sentence_transformers import SentenceTransformer; \
-from transformers import AutoModel, AutoTokenizer; \
-[SentenceTransformer(name) for name in ('all-MiniLM-L6-v2', 'paraphrase-multilingual-MiniLM-L12-v2')]; \
-AutoTokenizer.from_pretrained('distilbert-base-uncased'); \
-AutoModel.from_pretrained('distilbert-base-uncased')"
+# One import line: Azure's image build (az acr build) reads any Dockerfile line
+# starting with "from" as a FROM instruction, inside a RUN too
+RUN python -c "import sentence_transformers as st, transformers as tf; \
+[st.SentenceTransformer(name) for name in ('all-MiniLM-L6-v2', 'paraphrase-multilingual-MiniLM-L12-v2')]; \
+tf.AutoTokenizer.from_pretrained('distilbert-base-uncased'); \
+tf.AutoModel.from_pretrained('distilbert-base-uncased')"
 ENV HF_HUB_OFFLINE=1
 
 # The worker needs no privileges; Beat writes its schedule file to /app
