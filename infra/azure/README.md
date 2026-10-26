@@ -150,7 +150,7 @@ you're assigned. Then:
 
 | When | Command |
 |---|---|
-| After the first apply, once the FE has an address | `entra-app.sh redirect <client id> "$(terraform output -raw fe_url)"`: until then the sign-in refuses, so nothing opens |
+| After the first apply, once the FE has an address | `entra-app.sh redirect <client id> "$(terraform output -raw fe_url)"`: until then the sign-in refuses, so nothing opens. Again if you destroy the environment and create it anew: the FE gets a new address |
 | To let someone else in | `entra-app.sh allow <client id> <their sign-in name>` |
 | Before the secret expires (a year) | `entra-app.sh rotate <client id>`: a new secret beside the old one; apply it, then delete the old one with the command it prints |
 
@@ -333,12 +333,16 @@ touch production:
 ```bash
 REPO=YOUR_ORG/YOUR_DEPLOYMENT_REPO
 ENV=staging   # then again with production
+# how GitHub names the repository to Azure: usually with ID numbers
+# (repo:org@123/repo@456), else plainly (repo:org/repo)
+PREFIX=$(gh api "repos/$REPO/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty')
+PREFIX=${PREFIX:-repo:$REPO}
 APP_ID=$(az ad app create --display-name "assay-deploy-$ENV" --query appId -o tsv)
 az ad sp create --id "$APP_ID"
 az ad app federated-credential create --id "$APP_ID" --parameters "{
   \"name\": \"github-$ENV\",
   \"issuer\": \"https://token.actions.githubusercontent.com\",
-  \"subject\": \"repo:$REPO:environment:$ENV\",
+  \"subject\": \"$PREFIX:environment:$ENV\",
   \"audiences\": [\"api://AzureADTokenExchange\"]
 }"
 # it creates resources and role assignments...
@@ -424,7 +428,9 @@ the sign-in, which `azurerm` doesn't cover).
   request ID.
 - **Alerts** (with `alert_emails`): the worker hasn't run for 15 minutes; the FE answered
   server errors (the API's, or the API unreachable); the API, the worker or Beat logged an
-  error. The worker's alert is off while `worker_enabled` is false.
+  error. The worker's alert is off while `worker_enabled` is false. Expect one worker
+  alert email just after an environment is created: Azure's replica count lags the new
+  worker, and the alert resolves itself (a second email) once it catches up.
 - **Settings:** the application under test and the judge can also be changed from the UI
   (Settings); saved settings win over the environment. Settings › Operations shows how
   the deployment is set up.
@@ -441,6 +447,11 @@ the sign-in, which `azurerm` doesn't cover).
 - **`RequestDisallowedByAzure` … "not accepting new customers"** on the first apply: the
   region refuses new resources for your subscription. Destroy what was created and pick
   another region (see Before you start).
+- **The pipeline stops at "Log in to Azure" with `AADSTS700213` … "No matching federated
+  identity record"**: the identity's subject isn't the one GitHub sends, which the error
+  prints (`subject claim - repo:…`). Set that one, with `az ad app federated-credential
+  update --id <identity's app ID> --federated-credential-id github-<environment>
+  --parameters '{"subject": "<the subject>"}'`, and re-run the workflow.
 - **"Provider produced inconsistent result after apply … Root object was present, but now
   absent"**, or a 404 for something just created: Azure was slow to show a new resource.
   It does exist. Wait a minute and apply again. If Terraform then says the resource

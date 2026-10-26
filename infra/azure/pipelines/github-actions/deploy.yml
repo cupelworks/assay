@@ -203,7 +203,8 @@ jobs:
           BE: ${{ steps.versions.outputs.be }}
           FE: ${{ steps.versions.outputs.fe }}
         run: |
-          # A version is built once: its tag is never built over
+          # A version is built once: its tag is never built over. --file is read
+          # from where the command runs, not from inside the context
           build() {
             local image="$1" context="$2"; shift 2
             if az acr repository show --name "$REGISTRY" --image "$image" >/dev/null 2>&1; then
@@ -212,9 +213,9 @@ jobs:
               az acr build --registry "$REGISTRY" --image "$image" "$@" "$context"
             fi
           }
-          build "assay-api:$BE" assay --file Dockerfile
-          build "assay-worker:$BE" assay --file Dockerfile.worker
-          build "assay-fe:$FE" assay-fe --file Dockerfile \
+          build "assay-api:$BE" assay --file assay/Dockerfile
+          build "assay-worker:$BE" assay --file assay/Dockerfile.worker
+          build "assay-fe:$FE" assay-fe --file assay-fe/Dockerfile \
             --build-arg "VERSION=$FE" --build-arg "REVISION=$(git -C assay-fe rev-parse HEAD)"
 
       - name: Run the migrations with the new API image
@@ -265,11 +266,12 @@ jobs:
         run: |
           # Ready: Azure provisioned the revision and its probes pass (the
           # API's /health, the FE's /healthz). Read from Azure, so nothing
-          # needs to get past the sign-in.
+          # needs to get past the sign-in. Both names as one row: tsv prints a
+          # plain list one item per line.
           for app in $APPS; do
             for _ in $(seq 1 60); do
               read -r latest ready <<< "$(az containerapp show --name "$app" --resource-group "$RG" \
-                --query '[properties.latestRevisionName, properties.latestReadyRevisionName]' --output tsv)"
+                --query '[[properties.latestRevisionName, properties.latestReadyRevisionName]]' --output tsv)"
               if [ -n "$latest" ] && [ "$latest" = "$ready" ]; then
                 health=$(az containerapp revision show --name "$app" --resource-group "$RG" \
                   --revision "$latest" --query properties.healthState --output tsv)
