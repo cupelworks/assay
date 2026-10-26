@@ -333,12 +333,16 @@ touch production:
 ```bash
 REPO=YOUR_ORG/YOUR_DEPLOYMENT_REPO
 ENV=staging   # then again with production
+# how GitHub names the repository to Azure: usually with ID numbers
+# (repo:org@123/repo@456), else plainly (repo:org/repo)
+PREFIX=$(gh api "repos/$REPO/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty')
+PREFIX=${PREFIX:-repo:$REPO}
 APP_ID=$(az ad app create --display-name "assay-deploy-$ENV" --query appId -o tsv)
 az ad sp create --id "$APP_ID"
 az ad app federated-credential create --id "$APP_ID" --parameters "{
   \"name\": \"github-$ENV\",
   \"issuer\": \"https://token.actions.githubusercontent.com\",
-  \"subject\": \"repo:$REPO:environment:$ENV\",
+  \"subject\": \"$PREFIX:environment:$ENV\",
   \"audiences\": [\"api://AzureADTokenExchange\"]
 }"
 # it creates resources and role assignments...
@@ -441,6 +445,11 @@ the sign-in, which `azurerm` doesn't cover).
 - **`RequestDisallowedByAzure` … "not accepting new customers"** on the first apply: the
   region refuses new resources for your subscription. Destroy what was created and pick
   another region (see Before you start).
+- **The pipeline stops at "Log in to Azure" with `AADSTS700213` … "No matching federated
+  identity record"**: the identity's subject isn't the one GitHub sends, which the error
+  prints (`subject claim - repo:…`). Set that one, with `az ad app federated-credential
+  update --id <identity's app ID> --federated-credential-id github-<environment>
+  --parameters '{"subject": "<the subject>"}'`, and re-run the workflow.
 - **"Provider produced inconsistent result after apply … Root object was present, but now
   absent"**, or a 404 for something just created: Azure was slow to show a new resource.
   It does exist. Wait a minute and apply again. If Terraform then says the resource
