@@ -103,11 +103,25 @@ jobs:
              | "\(.resource_group_name) \(.name)"] | first // empty')"
           if [ -z "$name" ]; then
             echo "No log workspace in the state: nothing to delete."
-          else
-            az monitor log-analytics workspace delete --resource-group "$rg" \
-              --workspace-name "$name" --force true --yes
-            echo "$name deleted for good."
+            exit 0
           fi
+          # A plain request: az's own delete waits on a background thread, where
+          # its Python can deadlock loading the login
+          az rest --method delete --url "https://management.azure.com/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/${rg}/providers/Microsoft.OperationalInsights/workspaces/${name}?api-version=2023-09-01&force=true"
+          # Azure finishes in the background: wait until it's gone (az's exit
+          # code 3 is "not found") before Terraform reads it
+          for _ in $(seq 1 30); do
+            status=0
+            az monitor log-analytics workspace show --resource-group "$rg" \
+              --workspace-name "$name" --output none 2>/dev/null || status=$?
+            if [ "$status" -eq 3 ]; then
+              echo "$name deleted for good."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$name is still there after 5 minutes; nothing else was removed."
+          exit 1
 
       - name: Terraform destroy
         working-directory: ${{ env.TF_DIR }}
