@@ -471,23 +471,60 @@ the sign-in, which `azurerm` doesn't cover).
 
 ## Removing it
 
+`terraform destroy` removes an environment: every resource the module created, the
+database and its backups included. Take a copy of anything you want to keep first. The
+pipeline never destroys (its guard stops any plan that would delete the data), so you run
+it from your machine, signed in with `az login` as someone who is Owner on the
+subscription and has Storage Blob Data Contributor on the state's storage account (step 1
+of Deploy from your machine gives that role to whoever creates the account).
+
+**1. Connect to the environment's state.** If you deployed from your machine, you already
+are, in `example/environments/staging` (with step 2's `TF_VAR_entra_client_secret` set).
+If the pipeline deployed it, in a clone of your deployment repository:
+
 ```bash
-terraform destroy
-az ad app delete --id <client id>   # the environment's sign-in, if you're done with it
+cd environments/staging
+cp backend.hcl.example backend.hcl   # the GitHub environment's TF_STATE_* values
+terraform init -backend-config=backend.hcl
+export TF_VAR_subscription_id=...       # the GitHub environment's AZURE_SUBSCRIPTION_ID
+export TF_VAR_entra_client_id=...       # its ENTRA_CLIENT_ID
+export TF_VAR_entra_client_secret=...   # the sign-in's current client secret; never in a file
 ```
 
-This deletes every resource it created, the database included. The state storage
-account stays; delete it yourself if you no longer need it. Key Vault is kept for 7
-days after deletion (soft delete) before its name can be reused.
+**2. If you'll create the environment again, delete its logs for good first.** Azure
+keeps a deleted log workspace for 14 days, and a new one with the same name within that
+time comes back with the old logs:
+
+```bash
+az monitor log-analytics workspace delete --resource-group rg-assay-staging \
+  --workspace-name log-assay-staging --force true --yes
+```
+
+**3. Destroy, then remove the sign-in** if you're done with it:
+
+```bash
+terraform destroy
+az ad app delete --id <client id>
+```
+
+Deleting the Container Apps environment is slow: Azure releases its share of the virtual
+network last, which can take 40 minutes. `terraform destroy` waits; it isn't stuck.
+Terraform purges the Key Vault, which Azure would otherwise keep for 7 days. The resource
+group Azure made for the environment (`<resource group>-infra`) goes with it. The state's
+storage account stays, for the other environments; delete it yourself if you no longer
+need it.
 
 Azure may also have created a **Network Watcher** for the region, usually in a resource
 group named `NetworkWatcherRG`: it does so for the first virtual network in a region,
 unless the subscription has one there already. It's Azure's own, free, and shared by
 every virtual network in that region, so leave it in place.
 
-Deleting the Container Apps environment is slow: Azure releases its share of the
-virtual network last, which can take 40 minutes. `terraform destroy` waits; it isn't
-stuck.
+**With the pipeline, the next push to `main` creates the environment again**, from
+scratch. To keep it removed, disable the workflow (the deployment repository's Actions
+tab → the workflow → Disable workflow). To create it again: if you deleted the sign-in,
+make a new one and put its client ID and secret in the GitHub environment (Setting it up,
+steps 3 and 4); then push or run the workflow, and give the sign-in the FE's new address
+(`entra-app.sh redirect`), since a new environment gets a new one.
 
 ## Limits
 
