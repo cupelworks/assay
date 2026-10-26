@@ -11,7 +11,7 @@ infra/azure/
 │   └── tests/                        # terraform test, against a mocked provider
 ├── example/environments/             # staging and production: your deployment's layout
 ├── scripts/entra-app.sh              # the sign-in's app registration, per environment
-├── pipelines/github-actions/         # deploy.yml, a template for that repository
+├── pipelines/github-actions/         # deploy.yml and destroy.yml, templates for that repository
 └── AZURE-INFO.md                     # every resource it creates, why, and what it costs
 ```
 
@@ -33,6 +33,10 @@ infra/azure/
 - [Running it](#running-it)
 - [When something goes wrong](#when-something-goes-wrong)
 - [Removing it](#removing-it)
+  - [With the pipeline (staging)](#with-the-pipeline-staging)
+  - [From your machine (any environment)](#from-your-machine-any-environment)
+  - [What's left afterwards](#whats-left-afterwards)
+  - [Creating it again](#creating-it-again)
 - [Limits](#limits)
 
 ## How it fits together
@@ -307,7 +311,9 @@ your-deployment-repo/
 ├── environments/
 │   ├── staging/      # main.tf: the module at a release (?ref=vX.Y.Z), fe_version, sizes
 │   └── production/   # the same, its own releases and sizes
-└── .github/workflows/deploy.yml   # pipelines/github-actions/deploy.yml
+└── .github/workflows/
+    ├── deploy.yml    # pipelines/github-actions/deploy.yml
+    └── destroy.yml   # pipelines/github-actions/destroy.yml (optional: removes staging)
 ```
 
 Copy `example/environments/` with its two folders, and in each `main.tf` replace the
@@ -400,6 +406,10 @@ pipeline at other copies of the code.
 ends, it prints the FE's address: run `entra-app.sh redirect <client id> <that address>`
 once, and the sign-in works.
 
+**6. Optional: a button that removes staging**, `pipelines/github-actions/destroy.yml`,
+copied as `.github/workflows/destroy.yml`. It uses this same setup. See
+[Removing it](#with-the-pipeline-staging).
+
 ### Keep Azure out of public repositories
 
 The pipeline template skips itself in `cupelworks/assay`. In any public repository
@@ -491,60 +501,116 @@ the sign-in, which `azurerm` doesn't cover).
 
 ## Removing it
 
-`terraform destroy` removes an environment: every resource the module created, the
-database and its backups included. Take a copy of anything you want to keep first. The
-pipeline never destroys (its guard stops any plan that would delete the data), so you run
-it from your machine, signed in with `az login` as someone who is Owner on the
-subscription and has Storage Blob Data Contributor on the state's storage account (step 1
-of Deploy from your machine gives that role to whoever creates the account).
+Removing an environment deletes **everything in it, the database and its backups
+included**. Copy anything you want to keep first. There are two ways:
 
-**1. Connect to the environment's state.** If you deployed from your machine, you already
-are, in `example/environments/staging` (with step 2's `TF_VAR_entra_client_secret` set).
-If the pipeline deployed it, in a clone of your deployment repository:
+| | With the pipeline | From your machine |
+|---|---|---|
+| **Which environment** | staging only | any, production included |
+| **What you need** | the deploy's setup, nothing more | Terraform and the Azure CLI, signed in as Owner on the subscription, with Storage Blob Data Contributor on the state's storage account |
+| **How** | a button in GitHub | three steps in a terminal |
+
+Production can't be removed with the pipeline on purpose: a private repository on GitHub
+Team can't require anyone's approval before a run, so whoever can push could press it.
+
+Either way, the **sign-in's app registration stays**: the pipeline has no rights in your
+directory, and you may want to keep it for the next environment. Delete it yourself if
+you're done with it (below).
+
+### With the pipeline (staging)
+
+**Once:** copy `pipelines/github-actions/destroy.yml` into your deployment repository as
+`.github/workflows/destroy.yml` and push. A push to `main` also deploys; add `[skip ci]`
+to the commit message to push it without deploying.
+
+**Then, each time:**
+
+1. In your deployment repository on GitHub: **Actions → Destroy Assay's staging → Run
+   workflow**.
+2. Type `staging` in the box and press **Run workflow**. Anything else stops the run
+   before it touches Azure.
+3. Wait for it to finish: up to 40 minutes, most of it Azure deleting the Container Apps
+   environment. It waits for any deploy that's running, and a deploy started meanwhile
+   waits for it.
+
+It deletes the log workspace for good first (otherwise Azure keeps it 14 days and the next
+staging brings the old logs back), then runs `terraform destroy`. Its last lines repeat
+the command for the sign-in:
+
+```bash
+az ad app delete --id <client id>   # only if you're done with the sign-in
+```
+
+### From your machine (any environment)
+
+Run everything in **one terminal window**: the values you set in step 1 last only as long
+as that window. The commands use staging; for production, use `environments/production`
+and its names (`rg-assay-prod`, `log-assay-prod`).
+
+**1. Get Terraform ready.** It needs its record of what it created (the *state*, in your
+storage account) and the three values the configuration always asks for.
+
+If you deployed from your machine, use the folder you deployed from
+(`example/environments/staging`) with `TF_VAR_entra_client_secret` set as in Deploy from
+your machine, step 2, and go to step 2. If the pipeline deployed it, in a clone of your
+deployment repository:
 
 ```bash
 cd environments/staging
-cp backend.hcl.example backend.hcl   # the GitHub environment's TF_STATE_* values
+cp backend.hcl.example backend.hcl   # then fill it in, if it isn't: the GitHub environment's TF_STATE_* values
 terraform init -backend-config=backend.hcl
-export TF_VAR_subscription_id=...       # the GitHub environment's AZURE_SUBSCRIPTION_ID
-export TF_VAR_entra_client_id=...       # its ENTRA_CLIENT_ID
-export TF_VAR_entra_client_secret=...   # the sign-in's current client secret; never in a file
+export TF_VAR_subscription_id=...    # the GitHub environment's AZURE_SUBSCRIPTION_ID
+export TF_VAR_entra_client_id=...    # its ENTRA_CLIENT_ID
+read -s TF_VAR_entra_client_secret && export TF_VAR_entra_client_secret
+# paste the sign-in's client secret and press Enter: nothing shows while you paste
 ```
 
-**2. If you'll create the environment again, delete its logs for good first.** Azure
-keeps a deleted log workspace for 14 days, and a new one with the same name within that
-time comes back with the old logs:
+The GitHub values are in the deployment repository's **Settings → Environments →
+staging**. `terraform init` should end with "Terraform has been successfully
+initialized!", and `terraform state list` should then list the environment's resources.
+If init asks about `-reconfigure`, run it again with `-reconfigure`.
+
+**2. Delete the logs for good,** if you'll create the environment again: otherwise Azure
+keeps the log workspace 14 days and the new environment brings the old logs back.
 
 ```bash
 az monitor log-analytics workspace delete --resource-group rg-assay-staging \
   --workspace-name log-assay-staging --force true --yes
 ```
 
-**3. Destroy, then remove the sign-in** if you're done with it:
+**3. Destroy**, and confirm with `yes` when Terraform lists what it will delete:
 
 ```bash
 terraform destroy
-az ad app delete --id <client id>
+az ad app delete --id <client id>   # only if you're done with the sign-in
 ```
 
-Deleting the Container Apps environment is slow: Azure releases its share of the virtual
-network last, which can take 40 minutes. `terraform destroy` waits; it isn't stuck.
-Terraform purges the Key Vault, which Azure would otherwise keep for 7 days. The resource
-group Azure made for the environment (`<resource group>-infra`) goes with it. The state's
-storage account stays, for the other environments; delete it yourself if you no longer
-need it.
+Deleting the Container Apps environment can take 40 minutes. `terraform destroy` waits;
+it isn't stuck.
 
-Azure may also have created a **Network Watcher** for the region, usually in a resource
-group named `NetworkWatcherRG`: it does so for the first virtual network in a region,
-unless the subscription has one there already. It's Azure's own, free, and shared by
-every virtual network in that region, so leave it in place.
+### What's left afterwards
 
-**With the pipeline, the next push to `main` creates the environment again**, from
-scratch. To keep it removed, disable the workflow (the deployment repository's Actions
-tab → the workflow → Disable workflow). To create it again: if you deleted the sign-in,
-make a new one and put its client ID and secret in the GitHub environment (Setting it up,
-steps 3 and 4); then push or run the workflow, and give the sign-in the FE's new address
-(`entra-app.sh redirect`), since a new environment gets a new one.
+- **Gone:** every resource of the environment, with the resource group Azure made for it
+  (`<resource group>-infra`). Terraform purges the Key Vault, which Azure would otherwise
+  keep 7 days.
+- **Kept:** the state's storage account (other environments use it), the pipeline's
+  identity, the GitHub environment with its variables and secrets, and the sign-in's app
+  registration unless you deleted it.
+- **Network Watcher:** Azure may have created one for the region, usually in a resource
+  group named `NetworkWatcherRG`, for the first virtual network there. It's Azure's own,
+  free, and shared by every virtual network in that region, so leave it in place.
+
+### Creating it again
+
+**With the pipeline, the next push to `main` creates staging again**, from scratch. To keep
+it removed, disable the deploy (Actions → Deploy Assay to Azure → **Disable workflow**).
+To create it again:
+
+1. If you deleted the sign-in: make a new one, and put its client ID and secret in the
+   GitHub environment (Setting it up, steps 3 and 4).
+2. Push to `main`, or **Run workflow** on the deploy.
+3. Give the sign-in the new environment's address, which the run prints at the end: a new
+   environment gets a new one (`entra-app.sh redirect`, The sign-in).
 
 ## Limits
 
