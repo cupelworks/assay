@@ -15,6 +15,26 @@ infra/azure/
 └── AZURE-INFO.md                     # every resource it creates, why, and what it costs
 ```
 
+## Contents
+
+- [How it fits together](#how-it-fits-together)
+- [What it creates](#what-it-creates)
+- [Cost](#cost)
+- [Before you start](#before-you-start)
+- [The sign-in](#the-sign-in)
+- [What you change](#what-you-change)
+- [Deploy from your machine](#deploy-from-your-machine)
+- [Deploy with the pipeline](#deploy-with-the-pipeline)
+  - [Two repositories](#two-repositories)
+  - [Releasing](#releasing)
+  - [Setting it up](#setting-it-up)
+  - [Keep Azure out of public repositories](#keep-azure-out-of-public-repositories)
+- [Using the module from your own configuration](#using-the-module-from-your-own-configuration)
+- [Running it](#running-it)
+- [When something goes wrong](#when-something-goes-wrong)
+- [Removing it](#removing-it)
+- [Limits](#limits)
+
 ## How it fits together
 
 ```
