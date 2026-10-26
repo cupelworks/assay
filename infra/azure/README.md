@@ -150,7 +150,7 @@ you're assigned. Then:
 
 | When | Command |
 |---|---|
-| After the first apply, once the FE has an address | `entra-app.sh redirect <client id> "$(terraform output -raw fe_url)"`: until then the sign-in refuses, so nothing opens |
+| After the first apply, once the FE has an address | `entra-app.sh redirect <client id> "$(terraform output -raw fe_url)"`: until then the sign-in refuses, so nothing opens. Again if you destroy the environment and create it anew: the FE gets a new address |
 | To let someone else in | `entra-app.sh allow <client id> <their sign-in name>` |
 | Before the secret expires (a year) | `entra-app.sh rotate <client id>`: a new secret beside the old one; apply it, then delete the old one with the command it prints |
 
