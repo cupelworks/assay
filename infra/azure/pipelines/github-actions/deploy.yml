@@ -266,11 +266,12 @@ jobs:
         run: |
           # Ready: Azure provisioned the revision and its probes pass (the
           # API's /health, the FE's /healthz). Read from Azure, so nothing
-          # needs to get past the sign-in.
+          # needs to get past the sign-in. Both names as one row: tsv prints a
+          # plain list one item per line.
           for app in $APPS; do
             for _ in $(seq 1 60); do
               read -r latest ready <<< "$(az containerapp show --name "$app" --resource-group "$RG" \
-                --query '[properties.latestRevisionName, properties.latestReadyRevisionName]' --output tsv)"
+                --query '[[properties.latestRevisionName, properties.latestReadyRevisionName]]' --output tsv)"
               if [ -n "$latest" ] && [ "$latest" = "$ready" ]; then
                 health=$(az containerapp revision show --name "$app" --resource-group "$RG" \
                   --revision "$latest" --query properties.healthState --output tsv)
