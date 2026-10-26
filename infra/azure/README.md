@@ -188,17 +188,27 @@ own `az login`: for a first look, or before the pipeline is set up. It's the sam
 pipeline uses afterwards, and with the same state storage and key, the pipeline carries on
 from where you left off. The steps below use `staging`.
 
-**1. A storage account for Terraform's state**, once per subscription:
+**1. A storage account for Terraform's state**, once per subscription. The state holds
+every secret of the deployment, so the account allows only Microsoft sign-in (no access
+keys), and keeps old versions and deleted files for 30 days so a damaged state can be
+recovered. Its name must be unique across all of Azure: replace `tfstateyourname`.
 
 ```bash
 az group create --name rg-terraform-state --location northeurope
 az storage account create --name tfstateyourname --resource-group rg-terraform-state \
-  --sku Standard_LRS --min-tls-version TLS1_2 --allow-blob-public-access false
-az storage container create --name tfstate --account-name tfstateyourname --auth-mode login
-# let yourself write the state with your Azure login
+  --sku Standard_LRS --https-only true --min-tls-version TLS1_2 \
+  --allow-blob-public-access false --allow-shared-key-access false
+az storage account blob-service-properties update --account-name tfstateyourname \
+  --resource-group rg-terraform-state --enable-versioning true \
+  --enable-delete-retention true --delete-retention-days 30 \
+  --enable-container-delete-retention true --container-delete-retention-days 30
+# let yourself read and write the state with your Azure login (before creating the
+# container: with no access keys, creating it needs this role)
 az role assignment create --role "Storage Blob Data Contributor" \
   --assignee "$(az ad signed-in-user show --query id -o tsv)" \
   --scope "$(az storage account show --name tfstateyourname --query id -o tsv)"
+# the role takes a minute to apply; if this says you're not authorised, wait and retry
+az storage container create --name tfstate --account-name tfstateyourname --auth-mode login
 ```
 
 **2. Your settings**, in `example/environments/staging/`:
