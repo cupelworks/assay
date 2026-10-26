@@ -428,7 +428,9 @@ the sign-in, which `azurerm` doesn't cover).
   request ID.
 - **Alerts** (with `alert_emails`): the worker hasn't run for 15 minutes; the FE answered
   server errors (the API's, or the API unreachable); the API, the worker or Beat logged an
-  error. The worker's alert is off while `worker_enabled` is false.
+  error. The worker's alert is off while `worker_enabled` is false. Expect one worker
+  alert email just after an environment is created: Azure's replica count lags the new
+  worker, and the alert resolves itself (a second email) once it catches up.
 - **Settings:** the application under test and the judge can also be changed from the UI
   (Settings); saved settings win over the environment. Settings › Operations shows how
   the deployment is set up.
