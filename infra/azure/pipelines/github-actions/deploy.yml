@@ -165,6 +165,8 @@ jobs:
           cat > "$RUNNER_TEMP/guarded-apply" <<'GUARD'
           #!/usr/bin/env bash
           set -euo pipefail
+          # no JUDGE_API_KEY secret reaches here as an empty value: no judge key
+          [ -n "${TF_VAR_judge_api_key:-}" ] || unset TF_VAR_judge_api_key
           terraform plan -input=false -out=tfplan "$@"
           kept='["azurerm_resource_group", "azurerm_postgresql_flexible_server",
                  "azurerm_postgresql_flexible_server_database", "azurerm_key_vault"]'
