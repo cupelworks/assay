@@ -160,6 +160,7 @@ EMAIL=
 AMOUNT=300
 SUB=$(az account show --query id -o tsv)
 START=$(date -u +%Y-%m-01T00:00:00Z)
+if [ -n "$EMAIL" ]; then
 cat > budget.json <<EOF
 {"properties": {"category": "Cost", "amount": $AMOUNT, "timeGrain": "Monthly",
   "timePeriod": {"startDate": "$START"},
@@ -168,9 +169,11 @@ cat > budget.json <<EOF
     "at80":  {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 80,  "thresholdType": "Actual", "contactEmails": ["$EMAIL"]},
     "at100": {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 100, "thresholdType": "Actual", "contactEmails": ["$EMAIL"]}}}}
 EOF
-[ -n "$EMAIL" ] && az rest --method put --body @budget.json \
-  --url "https://management.azure.com/subscriptions/$SUB/providers/Microsoft.Consumption/budgets/assay-monthly?api-version=2023-05-01" \
-  || echo "Set EMAIL first."
+  az rest --method put --body @budget.json \
+    --url "https://management.azure.com/subscriptions/$SUB/providers/Microsoft.Consumption/budgets/assay-monthly?api-version=2023-05-01"
+else
+  echo "Set EMAIL first."
+fi
 ```
 
 In the portal: Cost Management → Budgets.
@@ -368,20 +371,20 @@ alert email shortly after, then a "resolved" one: Azure's replica count lags the
 worker.
 
 **Later, a new release:** set the new `BE_VERSION` and `FE_VERSION` in step 1's values
-block, run it and step 1's check, then move the two clones to them:
+block and run it, then move the two clones to them:
 
 ```bash
 git -C "$ASSAY" fetch --tags && git -C "$ASSAY" checkout "v$BE_VERSION"
 git -C "$ASSAYFE" fetch --tags && git -C "$ASSAYFE" checkout "v$FE_VERSION"
 ```
 
-Then, in this folder with step 4's secret set, steps 7 and 8. Images already in the
+Then run step 1's check: if it says **outside**, go back and pick another pair. Then, in
+this folder with step 4's secret set, steps 7 and 8. Images already in the
 registry are kept, so going back is the same steps with the old versions.
 
 ## Deploy with GitHub Actions
 
 The pipeline is a GitHub Actions workflow. Other CI systems have no template here.
-
 
 The code lives in public repositories: `cupelworks/assay` (the BE, and this module) and
 `cupelworks/assayfe` (the FE). They know nothing about your Azure. **Your deployment**
@@ -820,8 +823,8 @@ you're done with it (below).
 
 ### With GitHub Actions (staging)
 
-**Once:** the destroy workflow in your deployment repository, as in Deploy with the
-pipeline, step 10.
+**Once:** the destroy workflow in your deployment repository, as in Deploy with GitHub
+Actions, step 10.
 
 **Then, each time:**
 
@@ -853,10 +856,28 @@ If the pipeline deployed it, in a clone of your deployment repository:
 
 ```bash
 cd environments/staging
-cp backend.hcl.example backend.hcl   # then fill it in: the GitHub environment's TF_STATE_* values
+cp backend.hcl.example backend.hcl
+```
+
+Fill in `backend.hcl` with the GitHub environment's `TF_STATE_*` values: the storage
+account's name (`TF_STATE_STORAGE_ACCOUNT`) above all, and the key (`TF_STATE_KEY`).
+Then:
+
+```bash
 terraform init -backend-config=backend.hcl
-export TF_VAR_subscription_id=...    # the GitHub environment's AZURE_SUBSCRIPTION_ID
-export TF_VAR_entra_client_id=...    # its ENTRA_CLIENT_ID
+```
+
+Then the two values the configuration asks for, one line each: run the line, paste the
+value and press Enter. First the GitHub environment's `AZURE_SUBSCRIPTION_ID`:
+
+```bash
+read -r TF_VAR_subscription_id && export TF_VAR_subscription_id
+```
+
+Then its `ENTRA_CLIENT_ID`:
+
+```bash
+read -r TF_VAR_entra_client_id && export TF_VAR_entra_client_id
 ```
 
 Then the secret, on its own: run this line, paste the sign-in's client secret and press
