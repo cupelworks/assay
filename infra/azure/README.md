@@ -25,14 +25,14 @@ its first step to its last: everything it needs is in it, in order.
 - [Cost](#cost)
 - [Before you start](#before-you-start)
 - [Deploy from your machine](#deploy-from-your-machine)
-- [Deploy with the pipeline](#deploy-with-the-pipeline)
+- [Deploy with GitHub Actions](#deploy-with-github-actions)
   - [Releasing](#releasing)
   - [Production](#production)
   - [Keep Azure out of public repositories](#keep-azure-out-of-public-repositories)
 - [Running it](#running-it)
 - [When something goes wrong](#when-something-goes-wrong)
 - [Removing it](#removing-it)
-  - [With the pipeline (staging)](#with-the-pipeline-staging)
+  - [With GitHub Actions (staging)](#with-github-actions-staging)
   - [From your machine (any environment)](#from-your-machine-any-environment)
   - [What's left afterwards](#whats-left-afterwards)
   - [Creating it again](#creating-it-again)
@@ -85,8 +85,8 @@ it in a storage account only you and the pipeline can read, never in git.
 ## Cost
 
 The resources run all the time. Most of the cost is the worker (1 vCPU and 2 GiB,
-enough for the NLP models), then the database. Rough monthly list prices in North Europe,
-to check with the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/):
+enough for the NLP models), then the database. Rough monthly list prices in North Europe
+as of October 2026, to check with the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/):
 
 | | Sizes | About |
 |---|---|---|
@@ -113,7 +113,7 @@ once it's back); `api.min_replicas = 0` lets the API sleep when idle.
 - git;
 - from your machine: [Node.js](https://nodejs.org), which reads the FE's version and
   checks that it works with the API;
-- with the pipeline: the [GitHub CLI](https://cli.github.com);
+- with GitHub Actions: the [GitHub CLI](https://cli.github.com);
 - **bash**: every command here is written for it. On a Mac, whose terminal runs zsh, type
   `bash` first (and `exit` when you're done): zsh reads some of these lines differently,
   and they'd create things with the wrong names.
@@ -123,7 +123,7 @@ once it's back); `api.min_replicas = 0` lets the API sleep when idle.
 ```bash
 az login
 az account show
-gh auth login   # only for the pipeline
+gh auth login   # only for GitHub Actions
 ```
 
 **Pick a region that takes your subscription.** Some regions refuse new resources for
@@ -151,30 +151,33 @@ done
 In the portal: Subscriptions → your subscription → Settings → **Resource providers**;
 search for each name, select it and click **Register**.
 
-**Set a budget**, so a forgotten deployment can't surprise you. The amount is in the
-subscription's billing currency; this one emails you (replace `you@example.com`) at 50,
-80 and 100% of the month's cost, starting this month:
+**Set a budget**, so a forgotten deployment can't surprise you. It emails you at 50, 80
+and 100% of the month's cost, starting this month. Set your address and your own monthly
+ceiling, in the subscription's billing currency (300 is only an example):
 
 ```bash
+EMAIL=
+AMOUNT=300
 SUB=$(az account show --query id -o tsv)
 START=$(date -u +%Y-%m-01T00:00:00Z)
 cat > budget.json <<EOF
-{"properties": {"category": "Cost", "amount": 300, "timeGrain": "Monthly",
+{"properties": {"category": "Cost", "amount": $AMOUNT, "timeGrain": "Monthly",
   "timePeriod": {"startDate": "$START"},
   "notifications": {
-    "at50":  {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 50,  "thresholdType": "Actual", "contactEmails": ["you@example.com"]},
-    "at80":  {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 80,  "thresholdType": "Actual", "contactEmails": ["you@example.com"]},
-    "at100": {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 100, "thresholdType": "Actual", "contactEmails": ["you@example.com"]}}}}
+    "at50":  {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 50,  "thresholdType": "Actual", "contactEmails": ["$EMAIL"]},
+    "at80":  {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 80,  "thresholdType": "Actual", "contactEmails": ["$EMAIL"]},
+    "at100": {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 100, "thresholdType": "Actual", "contactEmails": ["$EMAIL"]}}}}
 EOF
-az rest --method put --body @budget.json \
-  --url "https://management.azure.com/subscriptions/$SUB/providers/Microsoft.Consumption/budgets/assay-monthly?api-version=2023-05-01"
+[ -n "$EMAIL" ] && az rest --method put --body @budget.json \
+  --url "https://management.azure.com/subscriptions/$SUB/providers/Microsoft.Consumption/budgets/assay-monthly?api-version=2023-05-01" \
+  || echo "Set EMAIL first."
 ```
 
 In the portal: Cost Management → Budgets.
 
 **Then choose how to deploy:**
 
-| | From your machine | With the pipeline |
+| | From your machine | With GitHub Actions |
 |---|---|---|
 | **For** | a first look, or a one-off environment | staging and production, released by a push |
 | **Runs on** | your computer, with your `az login` | GitHub's runners, in a private repository of yours |
@@ -187,18 +190,27 @@ all in **one terminal window**: later steps use values the earlier ones set (`$A
 `$STATE_ACCOUNT`, `$ENTRA_CLIENT_ID`, `$BE`, `$FE`). If you have to open a new one, run
 step 1's values block again, then `cd "$ASSAY/infra/azure/example/environments/staging"`.
 
-**1. Your values, and the code at the releases you deploy.** In an empty folder, set
-the releases you want (an FE release names the API releases it works with; step 7 checks
-it) and a name for your state's storage account: unique across all of Azure, 3 to 24
-lowercase letters and digits. This is the block to run again, from the same folder, in a
-new terminal:
+**1. Your values, and the code at the releases you deploy.** The releases are the two
+repositories' tags; this lists them, oldest first:
 
 ```bash
-BE_VERSION=2.4.2
-FE_VERSION=2.5.3
-STATE_ACCOUNT=tfstateyourname
+git ls-remote --tags --refs https://github.com/cupelworks/assay.git 'v*' | sed 's|.*refs/tags/v||' | sort -V
+git ls-remote --tags --refs https://github.com/cupelworks/assayfe.git 'v*' | sed 's|.*refs/tags/v||' | sort -V
+```
+
+The newest of each is a safe start. In an empty folder, set the two (as listed, without a
+`v`) and a name for your state's storage account: unique across all of Azure, 3 to 24
+lowercase letters and digits. This is the block to run again, from the same folder, in a
+new terminal; it says what's still missing:
+
+```bash
+BE_VERSION=
+FE_VERSION=
+STATE_ACCOUNT=
 ASSAY=$PWD/assay
 ASSAYFE=$PWD/assayfe
+[[ $BE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $FE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || echo "Set both versions first."
+[[ $STATE_ACCOUNT =~ ^[a-z0-9]{3,24}$ ]] || echo "Set STATE_ACCOUNT first: 3 to 24 lowercase letters and digits."
 ```
 
 Then, once, the two repositories at those releases:
@@ -206,6 +218,13 @@ Then, once, the two repositories at those releases:
 ```bash
 git clone --branch "v$BE_VERSION" https://github.com/cupelworks/assay.git
 git clone --branch "v$FE_VERSION" https://github.com/cupelworks/assayfe.git
+```
+
+Check that the two work together: an FE release names the API releases it works with.
+If it says **outside**, stop and pick another pair (and clone again):
+
+```bash
+(cd "$ASSAYFE" && node scripts/check-api-version.mjs "$BE_VERSION")
 ```
 
 **2. Terraform's state**, once per subscription: skip this step if you already have one.
@@ -247,10 +266,11 @@ people sign in to. Only the people assigned to it get in, and you're assigned.
 ```
 
 It prints the **client ID** and a **client secret**, shown only now and valid one year:
-keep the secret in your password manager, and the client ID in this terminal:
+keep the secret in your password manager. Then keep the client ID in this terminal: run
+this line, paste the client ID and press Enter:
 
 ```bash
-ENTRA_CLIENT_ID=paste-the-client-id-here
+read -r ENTRA_CLIENT_ID
 ```
 
 **4. Your settings**, in the staging folder. `backend.hcl` says where the state is,
@@ -298,6 +318,8 @@ terraform init -backend-config=backend.hcl
 terraform apply
 ```
 
+`terraform apply` lists what it will create and asks you to confirm: type `yes`.
+
 **6. The sign-in's return address.** After signing in, Microsoft sends people back only
 to an address the app registration lists, and the FE's address exists now:
 
@@ -312,13 +334,12 @@ step again.
 **7. The images**, built in your registry from the two clones (no Docker needed
 locally; the worker's image is about 3.5 GB and takes a while). Each is tagged with its
 version, read from the clone: Assay's from `pyproject.toml`, the FE's from its
-`package.json`. The FE's check stops here if it doesn't work with this API.
+`package.json` (step 1 checked that the two work together).
 
 ```bash
 REGISTRY=$(terraform output -raw registry_name)
 BE=$(sed -nE 's/^version = "(.*)"/\1/p' "$ASSAY/pyproject.toml")
 FE=$(cd "$ASSAYFE" && node -p 'require("./package.json").version')
-(cd "$ASSAYFE" && node scripts/check-api-version.mjs "$BE") && echo "FE $FE works with API $BE"
 (cd "$ASSAY" && az acr build --registry "$REGISTRY" --image "assay-api:$BE" --file Dockerfile .)
 (cd "$ASSAY" && az acr build --registry "$REGISTRY" --image "assay-worker:$BE" --file Dockerfile.worker .)
 (cd "$ASSAYFE" && az acr build --registry "$REGISTRY" --image "assay-fe:$FE" --file Dockerfile \
@@ -346,12 +367,21 @@ API, and `/api/health/worker` should answer `ready`. Expect one "worker not runn
 alert email shortly after, then a "resolved" one: Azure's replica count lags the new
 worker.
 
-**Later, a new release:** in the two clones, `git fetch --tags` and `git checkout
-v<the new version>`; then, in this folder with step 4's secret set, steps 7 and 8.
-Images already in the registry are kept, so going back is the same steps with the old
-versions.
+**Later, a new release:** set the new `BE_VERSION` and `FE_VERSION` in step 1's values
+block, run it and step 1's check, then move the two clones to them:
 
-## Deploy with the pipeline
+```bash
+git -C "$ASSAY" fetch --tags && git -C "$ASSAY" checkout "v$BE_VERSION"
+git -C "$ASSAYFE" fetch --tags && git -C "$ASSAYFE" checkout "v$FE_VERSION"
+```
+
+Then, in this folder with step 4's secret set, steps 7 and 8. Images already in the
+registry are kept, so going back is the same steps with the old versions.
+
+## Deploy with GitHub Actions
+
+The pipeline is a GitHub Actions workflow. Other CI systems have no template here.
+
 
 The code lives in public repositories: `cupelworks/assay` (the BE, and this module) and
 `cupelworks/assayfe` (the FE). They know nothing about your Azure. **Your deployment**
@@ -383,22 +413,38 @@ set (`$REPO`, `$ENV`, `$STATE_ACCOUNT`, `$ASSAY`, `$DEPLOY`, `$ENTRA_CLIENT_ID`,
 `ENTRA_CLIENT_ID` (step 3) and `APP_ID` (step 5) again if you need them.
 
 **1. Your repositories and values.** Create the private deployment repository on GitHub
-and clone it, and clone Assay's repository beside it: the templates, the example and the
-sign-in's script come from there. In an empty folder, with your repository's name, the
-releases you deploy and a name for your state's storage account (unique across all of
-Azure, 3 to 24 lowercase letters and digits):
+and clone it, and clone Assay's repository beside it: the templates (`deploy.yml`,
+`destroy.yml`), the example and the sign-in's script come from there, from its default
+branch on purpose, while the module itself is pinned to the release you choose, in
+`main.tf` (step 7). The releases you deploy are the two code repositories' tags; this
+lists them, oldest first:
 
 ```bash
-REPO=YOUR_ORG/YOUR_DEPLOYMENT_REPO
-ENV=staging
-BE_VERSION=2.4.2
-FE_VERSION=2.5.3
-STATE_ACCOUNT=tfstateyourname
-DEPLOY=$PWD/${REPO#*/}
-ASSAY=$PWD/assay
+git ls-remote --tags --refs https://github.com/cupelworks/assay.git 'v*' | sed 's|.*refs/tags/v||' | sort -V
+git ls-remote --tags --refs https://github.com/cupelworks/assayfe.git 'v*' | sed 's|.*refs/tags/v||' | sort -V
 ```
 
-This is the block to run again, from the same folder, in a new terminal. Then, once:
+The newest of each is a safe start: an FE release names the API releases it works with,
+and the pipeline checks it before deploying. In an empty folder, set your repository's
+name (`your-org/your-repo`), the two releases (as listed, without a `v`) and a name for
+your state's storage account: unique across all of Azure, 3 to 24 lowercase letters and
+digits. This is the block to run again, from the same folder, in a new terminal; it says
+what's still missing:
+
+```bash
+REPO=
+ENV=staging
+BE_VERSION=
+FE_VERSION=
+STATE_ACCOUNT=
+DEPLOY=$PWD/${REPO#*/}
+ASSAY=$PWD/assay
+[[ $REPO =~ ^[^/]+/[^/]+$ ]] || echo "Set REPO first: your-org/your-repo."
+[[ $BE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $FE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || echo "Set both versions first."
+[[ $STATE_ACCOUNT =~ ^[a-z0-9]{3,24}$ ]] || echo "Set STATE_ACCOUNT first: 3 to 24 lowercase letters and digits."
+```
+
+Then, once:
 
 ```bash
 gh repo create "$REPO" --private --clone
@@ -446,10 +492,11 @@ script is in the Assay clone from step 1:
 ```
 
 It prints the **client ID** and a **client secret**, shown only now and valid one year:
-keep the secret in your password manager for step 6, and the client ID in this terminal:
+keep the secret in your password manager for step 6. Then keep the client ID in this
+terminal: run this line, paste the client ID and press Enter:
 
 ```bash
-ENTRA_CLIENT_ID=paste-the-client-id-here
+read -r ENTRA_CLIENT_ID
 ```
 
 **4. The GitHub environment.** In the deployment repository's Settings → Environments,
@@ -532,9 +579,10 @@ gh secret set ENTRA_CLIENT_SECRET --env "$ENV" --repo "$REPO"
 | Secret | `ENTRA_CLIENT_SECRET` | its client secret |
 | Secret, optional | `JUDGE_API_KEY` | the LLM judge's API key: `gh secret set JUDGE_API_KEY --env "$ENV" --repo "$REPO"` |
 
-Optional repository variables `ASSAY_REPOSITORY` and `ASSAY_FE_REPOSITORY` point the
-pipeline at other copies of the code. The values are in the repository's Settings →
-Environments → staging.
+The environment's values are in the repository's Settings → Environments → staging.
+Optional repository variables `ASSAY_REPOSITORY` and `ASSAY_FE_REPOSITORY`, in Settings →
+Secrets and variables → Actions → Variables, point the pipeline at other copies of the
+code.
 
 **7. The deployment repository's files**: the two environments and the deploy, from the
 Assay clone, with the `.gitignore` lines that keep local Terraform files out of git:
@@ -546,6 +594,9 @@ mkdir -p .github/workflows
 cp "$ASSAY/infra/azure/pipelines/github-actions/deploy.yml" .github/workflows/
 printf '%s\n' .terraform/ .terraform.lock.hcl '*.tfstate' '*.tfplan' terraform.tfvars backend.hcl > .gitignore
 ```
+
+The lock file (`.terraform.lock.hcl`) stays out of git: each run picks the providers'
+newest versions within the constraints in each environment's `versions.tf`.
 
 Then, in each environment's `main.tf`, set the two releases. The pipeline reads them
 from there:
@@ -598,8 +649,15 @@ Assay <BE version> with its FE <FE version> runs at https://ca-assay-staging-fe.
 **9. The sign-in's return address.** After signing in, Microsoft sends people back only
 to an address the app registration lists. Give it the address step 8 printed:
 
+Run this line, paste the address and press Enter:
+
 ```bash
-FE_URL=paste-the-address-here
+read -r FE_URL
+```
+
+Then:
+
+```bash
 "$ASSAY/infra/azure/scripts/entra-app.sh" redirect "$ENTRA_CLIENT_ID" "$FE_URL"
 ```
 
@@ -621,7 +679,7 @@ git commit -m "A button that removes staging [skip ci]"
 git push
 ```
 
-How to use it is in [Removing it](#with-the-pipeline-staging).
+How to use it is in [Removing it](#with-github-actions-staging).
 
 ### Releasing
 
@@ -675,13 +733,14 @@ workflow, and Settings → Actions → "Require approval for all outside collabo
 - **Settings:** the application under test and the judge can also be changed from the UI
   (Settings); saved settings win over the environment. Settings › Operations shows how
   the deployment is set up.
-- **The sign-in**, from the Assay clone's `infra/azure/scripts/`:
+- **The sign-in**, from the Assay clone's `infra/azure/scripts/`, with its client ID in
+  `ENTRA_CLIENT_ID` (`read -r ENTRA_CLIENT_ID`, then paste it):
 
   | When | Command |
   |---|---|
-  | To let someone else in | `entra-app.sh allow <client id> <their sign-in name>` |
-  | Before the secret expires (a year) | `entra-app.sh rotate <client id>`: a new secret beside the old one; apply it (the pipeline's `ENTRA_CLIENT_SECRET`, then a run), then delete the old one with the command it prints |
   | To find the client ID again | `az ad app list --display-name "Assay (staging)" --query "[].appId" -o tsv` |
+  | To let someone else in | `entra-app.sh allow "$ENTRA_CLIENT_ID" "$SIGN_IN_NAME"`, with their sign-in name in `SIGN_IN_NAME` |
+  | Before the secret expires (a year) | `entra-app.sh rotate "$ENTRA_CLIENT_ID"`: a new secret beside the old one; apply it (the pipeline's `ENTRA_CLIENT_SECRET`, then a run), then delete the old one with the command it prints |
 
   Sign out (`/.auth/logout`) ends the session with Assay; the Microsoft session stays, so
   coming back signs you in at once.
@@ -702,7 +761,7 @@ workflow, and Settings → Actions → "Require approval for all outside collabo
   in without a password. For each run, GitHub gives it a signed name, printed just above
   the error as `subject claim - repo:…:environment:staging`. Azure lets it in only if the
   identity (`AZURE_CLIENT_ID`) trusts that exact name: its *federated credential*, from
-  Deploy with the pipeline, step 5. The error code says what's wrong:
+  Deploy with GitHub Actions, step 5. The error code says what's wrong:
 
   | Error | Means | Fix |
   |---|---|---|
@@ -746,7 +805,7 @@ workflow, and Settings → Actions → "Require approval for all outside collabo
 Removing an environment deletes **everything in it, the database and its backups
 included**. Copy anything you want to keep first. There are two ways:
 
-| | With the pipeline | From your machine |
+| | With GitHub Actions | From your machine |
 |---|---|---|
 | **Which environment** | staging only | any, production included |
 | **What you need** | the deploy's setup, nothing more | Terraform and the Azure CLI, signed in as Owner on the subscription, with Storage Blob Data Contributor on the state's storage account |
@@ -759,7 +818,7 @@ Either way, the **sign-in's app registration stays**: the pipeline has no rights
 directory, and you may want to keep it for the next environment. Delete it yourself if
 you're done with it (below).
 
-### With the pipeline (staging)
+### With GitHub Actions (staging)
 
 **Once:** the destroy workflow in your deployment repository, as in Deploy with the
 pipeline, step 10.
@@ -776,11 +835,7 @@ pipeline, step 10.
 
 It deletes the log workspace for good first (otherwise Azure keeps it 14 days and the next
 staging brings the old logs back), then runs `terraform destroy`. Its last lines repeat
-the command for the sign-in:
-
-```bash
-az ad app delete --id <client id>   # only if you're done with the sign-in
-```
+the command that deletes the sign-in, with its client ID, if you're done with it.
 
 ### From your machine (any environment)
 
@@ -828,7 +883,18 @@ az monitor log-analytics workspace delete --resource-group rg-assay-staging \
 
 ```bash
 terraform destroy
-az ad app delete --id <client id>   # only if you're done with the sign-in
+```
+
+Then, only if you're done with the sign-in, delete it: run the first line, paste its
+client ID (the GitHub environment's `ENTRA_CLIENT_ID`, or `entra_client_id` in
+`terraform.tfvars`) and press Enter, then the second:
+
+```bash
+read -r ENTRA_CLIENT_ID
+```
+
+```bash
+az ad app delete --id "$ENTRA_CLIENT_ID"
 ```
 
 Deleting the Container Apps environment can take 40 minutes. `terraform destroy` waits;
@@ -848,14 +914,14 @@ it isn't stuck.
 
 ### Creating it again
 
-**With the pipeline, the next push to `main` creates staging again**, from scratch. To keep
+**With GitHub Actions, the next push to `main` creates staging again**, from scratch. To keep
 it removed, disable the deploy (Actions → Deploy Assay to Azure → **Disable workflow**).
 To create it again:
 
 1. If you deleted the sign-in: make a new one, and put its client ID and secret in the
-   GitHub environment (Deploy with the pipeline, steps 3 and 6).
+   GitHub environment (Deploy with GitHub Actions, steps 3 and 6).
 2. Push to `main`, or **Run workflow** on the deploy.
-3. Give the sign-in the new environment's address, as in Deploy with the pipeline, step
+3. Give the sign-in the new environment's address, as in Deploy with GitHub Actions, step
    9: a new environment gets a new one.
 
 From your machine, it's Deploy from your machine from step 5, with step 6 again for the
@@ -863,6 +929,7 @@ new address.
 
 ## Limits
 
+- The pipeline is a GitHub Actions workflow; other CI systems have no template here.
 - Terraform's Azure provider is pinned to `~> 4.81` (version 5 isn't supported yet), and
   `azapi` to `~> 2.5`.
 - The module, the example and the script are checked with `terraform test` against a
