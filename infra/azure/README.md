@@ -190,44 +190,29 @@ In the portal: Cost Management → Budgets.
 
 The steps create **staging**, from the configuration in Assay's own repository. Run them
 all in **one terminal window**: later steps use values the earlier ones set (`$ASSAY`,
-`$STATE_ACCOUNT`, `$ENTRA_CLIENT_ID`, `$BE`, `$FE`). If you have to open a new one, run
-step 1's values block again, then `cd "$ASSAY/infra/azure/example/environments/staging"`.
+`$ASSAYFE`, `$STATE_ACCOUNT`, `$ENTRA_CLIENT_ID`, `$BE`, `$FE`). In a new one, from step 4
+on, set `ASSAY`, `ASSAYFE`, `STATE_ACCOUNT` and `ENTRA_CLIENT_ID` again, and
+`cd "$ASSAY/infra/azure/example/environments/staging"`; from step 5 on, also step 4's
+secret line, and step 8 needs step 7's `BE` and `FE`.
 
-**1. Your values, and the code at the releases you deploy.** The releases are the two
-repositories' tags; this lists them, oldest first:
-
-```bash
-git ls-remote --tags --refs https://github.com/cupelworks/assay.git 'v*' | sed 's|.*refs/tags/v||' | sort -V
-git ls-remote --tags --refs https://github.com/cupelworks/assayfe.git 'v*' | sed 's|.*refs/tags/v||' | sort -V
-```
-
-The newest of each is a safe start. In an empty folder, set the two (as listed, without a
-`v`) and a name for your state's storage account: unique across all of Azure, 3 to 24
-lowercase letters and digits. This is the block to run again, from the same folder, in a
-new terminal; it says what's still missing:
+**1. The code, at the releases you deploy.** Pick a release of each from the tags of
+[`cupelworks/assay`](https://github.com/cupelworks/assay/tags) and
+[`cupelworks/assayfe`](https://github.com/cupelworks/assayfe/tags) (the newest of each is
+a safe start), and clone them in an empty folder, with your releases in place of
+`vX.Y.Z`:
 
 ```bash
-BE_VERSION=
-FE_VERSION=
-STATE_ACCOUNT=
+git clone --branch vX.Y.Z https://github.com/cupelworks/assay.git
+git clone --branch vX.Y.Z https://github.com/cupelworks/assayfe.git
 ASSAY=$PWD/assay
 ASSAYFE=$PWD/assayfe
-[[ $BE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $FE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || echo "Set both versions first."
-[[ $STATE_ACCOUNT =~ ^[a-z0-9]{3,24}$ ]] || echo "Set STATE_ACCOUNT first: 3 to 24 lowercase letters and digits."
 ```
 
-Then, once, the two repositories at those releases:
+Check that the two work together, with the BE release in place of `X.Y.Z`: an FE release
+names the API releases it works with. If it says **outside**, pick another FE release:
 
 ```bash
-git clone --branch "v$BE_VERSION" https://github.com/cupelworks/assay.git
-git clone --branch "v$FE_VERSION" https://github.com/cupelworks/assayfe.git
-```
-
-Check that the two work together: an FE release names the API releases it works with.
-If it says **outside**, stop and pick another pair (and clone again):
-
-```bash
-(cd "$ASSAYFE" && node scripts/check-api-version.mjs "$BE_VERSION")
+node "$ASSAYFE/scripts/check-api-version.mjs" X.Y.Z
 ```
 
 **2. Terraform's state**, once per subscription: skip this step if you already have one.
@@ -236,9 +221,11 @@ updates it. It lives in a storage account of yours, shared by every environment 
 under its own key), and stays when an environment is removed. The state holds every
 secret of the deployment, so the account allows only Microsoft sign-in (no access keys),
 and keeps old versions and deleted files for 30 days so a damaged state can be recovered.
-Only the storage account's name is yours to choose; keep the others.
+Only the storage account's name is yours to choose (unique across all of Azure, 3 to 24
+lowercase letters and digits): set it after `STATE_ACCOUNT=`, and keep the other names.
 
 ```bash
+STATE_ACCOUNT=
 az group create --name rg-terraform-state --location northeurope
 az storage account create --name "$STATE_ACCOUNT" --resource-group rg-terraform-state \
   --sku Standard_LRS --https-only true --min-tls-version TLS1_2 \
@@ -370,88 +357,71 @@ API, and `/api/health/worker` should answer `ready`. Expect one "worker not runn
 alert email shortly after, then a "resolved" one: Azure's replica count lags the new
 worker.
 
-**Later, a new release:** set the new `BE_VERSION` and `FE_VERSION` in step 1's values
-block and run it, then move the two clones to them:
+**Later, a new release:** move the two clones to the new releases, check them, then, in
+this folder with step 4's secret set, steps 7 and 8. Images already in the registry are
+kept, so going back is the same steps with the old releases.
 
 ```bash
-git -C "$ASSAY" fetch --tags && git -C "$ASSAY" checkout "v$BE_VERSION"
-git -C "$ASSAYFE" fetch --tags && git -C "$ASSAYFE" checkout "v$FE_VERSION"
+git -C "$ASSAY" fetch --tags && git -C "$ASSAY" checkout vX.Y.Z
+git -C "$ASSAYFE" fetch --tags && git -C "$ASSAYFE" checkout vX.Y.Z
+node "$ASSAYFE/scripts/check-api-version.mjs" X.Y.Z
 ```
-
-Then run step 1's check: if it says **outside**, go back and pick another pair. Then, in
-this folder with step 4's secret set, steps 7 and 8. Images already in the
-registry are kept, so going back is the same steps with the old versions.
 
 ## Deploy with GitHub Actions
 
 The pipeline is a GitHub Actions workflow. Other CI systems have no template here.
 
-The code lives in public repositories: `cupelworks/assay` (the BE, and this module) and
-`cupelworks/assayfe` (the FE). They know nothing about your Azure. **Your deployment**
-lives in a **private repository of your own**, not a fork (a fork of a public repository
-is always public): which releases run where, the pipeline, its runs and their logs, your
-variables and secrets. A public repository's workflow logs are public, so nothing about
-your Azure ever runs in one. The deployment repository holds no Assay code:
+Your deployment is a **private repository of yours** (not a fork: a fork of a public
+repository is public, and so are its workflow logs), with exactly this content. Most of
+it is copied from [`cupelworks/assay`](https://github.com/cupelworks/assay/tree/main/infra/azure)'s
+`main` branch, not from a release, on purpose: it has the pipeline's latest fixes, while
+the release you deploy is set in `main.tf`.
 
 ```
-your-deployment-repo/
-├── environments/
-│   ├── staging/      # main.tf: the module at a release (?ref=vX.Y.Z), fe_version, sizes
-│   └── production/   # the same, its own releases and sizes
-└── .github/workflows/
-    ├── deploy.yml    # pipelines/github-actions/deploy.yml
-    └── destroy.yml   # pipelines/github-actions/destroy.yml (optional: removes staging)
+your-deployment-repo/      copied from cupelworks/assay (main)
+├── environments/          ← infra/azure/example/environments/
+│   ├── staging/main.tf      two lines to change (step 7)
+│   └── production/main.tf   the same
+├── .github/workflows/
+│   ├── deploy.yml         ← infra/azure/pipelines/github-actions/deploy.yml
+│   └── destroy.yml        ← infra/azure/pipelines/github-actions/destroy.yml (optional, step 9)
+└── .gitignore             you create it, with the lines below
 ```
 
-The pipeline reads the two releases from each `main.tf`, checks out the two code
-repositories at those tags (they're public: no key), checks that the FE works with that
-API, builds the three images, runs the migrations and releases. A push to `main` deploys
-staging, so **don't push to `main` until step 8**: until then the run would fail, its
-variables and secrets missing.
+The `.gitignore` keeps out what Terraform makes when it runs in the repository (as when
+removing an environment from your machine):
+
+```
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+backend.hcl
+terraform.tfvars
+```
+
+The lock file is among them: each run takes the providers' newest versions within the
+constraints in each environment's `versions.tf`.
+
+The first push to `main` deploys staging, so **add the content only at step 7**, once
+the variables and secrets it needs exist.
 
 The steps set up **staging**; [Production](#production), after them, repeats the ones it
-needs. Run them all in **one terminal window**: later steps use values the earlier ones
-set (`$REPO`, `$ENV`, `$STATE_ACCOUNT`, `$ASSAY`, `$DEPLOY`, `$ENTRA_CLIENT_ID`,
-`$APP_ID`). If you have to open a new one, run step 1's values block again, and set
-`ENTRA_CLIENT_ID` (step 3) and `APP_ID` (step 5) again if you need them.
+needs. Run the commands in **one terminal window**: later steps use values the earlier
+ones set (`$REPO`, `$ENV`, `$ASSAY`, `$STATE_ACCOUNT`, `$ENTRA_CLIENT_ID`, `$APP_ID`). In a
+new one, set again the ones the next step uses: from step 3 on, `REPO`, `ENV`, `ASSAY` and
+`STATE_ACCOUNT`; from step 6 on, also `ENTRA_CLIENT_ID` and `APP_ID`.
 
-**1. Your repositories and values.** Create the private deployment repository on GitHub
-and clone it, and clone Assay's repository beside it: the templates (`deploy.yml`,
-`destroy.yml`), the example and the sign-in's script come from there, from its default
-branch on purpose, while the module itself is pinned to the release you choose, in
-`main.tf` (step 7). The releases you deploy are the two code repositories' tags; this
-lists them, oldest first:
-
-```bash
-git ls-remote --tags --refs https://github.com/cupelworks/assay.git 'v*' | sed 's|.*refs/tags/v||' | sort -V
-git ls-remote --tags --refs https://github.com/cupelworks/assayfe.git 'v*' | sed 's|.*refs/tags/v||' | sort -V
-```
-
-The newest of each is a safe start: an FE release names the API releases it works with,
-and the pipeline checks it before deploying. In an empty folder, set your repository's
-name (`your-org/your-repo`), the two releases (as listed, without a `v`) and a name for
-your state's storage account: unique across all of Azure, 3 to 24 lowercase letters and
-digits. This is the block to run again, from the same folder, in a new terminal; it says
-what's still missing:
+**1. Your repository.** Create the private repository on GitHub, empty (no README, no
+`.gitignore`, no licence): its content
+comes in step 7. In an empty folder, set its name after `REPO=` (`your-org/your-repo`),
+and clone Assay's repository, for the files to copy and the sign-in's script:
 
 ```bash
 REPO=
 ENV=staging
-BE_VERSION=
-FE_VERSION=
-STATE_ACCOUNT=
-DEPLOY=$PWD/${REPO#*/}
-ASSAY=$PWD/assay
-[[ $REPO =~ ^[^/]+/[^/]+$ ]] || echo "Set REPO first: your-org/your-repo."
-[[ $BE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $FE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || echo "Set both versions first."
-[[ $STATE_ACCOUNT =~ ^[a-z0-9]{3,24}$ ]] || echo "Set STATE_ACCOUNT first: 3 to 24 lowercase letters and digits."
-```
-
-Then, once:
-
-```bash
-gh repo create "$REPO" --private --clone
 git clone https://github.com/cupelworks/assay.git
+ASSAY=$PWD/assay
 ```
 
 **2. Terraform's state**, once per subscription: skip this step if you already have one.
@@ -460,10 +430,12 @@ updates it, the pipeline's included. It lives in a storage account of yours, sha
 every environment (each under its own key), and stays when an environment is removed.
 The state holds every secret of the deployment, so the account allows only Microsoft
 sign-in (no access keys), and keeps old versions and deleted files for 30 days so a
-damaged state can be recovered. Only the storage account's name is yours to choose; keep
-the others.
+damaged state can be recovered. Only the storage account's name is yours to choose
+(unique across all of Azure, 3 to 24 lowercase letters and digits): set it after
+`STATE_ACCOUNT=`, and keep the other names.
 
 ```bash
+STATE_ACCOUNT=
 az group create --name rg-terraform-state --location northeurope
 az storage account create --name "$STATE_ACCOUNT" --resource-group rg-terraform-state \
   --sku Standard_LRS --https-only true --min-tls-version TLS1_2 \
@@ -587,38 +559,21 @@ Optional repository variables `ASSAY_REPOSITORY` and `ASSAY_FE_REPOSITORY`, in S
 Secrets and variables → Actions → Variables, point the pipeline at other copies of the
 code.
 
-**7. The deployment repository's files**: the two environments and the deploy, from the
-Assay clone, with the `.gitignore` lines that keep local Terraform files out of git:
+**7. The repository's content, then the first run.** Put in it the folders and the
+workflow the tree at the top shows, from the Assay clone, and the `.gitignore`. Then pick a release of each
+from the tags of [`cupelworks/assay`](https://github.com/cupelworks/assay/tags) and
+[`cupelworks/assayfe`](https://github.com/cupelworks/assayfe/tags) (the newest of each is
+a safe start: the FE's names the API releases it works with, and the pipeline checks the
+pair before deploying), and set them in each `main.tf`:
 
-```bash
-cd "$DEPLOY"
-cp -R "$ASSAY/infra/azure/example/environments" .
-mkdir -p .github/workflows
-cp "$ASSAY/infra/azure/pipelines/github-actions/deploy.yml" .github/workflows/
-printf '%s\n' .terraform/ .terraform.lock.hcl '*.tfstate' '*.tfplan' terraform.tfvars backend.hcl > .gitignore
-```
+- **The BE release, in the module's `source`.** Delete the line
+  `source = "../../../modules/assay"` (the example's own copy of the module), and
+  uncomment the line above it with your release:
 
-The lock file (`.terraform.lock.hcl`) stays out of git: each run picks the providers'
-newest versions within the constraints in each environment's `versions.tf`.
-
-Then, in each environment's `main.tf`, set the two releases. The pipeline reads them
-from there:
-
-- **The BE release, in the module's `source`.** The example uses the module from its own
-  folder (`source = "../../../modules/assay"`); a deployment repository uses it at a
-  release, the line commented just above it. That release is also the BE version the
-  environment runs.
-- **The FE release, `fe_version`.**
-
-```bash
-sed -i.bak -E \
-  -e 's|^  source = "\.\./\.\./\.\./modules/assay"|  source = "git::https://github.com/cupelworks/assay.git//infra/azure/modules/assay?ref=v'"$BE_VERSION"'"|' \
-  -e 's|^(  fe_version = ")[^"]*"|\1'"$FE_VERSION"'"|' \
-  environments/*/main.tf
-rm environments/*/main.tf.bak
-# check: each main.tf has the source at v$BE_VERSION and fe_version $FE_VERSION
-grep -nE '^ *(source|fe_version) *=' environments/*/main.tf
-```
+  ```hcl
+  source = "git::https://github.com/cupelworks/assay.git//infra/azure/modules/assay?ref=vX.Y.Z"
+  ```
+- **The FE release, `fe_version`:** `fe_version = "X.Y.Z"` with yours.
 
 The rest of each `main.tf` works as it is; what you may change:
 
@@ -630,14 +585,8 @@ The rest of each `main.tf` works as it is; what you may change:
 | *Optional* | How many workers: `min_replicas` and `max_replicas` in `worker`, both set to that number (nothing scales the worker by itself) | `worker` |
 | *Optional* | Region, resource group name, sizes, the worker's off switch, the upload limit | the module's inputs are in the Assay clone's `infra/azure/modules/assay/variables.tf` |
 
-**8. Push: the first run.** With everything in place, the push to `main` deploys staging:
-
-```bash
-cd "$DEPLOY"
-git add .
-git commit -m "Assay $BE_VERSION with its FE $FE_VERSION"
-git push -u origin HEAD:main
-```
+Then commit it all, `.gitignore` included, and push it to `main` with git: the first run
+starts.
 
 Follow it in the repository's **Actions** tab. The first run creates the environment
 with placeholder images, then builds and releases the real ones: about 20 minutes, most
@@ -649,10 +598,9 @@ revision", ends with the FE's address:
 Assay <BE version> with its FE <FE version> runs at https://ca-assay-staging-fe.<random>.northeurope.azurecontainerapps.io
 ```
 
-**9. The sign-in's return address.** After signing in, Microsoft sends people back only
-to an address the app registration lists. Give it the address step 8 printed:
-
-Run this line, paste the address and press Enter:
+**8. The sign-in's return address.** After signing in, Microsoft sends people back only
+to an address the app registration lists. Give it the address step 7's run printed: run this
+line, paste the address and press Enter:
 
 ```bash
 read -r FE_URL
@@ -671,18 +619,9 @@ shortly after, then a "resolved" one: Azure's replica count lags the new worker.
 Releases keep the address; only an environment created anew gets a new one, and needs
 this step again.
 
-**10. Optional: a button that removes staging.** Copy the template, and push it without
-deploying (`[skip ci]`):
-
-```bash
-cd "$DEPLOY"
-cp "$ASSAY/infra/azure/pipelines/github-actions/destroy.yml" .github/workflows/
-git add .github/workflows/destroy.yml
-git commit -m "A button that removes staging [skip ci]"
-git push
-```
-
-How to use it is in [Removing it](#with-github-actions-staging).
+**9. Optional: a button that removes staging.** Add `destroy.yml` to
+`.github/workflows/` (from the Assay clone, as the tree shows) and push it with
+`[skip ci]` in the commit message, so the push doesn't deploy. How to use it is in [Removing it](#with-github-actions-staging).
 
 ### Releasing
 
@@ -715,7 +654,7 @@ with `ENV=production`:
    the state's key `assay-production.tfstate`.
 4. In the repository's **Actions** tab: **Deploy Assay to Azure → Run workflow →
    production**.
-5. Step 9, with the address that run prints.
+5. Step 8, with the address that run prints.
 
 ### Keep Azure out of public repositories
 
@@ -824,7 +763,7 @@ you're done with it (below).
 ### With GitHub Actions (staging)
 
 **Once:** the destroy workflow in your deployment repository, as in Deploy with GitHub
-Actions, step 10.
+Actions, step 9.
 
 **Then, each time:**
 
@@ -943,7 +882,7 @@ To create it again:
    GitHub environment (Deploy with GitHub Actions, steps 3 and 6).
 2. Push to `main`, or **Run workflow** on the deploy.
 3. Give the sign-in the new environment's address, as in Deploy with GitHub Actions, step
-   9: a new environment gets a new one.
+   8: a new environment gets a new one.
 
 From your machine, it's Deploy from your machine from step 5, with step 6 again for the
 new address.
