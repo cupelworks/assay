@@ -1,7 +1,8 @@
 # Staging: the releases it runs and its sizes. To release, change the versions
 # and push to main: the pipeline deploys staging.
 #
-# What to change before deploying: infra/azure/README.md, "What you change".
+# What to change before deploying: infra/azure/README.md, step 4 from your machine
+# (the settings), step 7 with the pipeline (the deployment repository's files).
 
 locals {
   # The FE release staging runs (cupelworks/assayfe's tag v2.5.2). The BE's is the

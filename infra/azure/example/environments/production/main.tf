@@ -2,7 +2,8 @@
 # by hand (Run workflow → production), from main: bump the versions here once
 # staging has run them.
 #
-# What to change before deploying: infra/azure/README.md, "What you change".
+# What to change before deploying: infra/azure/README.md, step 4 from your machine
+# (the settings), step 7 with the pipeline (the deployment repository's files).
 
 locals {
   # The FE release production runs (cupelworks/assayfe's tag v2.5.2). The BE's is the

@@ -15,22 +15,20 @@ infra/azure/
 └── AZURE-INFO.md                     # every resource it creates, why, and what it costs
 ```
 
+Read the first four sections once, then follow **one** of the two ways of deploying from
+its first step to its last: everything it needs is in it, in order.
+
 ## Contents
 
 - [How it fits together](#how-it-fits-together)
 - [What it creates](#what-it-creates)
 - [Cost](#cost)
 - [Before you start](#before-you-start)
-- [Terraform's state](#terraforms-state)
-- [The sign-in](#the-sign-in)
-- [What you change](#what-you-change)
 - [Deploy from your machine](#deploy-from-your-machine)
 - [Deploy with the pipeline](#deploy-with-the-pipeline)
-  - [Two repositories](#two-repositories)
   - [Releasing](#releasing)
-  - [Setting it up](#setting-it-up)
+  - [Production](#production)
   - [Keep Azure out of public repositories](#keep-azure-out-of-public-repositories)
-- [Using the module from your own configuration](#using-the-module-from-your-own-configuration)
 - [Running it](#running-it)
 - [When something goes wrong](#when-something-goes-wrong)
 - [Removing it](#removing-it)
@@ -39,6 +37,7 @@ infra/azure/
   - [What's left afterwards](#whats-left-afterwards)
   - [Creating it again](#creating-it-again)
 - [Limits](#limits)
+- [Using the module from your own configuration](#using-the-module-from-your-own-configuration)
 
 ## How it fits together
 
@@ -80,8 +79,8 @@ or roles yet: everyone who signs in can do everything.
 Every app uses one managed identity: no password is stored in the apps' settings or in
 the pipeline. [AZURE-INFO.md](AZURE-INFO.md) lists every resource one by one (35 per
 environment, counting their parts), why each is there, what lives outside the module, and
-the timings and quirks to expect. Terraform's state holds every secret in plain text: keep it in a storage
-account only you and the pipeline can read, never in git.
+the timings and quirks to expect. Terraform's state holds every secret in plain text: keep
+it in a storage account only you and the pipeline can read, never in git.
 
 ## Cost
 
@@ -96,8 +95,7 @@ to check with the [Azure pricing calculator](https://azure.microsoft.com/pricing
 
 The ranges are wide because an idle container is billed far less than a busy one.
 `worker_enabled = false` removes the worker (runs wait as `Pending` and are sent again
-once it's back); `api.min_replicas = 0` lets the API sleep when idle. `terraform destroy`
-removes everything when you're done. Set a budget (below) before the first apply.
+once it's back); `api.min_replicas = 0` lets the API sleep when idle.
 
 ## Before you start
 
@@ -108,15 +106,25 @@ removes everything when you're done. Set a budget (below) before the first apply
   Administrator);
 - to create the sign-in's app registration: a role that may create app registrations
   in the directory (Application Administrator, or Global Administrator);
-- the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), signed in
-  (`az login`, then `az account show` to check the subscription);
+- the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli);
 - [Terraform](https://developer.hashicorp.com/terraform/install) 1.9 or later. On macOS,
   from HashiCorp's tap: `brew tap hashicorp/tap && brew install hashicorp/tap/terraform`
   (Homebrew's own `terraform` stays at 1.5.7);
-- for the pipeline, the [GitHub CLI](https://cli.github.com), signed in (`gh auth login`);
+- git;
+- from your machine: [Node.js](https://nodejs.org), which reads the FE's version and
+  checks that it works with the API;
+- with the pipeline: the [GitHub CLI](https://cli.github.com);
 - **bash**: every command here is written for it. On a Mac, whose terminal runs zsh, type
   `bash` first (and `exit` when you're done): zsh reads some of these lines differently,
   and they'd create things with the wrong names.
+
+**Sign in**, and check that the subscription shown is the one to deploy to:
+
+```bash
+az login
+az account show
+gh auth login   # only for the pipeline
+```
 
 **Pick a region that takes your subscription.** Some regions refuse new resources for
 newer subscriptions: the first apply then fails with `RequestDisallowedByAzure` ("the
@@ -144,13 +152,15 @@ In the portal: Subscriptions → your subscription → Settings → **Resource p
 search for each name, select it and click **Register**.
 
 **Set a budget**, so a forgotten deployment can't surprise you. The amount is in the
-subscription's billing currency; this one emails at 50, 80 and 100% of the month's cost:
+subscription's billing currency; this one emails you (replace `you@example.com`) at 50,
+80 and 100% of the month's cost, starting this month:
 
 ```bash
 SUB=$(az account show --query id -o tsv)
-cat > budget.json <<'EOF'
+START=$(date -u +%Y-%m-01T00:00:00Z)
+cat > budget.json <<EOF
 {"properties": {"category": "Cost", "amount": 300, "timeGrain": "Monthly",
-  "timePeriod": {"startDate": "2026-10-01T00:00:00Z"},
+  "timePeriod": {"startDate": "$START"},
   "notifications": {
     "at50":  {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 50,  "thresholdType": "Actual", "contactEmails": ["you@example.com"]},
     "at80":  {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 80,  "thresholdType": "Actual", "contactEmails": ["you@example.com"]},
@@ -160,27 +170,58 @@ az rest --method put --body @budget.json \
   --url "https://management.azure.com/subscriptions/$SUB/providers/Microsoft.Consumption/budgets/assay-monthly?api-version=2023-05-01"
 ```
 
-The start date must be the first day of a month, this one or a later one. In the portal:
-Cost Management → Budgets.
+In the portal: Cost Management → Budgets.
 
-## Terraform's state
+**Then choose how to deploy:**
 
+| | From your machine | With the pipeline |
+|---|---|---|
+| **For** | a first look, or a one-off environment | staging and production, released by a push |
+| **Runs on** | your computer, with your `az login` | GitHub's runners, in a private repository of yours |
+| **Needs** | the two code repositories cloned | a private GitHub repository, on a paid plan |
+
+## Deploy from your machine
+
+The steps create **staging**, from the configuration in Assay's own repository. Run them
+all in **one terminal window**: later steps use values the earlier ones set (`$ASSAY`,
+`$STATE_ACCOUNT`, `$ENTRA_CLIENT_ID`, `$BE`, `$FE`). If you have to open a new one, run
+step 1's values block again, then `cd "$ASSAY/infra/azure/example/environments/staging"`.
+
+**1. Your values, and the code at the releases you deploy.** In an empty folder, set
+the releases you want (an FE release names the API releases it works with; step 7 checks
+it) and a name for your state's storage account: unique across all of Azure, 3 to 24
+lowercase letters and digits. This is the block to run again, from the same folder, in a
+new terminal:
+
+```bash
+BE_VERSION=2.4.2
+FE_VERSION=2.5.3
+STATE_ACCOUNT=tfstateyourname
+ASSAY=$PWD/assay
+ASSAYFE=$PWD/assayfe
+```
+
+Then, once, the two repositories at those releases:
+
+```bash
+git clone --branch "v$BE_VERSION" https://github.com/cupelworks/assay.git
+git clone --branch "v$FE_VERSION" https://github.com/cupelworks/assayfe.git
+```
+
+**2. Terraform's state**, once per subscription: skip this step if you already have one.
 Terraform keeps a record of everything it created, the *state*, and every run reads and
-updates it: from your machine and from the pipeline alike. It lives in a storage account
-of yours, **created once per subscription, before either way of deploying**, and shared
-by every environment (each under its own key). Removing an environment leaves it in place.
-
-The state holds every secret of the deployment, so the account allows only Microsoft
-sign-in (no access keys), and keeps old versions and deleted files for 30 days so a
-damaged state can be recovered. Its name must be unique across all of Azure: replace
-`tfstateyourname`.
+updates it. It lives in a storage account of yours, shared by every environment (each
+under its own key), and stays when an environment is removed. The state holds every
+secret of the deployment, so the account allows only Microsoft sign-in (no access keys),
+and keeps old versions and deleted files for 30 days so a damaged state can be recovered.
+Only the storage account's name is yours to choose; keep the others.
 
 ```bash
 az group create --name rg-terraform-state --location northeurope
-az storage account create --name tfstateyourname --resource-group rg-terraform-state \
+az storage account create --name "$STATE_ACCOUNT" --resource-group rg-terraform-state \
   --sku Standard_LRS --https-only true --min-tls-version TLS1_2 \
   --allow-blob-public-access false --allow-shared-key-access false
-az storage account blob-service-properties update --account-name tfstateyourname \
+az storage account blob-service-properties update --account-name "$STATE_ACCOUNT" \
   --resource-group rg-terraform-state --enable-versioning true \
   --enable-delete-retention true --delete-retention-days 30 \
   --enable-container-delete-retention true --container-delete-retention-days 30
@@ -188,112 +229,103 @@ az storage account blob-service-properties update --account-name tfstateyourname
 # container: with no access keys, creating it needs this role)
 az role assignment create --role "Storage Blob Data Contributor" \
   --assignee "$(az ad signed-in-user show --query id -o tsv)" \
-  --scope "$(az storage account show --name tfstateyourname --query id -o tsv)"
-# the role takes a minute to apply; if this says you're not authorised, wait and retry
-az storage container create --name tfstate --account-name tfstateyourname --auth-mode login
+  --scope "$(az storage account show --name "$STATE_ACCOUNT" --query id -o tsv)"
 ```
 
-Whoever runs Terraform needs the **Storage Blob Data Contributor** role on this account:
-the commands above give it to you, and the pipeline's identity gets it in Setting it up,
-step 2.
-
-## The sign-in
-
-Each environment has its own Entra ID app registration: the "app" people sign in to.
-`scripts/entra-app.sh` creates it with the Azure CLI, once per environment, so the
-pipeline never needs rights in your directory:
+The role takes a minute to apply. Then create the container; if it says you're not
+authorised, wait a minute and run it again:
 
 ```bash
-infra/azure/scripts/entra-app.sh create "Assay (staging)"
+az storage container create --name tfstate --account-name "$STATE_ACCOUNT" --auth-mode login
 ```
 
-It prints the **client ID** (a setting) and a **client secret** (a secret, shown only
-then, valid one year). Only the people assigned to the registration can sign in, and
-you're assigned. Then:
-
-| When | Command |
-|---|---|
-| After the first apply, once the FE has an address | `entra-app.sh redirect <client id> "$(terraform output -raw fe_url)"`: until then the sign-in refuses, so nothing opens. Again if you destroy the environment and create it anew: the FE gets a new address |
-| To let someone else in | `entra-app.sh allow <client id> <their sign-in name>` |
-| Before the secret expires (a year) | `entra-app.sh rotate <client id>`: a new secret beside the old one; apply it, then delete the old one with the command it prints |
-
-Sign out (`/.auth/logout`) ends the session with Assay; the Microsoft session stays, so
-coming back signs you in at once.
-
-## What you change
-
-Everything else works as it is. Each value goes in one place when you deploy from your
-machine, and in another when the pipeline deploys.
-
-| | What | From your machine | With the pipeline |
-|---|---|---|---|
-| **Must** | Your subscription | `subscription_id` in `terraform.tfvars` | `AZURE_SUBSCRIPTION_ID` |
-| **Must** | The state storage account's name: replace `tfstateyourname` (storage account names are unique across all of Azure) | `backend.hcl` | `TF_STATE_STORAGE_ACCOUNT` (and the other `TF_STATE_*`) |
-| **Must** | The sign-in's client ID and secret, from `scripts/entra-app.sh create` | `entra_client_id` in `terraform.tfvars`; `export TF_VAR_entra_client_secret=...` | `ENTRA_CLIENT_ID`; the `ENTRA_CLIENT_SECRET` secret |
-| **Must** | The sign-in's return address, once, after the first apply | `scripts/entra-app.sh redirect <client id> <fe url>` | the same |
-| **Must** (pipeline) | The pipeline's Azure identity | | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` |
-| **Must** (your deployment repository) | The module's `source`: the commented `git::` line, with the BE release in `?ref=vX.Y.Z` | each environment's `main.tf` | the same |
-| **Must** (your deployment repository) | The FE release, `fe_version` | each environment's `main.tf` | the same |
-| *Recommended* | Who gets the alert emails | `alert_emails` in `main.tf` | the same |
-| *Recommended* | Your application under test, if your tests ask it for answers | `extra_environment` in `main.tf` (`ASSAY_TARGET_*`), or later from Assay's Settings | the same |
-| *Optional* | The LLM judge: provider and model, and its key | `judge` in `main.tf`; `export TF_VAR_judge_api_key=...` | `judge` in `main.tf`; the `JUDGE_API_KEY` secret |
-| *Optional* | How many workers: `min_replicas` and `max_replicas` in `worker`, both set to that number (nothing scales the worker by itself) | `main.tf` | the same |
-| *Optional* | Region, resource group name, sizes, the worker's off switch, the upload limit | `main.tf`; the module's inputs are in `modules/assay/variables.tf` | the same |
-
-The images to run aren't a setting: from your machine you pass them when applying
-(`-var image_tag=... -var fe_image_tag=...`), and the pipeline reads them from the
-versions in `main.tf`.
-
-## Deploy from your machine
-
-Each folder in `example/environments/` (`staging`, `production`) can be applied with your
-own `az login`: for a first look, or before the pipeline is set up. It's the same folder the
-pipeline uses afterwards, and with the same state storage and key, the pipeline carries on
-from where you left off. The steps below use `staging`.
-
-**1. Terraform's state:** create its storage account first, once per subscription, as
-[Terraform's state](#terraforms-state) shows.
-
-**2. Your settings**, in `example/environments/staging/`:
+**3. The sign-in.** Each environment has its own Entra ID app registration: the "app"
+people sign in to. Only the people assigned to it get in, and you're assigned.
 
 ```bash
-cd infra/azure/example/environments/staging
-cp backend.hcl.example backend.hcl            # the storage account above
-cp terraform.tfvars.example terraform.tfvars  # your subscription and entra_client_id
-export TF_VAR_entra_client_secret=...         # from entra-app.sh create; never in a file
-export TF_VAR_judge_api_key=...               # optional; never in a file
+"$ASSAY/infra/azure/scripts/entra-app.sh" create "Assay (staging)"
 ```
 
-Both copies are git-ignored. The environment's other choices (its region, sizes, alert
-emails, the judge, other Assay settings) are in its `main.tf`.
+It prints the **client ID** and a **client secret**, shown only now and valid one year:
+keep the secret in your password manager, and the client ID in this terminal:
 
-**3. The infrastructure**, with placeholder images (Assay's own images need the
-registry this creates), then the sign-in's return address:
+```bash
+ENTRA_CLIENT_ID=paste-the-client-id-here
+```
+
+**4. Your settings**, in the staging folder. `backend.hcl` says where the state is,
+`terraform.tfvars` holds your subscription and the sign-in's client ID (both files are
+git-ignored), and the secret is read without showing it or keeping it in your history:
+
+```bash
+cd "$ASSAY/infra/azure/example/environments/staging"
+cat > backend.hcl <<EOF
+resource_group_name  = "rg-terraform-state"
+storage_account_name = "$STATE_ACCOUNT"
+container_name       = "tfstate"
+key                  = "assay-staging.tfstate"
+use_azuread_auth     = true
+EOF
+cat > terraform.tfvars <<EOF
+subscription_id = "$(az account show --query id -o tsv)"
+entra_client_id = "$ENTRA_CLIENT_ID"
+EOF
+```
+
+Then the secret, on its own: run this line, paste the client secret from step 3 and press
+Enter (nothing shows while you paste):
+
+```bash
+read -s TF_VAR_entra_client_secret && export TF_VAR_entra_client_secret
+```
+
+The environment's other choices are in the same folder's `main.tf`. Everything works
+as it is; what you may change:
+
+| | What | In `main.tf` |
+|---|---|---|
+| *Recommended* | Who gets the alert emails | `alert_emails` |
+| *Recommended* | Your application under test, if your tests ask it for answers | `extra_environment` (`ASSAY_TARGET_*`), or later from Assay's Settings |
+| *Optional* | The LLM judge: provider and model, and its key | `judge`; the key with `read -s TF_VAR_judge_api_key && export TF_VAR_judge_api_key` |
+| *Optional* | How many workers: `min_replicas` and `max_replicas` in `worker`, both set to that number (nothing scales the worker by itself) | `worker` |
+| *Optional* | Region, resource group name, sizes, the worker's off switch, the upload limit | the module's inputs are in `modules/assay/variables.tf` |
+
+**5. The infrastructure**, with placeholder images: Assay's own images need the
+registry this creates. About 20 minutes the first time.
 
 ```bash
 terraform init -backend-config=backend.hcl
 terraform apply
-../../../scripts/entra-app.sh redirect <client id> "$(terraform output -raw fe_url)"
 ```
 
-**4. The images**, built in your registry (no Docker needed locally; the worker's image
-is about 3.5 GB and takes a while). Each is tagged with its version: Assay's from
-`pyproject.toml`, the FE's from its `package.json`.
+**6. The sign-in's return address.** After signing in, Microsoft sends people back only
+to an address the app registration lists, and the FE's address exists now:
+
+```bash
+"$ASSAY/infra/azure/scripts/entra-app.sh" redirect "$ENTRA_CLIENT_ID" "$(terraform output -raw fe_url)"
+```
+
+It answers "Sign-in now returns to …". Without it, Microsoft refuses the sign-in
+("redirect URI mismatch"). An environment created anew gets a new address, and needs this
+step again.
+
+**7. The images**, built in your registry from the two clones (no Docker needed
+locally; the worker's image is about 3.5 GB and takes a while). Each is tagged with its
+version, read from the clone: Assay's from `pyproject.toml`, the FE's from its
+`package.json`. The FE's check stops here if it doesn't work with this API.
 
 ```bash
 REGISTRY=$(terraform output -raw registry_name)
-cd ../../../../..   # Assay's repository root
-BE=$(sed -nE 's/^version = "(.*)"/\1/p' pyproject.toml)
-az acr build --registry "$REGISTRY" --image "assay-api:$BE" --file Dockerfile .
-az acr build --registry "$REGISTRY" --image "assay-worker:$BE" --file Dockerfile.worker .
-cd /path/to/assayfe   # the FE's repository root
-FE=$(node -p 'require("./package.json").version')
-az acr build --registry "$REGISTRY" --image "assay-fe:$FE" --file Dockerfile \
-  --build-arg "VERSION=$FE" --build-arg "REVISION=$(git rev-parse HEAD)" .
-cd -   # back to example/environments/staging
+BE=$(sed -nE 's/^version = "(.*)"/\1/p' "$ASSAY/pyproject.toml")
+FE=$(cd "$ASSAYFE" && node -p 'require("./package.json").version')
+(cd "$ASSAYFE" && node scripts/check-api-version.mjs "$BE") && echo "FE $FE works with API $BE"
+(cd "$ASSAY" && az acr build --registry "$REGISTRY" --image "assay-api:$BE" --file Dockerfile .)
+(cd "$ASSAY" && az acr build --registry "$REGISTRY" --image "assay-worker:$BE" --file Dockerfile.worker .)
+(cd "$ASSAYFE" && az acr build --registry "$REGISTRY" --image "assay-fe:$FE" --file Dockerfile \
+  --build-arg "VERSION=$FE" --build-arg "REVISION=$(git rev-parse HEAD)" .)
 ```
 
-**5. The migrations, then the release:**
+**8. The migrations, then the release:**
 
 ```bash
 RG=$(terraform output -raw resource_group_name)
@@ -309,21 +341,24 @@ az containerapp job execution list --name "$JOB" --resource-group "$RG" -o table
 terraform apply -var "image_tag=$BE" -var "fe_image_tag=$FE"
 ```
 
-**6. Check it.** Open `terraform output -raw fe_url` and sign in. `/api/docs` shows the
-API, and `/api/health/worker` should answer `ready`.
+**9. Check it.** Open `terraform output -raw fe_url` and sign in. `/api/docs` shows the
+API, and `/api/health/worker` should answer `ready`. Expect one "worker not running"
+alert email shortly after, then a "resolved" one: Azure's replica count lags the new
+worker.
+
+**Later, a new release:** in the two clones, `git fetch --tags` and `git checkout
+v<the new version>`; then, in this folder with step 4's secret set, steps 7 and 8.
+Images already in the registry are kept, so going back is the same steps with the old
+versions.
 
 ## Deploy with the pipeline
 
-### Two repositories
-
-- **The code** lives in public repositories: `cupelworks/assay` (the BE, and this
-  module) and `cupelworks/assayfe` (the FE). They know nothing about your Azure.
-- **Your deployment** lives in a **private repository of your own**, not a fork (a fork
-  of a public repository is always public). It holds which releases run where, the
-  pipeline, its runs and their logs, your variables and secrets. A public repository's
-  workflow logs are public, so nothing about your Azure ever runs in one.
-
-The deployment repository holds no Assay code. Its layout is `example/`'s:
+The code lives in public repositories: `cupelworks/assay` (the BE, and this module) and
+`cupelworks/assayfe` (the FE). They know nothing about your Azure. **Your deployment**
+lives in a **private repository of your own**, not a fork (a fork of a public repository
+is always public): which releases run where, the pipeline, its runs and their logs, your
+variables and secrets. A public repository's workflow logs are public, so nothing about
+your Azure ever runs in one. The deployment repository holds no Assay code:
 
 ```
 your-deployment-repo/
@@ -335,12 +370,258 @@ your-deployment-repo/
     └── destroy.yml   # pipelines/github-actions/destroy.yml (optional: removes staging)
 ```
 
-Copy `example/environments/` with its two folders, and in each `main.tf` replace the
-module's `source` with the line in its comment: the module at a release. That release is
-also the BE version the environment runs, and `fe_version` is the FE's. The pipeline
-reads both, checks out the two repositories at those tags (they're public: no key),
-checks that the FE works with that API, builds the three images, runs the migrations and
-releases.
+The pipeline reads the two releases from each `main.tf`, checks out the two code
+repositories at those tags (they're public: no key), checks that the FE works with that
+API, builds the three images, runs the migrations and releases. A push to `main` deploys
+staging, so **don't push to `main` until step 8**: until then the run would fail, its
+variables and secrets missing.
+
+The steps set up **staging**; [Production](#production), after them, repeats the ones it
+needs. Run them all in **one terminal window**: later steps use values the earlier ones
+set (`$REPO`, `$ENV`, `$STATE_ACCOUNT`, `$ASSAY`, `$DEPLOY`, `$ENTRA_CLIENT_ID`,
+`$APP_ID`). If you have to open a new one, run step 1's values block again, and set
+`ENTRA_CLIENT_ID` (step 3) and `APP_ID` (step 5) again if you need them.
+
+**1. Your repositories and values.** Create the private deployment repository on GitHub
+and clone it, and clone Assay's repository beside it: the templates, the example and the
+sign-in's script come from there. In an empty folder, with your repository's name, the
+releases you deploy and a name for your state's storage account (unique across all of
+Azure, 3 to 24 lowercase letters and digits):
+
+```bash
+REPO=YOUR_ORG/YOUR_DEPLOYMENT_REPO
+ENV=staging
+BE_VERSION=2.4.2
+FE_VERSION=2.5.3
+STATE_ACCOUNT=tfstateyourname
+DEPLOY=$PWD/${REPO#*/}
+ASSAY=$PWD/assay
+```
+
+This is the block to run again, from the same folder, in a new terminal. Then, once:
+
+```bash
+gh repo create "$REPO" --private --clone
+git clone https://github.com/cupelworks/assay.git
+```
+
+**2. Terraform's state**, once per subscription: skip this step if you already have one.
+Terraform keeps a record of everything it created, the *state*, and every run reads and
+updates it, the pipeline's included. It lives in a storage account of yours, shared by
+every environment (each under its own key), and stays when an environment is removed.
+The state holds every secret of the deployment, so the account allows only Microsoft
+sign-in (no access keys), and keeps old versions and deleted files for 30 days so a
+damaged state can be recovered. Only the storage account's name is yours to choose; keep
+the others.
+
+```bash
+az group create --name rg-terraform-state --location northeurope
+az storage account create --name "$STATE_ACCOUNT" --resource-group rg-terraform-state \
+  --sku Standard_LRS --https-only true --min-tls-version TLS1_2 \
+  --allow-blob-public-access false --allow-shared-key-access false
+az storage account blob-service-properties update --account-name "$STATE_ACCOUNT" \
+  --resource-group rg-terraform-state --enable-versioning true \
+  --enable-delete-retention true --delete-retention-days 30 \
+  --enable-container-delete-retention true --container-delete-retention-days 30
+# let yourself read and write the state with your Azure login (before creating the
+# container: with no access keys, creating it needs this role)
+az role assignment create --role "Storage Blob Data Contributor" \
+  --assignee "$(az ad signed-in-user show --query id -o tsv)" \
+  --scope "$(az storage account show --name "$STATE_ACCOUNT" --query id -o tsv)"
+```
+
+The role takes a minute to apply. Then create the container; if it says you're not
+authorised, wait a minute and run it again:
+
+```bash
+az storage container create --name tfstate --account-name "$STATE_ACCOUNT" --auth-mode login
+```
+
+**3. The sign-in.** Each environment has its own Entra ID app registration: the "app"
+people sign in to. Only the people assigned to it get in, and you're assigned. The
+script is in the Assay clone from step 1:
+
+```bash
+"$ASSAY/infra/azure/scripts/entra-app.sh" create "Assay (staging)"
+```
+
+It prints the **client ID** and a **client secret**, shown only now and valid one year:
+keep the secret in your password manager for step 6, and the client ID in this terminal:
+
+```bash
+ENTRA_CLIENT_ID=paste-the-client-id-here
+```
+
+**4. The GitHub environment.** In the deployment repository's Settings → Environments,
+create `staging` (and `production`, if you'll have one: limit its deployment branches to
+`main`). Environments in a **private** repository need a paid GitHub plan (Pro, Team or
+Enterprise); required reviewers there need Enterprise, so the gate on production is that
+only people who can write to the repository can start the run. On GitHub Free, a private
+repository has no environments: you'd need one workflow file per environment and a
+federated credential per file, which this template doesn't cover.
+
+**5. An Azure identity for the environment**, which GitHub logs in as with OIDC (no
+stored password). Azure trusts it only from that GitHub environment, so a staging run
+can't touch production.
+
+**5a. What Azure will trust, and a check.** GitHub names each run of the environment to
+Azure; this asks GitHub for that name:
+
+```bash
+PREFIX=$(gh api "repos/$REPO/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty' 2>/dev/null) \
+  && SUBJECT="${PREFIX:-repo:$REPO}:environment:${ENV}" \
+  || SUBJECT=
+echo "${SUBJECT:-Not found on GitHub: $REPO}"
+```
+
+It should print something like `repo:your-org@123/your-repo@456:environment:staging`. If
+it says **Not found on GitHub…**, fix `REPO` (or sign in with `gh auth login`) and run 5a
+again. Don't go on until it looks right.
+
+**5b. The identity:**
+
+```bash
+APP_ID=$(az ad app create --display-name "assay-deploy-$ENV" --query appId -o tsv)
+az ad sp create --id "$APP_ID"
+# trust GitHub's runs of that environment, and nothing else; "github-$ENV" is only the
+# credential's label: keep it, the login fixes in "When something goes wrong" use it
+az ad app federated-credential create --id "$APP_ID" --parameters "{\"name\": \"github-$ENV\", \"issuer\": \"https://token.actions.githubusercontent.com\", \"subject\": \"$SUBJECT\", \"audiences\": [\"api://AzureADTokenExchange\"]}"
+# it creates resources and role assignments...
+az role assignment create --assignee "$APP_ID" --role Owner \
+  --scope "/subscriptions/$(az account show --query id -o tsv)"
+# ...and reads and writes Terraform's state
+az role assignment create --assignee "$APP_ID" --role "Storage Blob Data Contributor" \
+  --scope "$(az storage account show --name "$STATE_ACCOUNT" --query id -o tsv)"
+# check: the name it trusts must be 5a's
+az ad app federated-credential list --id "$APP_ID" --query "[].subject" -o tsv
+```
+
+If a role assignment says the identity isn't found, Azure hasn't caught up yet: wait a
+minute and run that line again. Owner on the subscription is the simplest; scope it to
+the environment's resource group if your organisation requires it (the group must then
+exist before the first run).
+
+**6. The environment's variables and secrets**, for the pipeline to read:
+
+```bash
+gh variable set AZURE_CLIENT_ID          --env "$ENV" --repo "$REPO" --body "$APP_ID"
+gh variable set AZURE_TENANT_ID          --env "$ENV" --repo "$REPO" --body "$(az account show --query tenantId -o tsv)"
+gh variable set AZURE_SUBSCRIPTION_ID    --env "$ENV" --repo "$REPO" --body "$(az account show --query id -o tsv)"
+gh variable set TF_STATE_RESOURCE_GROUP  --env "$ENV" --repo "$REPO" --body rg-terraform-state
+gh variable set TF_STATE_STORAGE_ACCOUNT --env "$ENV" --repo "$REPO" --body "$STATE_ACCOUNT"
+gh variable set TF_STATE_CONTAINER       --env "$ENV" --repo "$REPO" --body tfstate
+gh variable set TF_STATE_KEY             --env "$ENV" --repo "$REPO" --body "assay-$ENV.tfstate"
+gh variable set ENTRA_CLIENT_ID          --env "$ENV" --repo "$REPO" --body "$ENTRA_CLIENT_ID"
+gh variable list --env "$ENV" --repo "$REPO"
+```
+
+The list should show the eight variables. Then the secret, on its own: run this line and
+paste step 3's client secret when it asks:
+
+```bash
+gh secret set ENTRA_CLIENT_SECRET --env "$ENV" --repo "$REPO"
+```
+
+| Kind | Name | What it is |
+|---|---|---|
+| Variable | `AZURE_CLIENT_ID` | the identity from step 5, which the pipeline logs in as |
+| Variable | `AZURE_TENANT_ID` | your Entra directory |
+| Variable | `AZURE_SUBSCRIPTION_ID` | the subscription to deploy to |
+| Variable | `TF_STATE_RESOURCE_GROUP`, `TF_STATE_STORAGE_ACCOUNT`, `TF_STATE_CONTAINER`, `TF_STATE_KEY` | where the state is (step 2), and the environment's key in it |
+| Variable | `ENTRA_CLIENT_ID` | the sign-in from step 3 |
+| Secret | `ENTRA_CLIENT_SECRET` | its client secret |
+| Secret, optional | `JUDGE_API_KEY` | the LLM judge's API key: `gh secret set JUDGE_API_KEY --env "$ENV" --repo "$REPO"` |
+
+Optional repository variables `ASSAY_REPOSITORY` and `ASSAY_FE_REPOSITORY` point the
+pipeline at other copies of the code. The values are in the repository's Settings →
+Environments → staging.
+
+**7. The deployment repository's files**: the two environments and the deploy, from the
+Assay clone, with the `.gitignore` lines that keep local Terraform files out of git:
+
+```bash
+cd "$DEPLOY"
+cp -R "$ASSAY/infra/azure/example/environments" .
+mkdir -p .github/workflows
+cp "$ASSAY/infra/azure/pipelines/github-actions/deploy.yml" .github/workflows/
+printf '%s\n' .terraform/ .terraform.lock.hcl '*.tfstate' '*.tfplan' terraform.tfvars backend.hcl > .gitignore
+```
+
+Then, in each environment's `main.tf`, set the two releases. The pipeline reads them
+from there:
+
+- **The BE release, in the module's `source`.** The example uses the module from its own
+  folder (`source = "../../../modules/assay"`); a deployment repository uses it at a
+  release, the line commented just above it. That release is also the BE version the
+  environment runs.
+- **The FE release, `fe_version`.**
+
+```bash
+sed -i.bak -E \
+  -e 's|^  source = "\.\./\.\./\.\./modules/assay"|  source = "git::https://github.com/cupelworks/assay.git//infra/azure/modules/assay?ref=v'"$BE_VERSION"'"|' \
+  -e 's|^(  fe_version = ")[^"]*"|\1'"$FE_VERSION"'"|' \
+  environments/*/main.tf
+rm environments/*/main.tf.bak
+# check: each main.tf has the source at v$BE_VERSION and fe_version $FE_VERSION
+grep -nE '^ *(source|fe_version) *=' environments/*/main.tf
+```
+
+The rest of each `main.tf` works as it is; what you may change:
+
+| | What | In `main.tf` |
+|---|---|---|
+| *Recommended* | Who gets the alert emails | `alert_emails` |
+| *Recommended* | Your application under test, if your tests ask it for answers | `extra_environment` (`ASSAY_TARGET_*`), or later from Assay's Settings |
+| *Optional* | The LLM judge: provider and model (its key is step 6's `JUDGE_API_KEY`) | `judge` |
+| *Optional* | How many workers: `min_replicas` and `max_replicas` in `worker`, both set to that number (nothing scales the worker by itself) | `worker` |
+| *Optional* | Region, resource group name, sizes, the worker's off switch, the upload limit | the module's inputs are in the Assay clone's `infra/azure/modules/assay/variables.tf` |
+
+**8. Push: the first run.** With everything in place, the push to `main` deploys staging:
+
+```bash
+cd "$DEPLOY"
+git add .
+git commit -m "Assay $BE_VERSION with its FE $FE_VERSION"
+git push -u origin HEAD:main
+```
+
+Follow it in the repository's **Actions** tab. The first run creates the environment
+with placeholder images, then builds and releases the real ones: about 20 minutes, most
+of it the database and the worker's image. Don't stop it halfway: Terraform would leave
+its state locked and some resources unrecorded. Its last step, "Wait for every app's new
+revision", ends with the FE's address:
+
+```
+Assay <BE version> with its FE <FE version> runs at https://ca-assay-staging-fe.<random>.northeurope.azurecontainerapps.io
+```
+
+**9. The sign-in's return address.** After signing in, Microsoft sends people back only
+to an address the app registration lists. Give it the address step 8 printed:
+
+```bash
+FE_URL=paste-the-address-here
+"$ASSAY/infra/azure/scripts/entra-app.sh" redirect "$ENTRA_CLIENT_ID" "$FE_URL"
+```
+
+It answers "Sign-in now returns to …". Open the address and sign in: until this is done,
+Microsoft refuses the sign-in ("redirect URI mismatch"). `/api/docs` shows the API, and
+`/api/health/worker` should answer `ready`. Expect one "worker not running" alert email
+shortly after, then a "resolved" one: Azure's replica count lags the new worker.
+Releases keep the address; only an environment created anew gets a new one, and needs
+this step again.
+
+**10. Optional: a button that removes staging.** Copy the template, and push it without
+deploying (`[skip ci]`):
+
+```bash
+cd "$DEPLOY"
+cp "$ASSAY/infra/azure/pipelines/github-actions/destroy.yml" .github/workflows/
+git add .github/workflows/destroy.yml
+git commit -m "A button that removes staging [skip ci]"
+git push
+```
+
+How to use it is in [Removing it](#with-the-pipeline-staging).
 
 ### Releasing
 
@@ -353,7 +634,8 @@ releases.
 
 The pipeline stops before deploying when the FE doesn't work with that API (the FE's
 `package.json` names the API versions it needs), or when a tag doesn't hold the version
-it names. A version already built is reused, never built again over.
+it names. A version already built is reused, never built again over. Going back is the
+same change, to the old versions.
 
 It also stops, before applying anything, when Terraform's plan would **delete or replace
 what holds the data**: the resource group, the database server, its database or the Key
@@ -361,132 +643,24 @@ Vault. That only happens for a setting Azure can't change in place, such as the 
 the database's geo-redundant backups, and it would lose the data. Make such a change
 deliberately, from your machine, after a backup.
 
-### Setting it up
+### Production
 
-**First, [Terraform's state](#terraforms-state)**, if your subscription doesn't have it
-yet: the pipeline keeps its state there too.
+Production has its own sign-in, identity and GitHub environment. In the same terminal,
+with `ENV=production`:
 
-**1. GitHub environments.** In the deployment repository's Settings → Environments,
-create `staging` and `production`; on `production`, limit deployment branches to `main`.
-Environments in a **private** repository need a paid GitHub plan (Pro, Team or
-Enterprise); required reviewers there need Enterprise, so the gate on production is that
-only people who can write to the repository can start the run. On GitHub Free, a private
-repository has no environments: you'd need one workflow file per environment and a
-federated credential per file, which this template doesn't cover.
-
-**2. An Azure identity per environment**, which GitHub logs in as with OIDC (no stored
-password). Azure trusts it only from that GitHub environment, so a staging run can't
-touch production.
-
-**2a. Your values, and a check.** Replace `YOUR_ORG/YOUR_DEPLOYMENT_REPO`, then run:
-
-```bash
-REPO=YOUR_ORG/YOUR_DEPLOYMENT_REPO
-ENV=staging
-# how GitHub names a run of that environment to Azure
-PREFIX=$(gh api "repos/$REPO/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty' 2>/dev/null) \
-  && SUBJECT="${PREFIX:-repo:$REPO}:environment:${ENV}" \
-  || SUBJECT=
-echo "${SUBJECT:-Not found on GitHub: $REPO}"
-```
-
-It should print something like `repo:your-org@123/your-repo@456:environment:staging`. If
-it says **Not found on GitHub…**, fix `REPO` (or sign in with `gh auth login`) and run 2a
-again. Don't go on until it looks right.
-
-**2b. The identity**, in the same terminal. Replace `tfstateyourname` with your state's
-storage account ([Terraform's state](#terraforms-state)):
-
-```bash
-APP_ID=$(az ad app create --display-name "assay-deploy-$ENV" --query appId -o tsv)
-az ad sp create --id "$APP_ID"
-# trust GitHub's runs of that environment, and nothing else
-az ad app federated-credential create --id "$APP_ID" --parameters "{\"name\": \"github-$ENV\", \"issuer\": \"https://token.actions.githubusercontent.com\", \"subject\": \"$SUBJECT\", \"audiences\": [\"api://AzureADTokenExchange\"]}"
-# it creates resources and role assignments...
-az role assignment create --assignee "$APP_ID" --role Owner \
-  --scope "/subscriptions/$(az account show --query id -o tsv)"
-# ...and reads and writes Terraform's state
-az role assignment create --assignee "$APP_ID" --role "Storage Blob Data Contributor" \
-  --scope "$(az storage account show --name tfstateyourname --query id -o tsv)"
-# check: the name it trusts, then its client ID (step 4's AZURE_CLIENT_ID)
-az ad app federated-credential list --id "$APP_ID" --query "[].subject" -o tsv
-echo "AZURE_CLIENT_ID: $APP_ID"
-```
-
-The check must print the same name as 2a. If a role assignment says the identity isn't
-found, Azure hasn't caught up yet: wait a minute and run that line again.
-
-Owner on the subscription is the simplest; scope it to the environment's resource group
-if your organisation requires it (the group must then exist before the first run).
-
-**3. The sign-in**, per environment: `scripts/entra-app.sh create "Assay (staging)"`.
-
-**4. Each GitHub environment's variables and secrets:**
-
-| Kind | Name | Value |
-|---|---|---|
-| Variable | `AZURE_CLIENT_ID` | the identity's client ID, printed at the end of step 2 (later: `az ad app list --display-name assay-deploy-staging --query "[].appId" -o tsv`) |
-| Variable | `AZURE_TENANT_ID` | `az account show --query tenantId -o tsv` |
-| Variable | `AZURE_SUBSCRIPTION_ID` | your subscription's ID |
-| Variable | `TF_STATE_RESOURCE_GROUP` | `rg-terraform-state` |
-| Variable | `TF_STATE_STORAGE_ACCOUNT` | `tfstateyourname` |
-| Variable | `TF_STATE_CONTAINER` | `tfstate` |
-| Variable | `TF_STATE_KEY` | `assay-staging.tfstate` (production: `assay-production.tfstate`) |
-| Variable | `ENTRA_CLIENT_ID` | the client ID from `entra-app.sh create` |
-| Secret | `ENTRA_CLIENT_SECRET` | its client secret |
-| Secret | `JUDGE_API_KEY` | optional: the judge's API key |
-
-Optional repository variables `ASSAY_REPOSITORY` and `ASSAY_FE_REPOSITORY` point the
-pipeline at other copies of the code.
-
-**5. The first run** deploys with placeholder images first, then the real ones. When it
-ends, it prints the FE's address: run `entra-app.sh redirect <client id> <that address>`
-once, and the sign-in works.
-
-**6. Optional: a button that removes staging**, `pipelines/github-actions/destroy.yml`,
-copied as `.github/workflows/destroy.yml`. It uses this same setup. See
-[Removing it](#with-the-pipeline-staging).
+1. Step 3, with `create "Assay (production)"`, and its `ENTRA_CLIENT_ID`.
+2. Step 4's `production` environment, if you didn't create it then.
+3. Steps 5 and 6 as they are: `$ENV` names the identity `assay-deploy-production` and
+   the state's key `assay-production.tfstate`.
+4. In the repository's **Actions** tab: **Deploy Assay to Azure → Run workflow →
+   production**.
+5. Step 9, with the address that run prints.
 
 ### Keep Azure out of public repositories
 
 The pipeline template skips itself in `cupelworks/assay`. In any public repository
 holding Assay's code: no Azure variables or secrets, never a `pull_request_target`
 workflow, and Settings → Actions → "Require approval for all outside collaborators".
-
-## Using the module from your own configuration
-
-Pin the module to a release, so an update to Assay never changes your infrastructure
-unannounced:
-
-```hcl
-module "assay" {
-  source = "git::https://github.com/cupelworks/assay.git//infra/azure/modules/assay?ref=vX.Y.Z"
-
-  environment         = "prod"
-  location            = "northeurope"
-  resource_group_name = azurerm_resource_group.assay.name
-
-  entra               = { client_id = var.entra_client_id }
-  entra_client_secret = var.entra_client_secret
-  image_tag           = var.image_tag
-  fe_image_tag        = var.fe_image_tag
-}
-```
-
-Its inputs are in `modules/assay/variables.tf`:
-
-- sizes: `api`, `fe`, `worker`, `worker_enabled`, `postgres` (with `geo_redundant_backup`,
-  which can only be chosen when the server is created, and `auto_grow`);
-- `alert_emails`;
-- the network range;
-- the upload limit: `dataset_upload_max_mb`, which sets the API's limit and the FE's
-  nginx alike;
-- the judge;
-- other browser origins: `cors_allowed_origins`, empty by default;
-- any other `ASSAY_*` setting: `extra_environment`.
-
-The root that calls it configures the `azurerm` and `azapi` providers (`azapi` sets up
-the sign-in, which `azurerm` doesn't cover).
 
 ## Running it
 
@@ -501,8 +675,18 @@ the sign-in, which `azurerm` doesn't cover).
 - **Settings:** the application under test and the judge can also be changed from the UI
   (Settings); saved settings win over the environment. Settings › Operations shows how
   the deployment is set up.
-- **Secrets that expire:** the sign-in's client secret after a year (`entra-app.sh
-  rotate`); the judge's key whenever its provider says.
+- **The sign-in**, from the Assay clone's `infra/azure/scripts/`:
+
+  | When | Command |
+  |---|---|
+  | To let someone else in | `entra-app.sh allow <client id> <their sign-in name>` |
+  | Before the secret expires (a year) | `entra-app.sh rotate <client id>`: a new secret beside the old one; apply it (the pipeline's `ENTRA_CLIENT_SECRET`, then a run), then delete the old one with the command it prints |
+  | To find the client ID again | `az ad app list --display-name "Assay (staging)" --query "[].appId" -o tsv` |
+
+  Sign out (`/.auth/logout`) ends the session with Assay; the Microsoft session stays, so
+  coming back signs you in at once.
+- **Secrets that expire:** the sign-in's client secret after a year (above); the judge's
+  key whenever its provider says.
 - **Images pile up** in the registry, one per release and app. Clean up old ones with
   `az acr run --registry "$REGISTRY" --cmd "acr purge --filter 'assay-.*:.*' --ago 30d --keep 5" /dev/null`.
 - **The broker keeps nothing on disk.** If Redis restarts, queued tasks are lost, and
@@ -518,13 +702,13 @@ the sign-in, which `azurerm` doesn't cover).
   in without a password. For each run, GitHub gives it a signed name, printed just above
   the error as `subject claim - repo:…:environment:staging`. Azure lets it in only if the
   identity (`AZURE_CLIENT_ID`) trusts that exact name: its *federated credential*, from
-  Setting it up, step 2. The error code says what's wrong:
+  Deploy with the pipeline, step 5. The error code says what's wrong:
 
   | Error | Means | Fix |
   |---|---|---|
-  | `AADSTS70025` "has no configured federated identity credentials" | The identity trusts no name: step 2's credential was never created | Create it (below) |
+  | `AADSTS70025` "has no configured federated identity credentials" | The identity trusts no name: step 5's credential was never created | Create it (below) |
   | `AADSTS700213` "No matching federated identity record" | It trusts a different name | Correct it (below) |
-  | `AADSTS700016` "Application … was not found" | `AZURE_CLIENT_ID` names an identity that doesn't exist (deleted, or a typo) | Redo step 2, and set the new `AZURE_CLIENT_ID` |
+  | `AADSTS700016` "Application … was not found" | `AZURE_CLIENT_ID` names an identity that doesn't exist (deleted, or a typo) | Redo step 5, and set the new `AZURE_CLIENT_ID` (step 6) |
 
   Use the name from the error's `subject claim` line and the identity's client ID:
 
@@ -539,7 +723,7 @@ the sign-in, which `azurerm` doesn't cover).
   minute: Azure takes a moment to apply it.
 - **"Terraform init" fails with `403` or `AuthorizationPermissionMismatch`**: the identity
   can't read Terraform's state. It needs **Storage Blob Data Contributor** on the state's
-  storage account, step 2's last role.
+  storage account, step 5's last role.
 - **"Provider produced inconsistent result after apply … Root object was present, but now
   absent"**, or a 404 for something just created: Azure was slow to show a new resource.
   It does exist. Wait a minute and apply again. If Terraform then says the resource
@@ -577,9 +761,8 @@ you're done with it (below).
 
 ### With the pipeline (staging)
 
-**Once:** copy `pipelines/github-actions/destroy.yml` into your deployment repository as
-`.github/workflows/destroy.yml` and push. A push to `main` also deploys; add `[skip ci]`
-to the commit message to push it without deploying.
+**Once:** the destroy workflow in your deployment repository, as in Deploy with the
+pipeline, step 10.
 
 **Then, each time:**
 
@@ -609,18 +792,23 @@ and its names (`rg-assay-prod`, `log-assay-prod`).
 storage account) and the three values the configuration always asks for.
 
 If you deployed from your machine, use the folder you deployed from
-(`example/environments/staging`) with `TF_VAR_entra_client_secret` set as in Deploy from
-your machine, step 2, and go to step 2. If the pipeline deployed it, in a clone of your
-deployment repository:
+(`infra/azure/example/environments/staging` in the Assay clone) with
+`TF_VAR_entra_client_secret` set as in Deploy from your machine, step 4, and go to step 2.
+If the pipeline deployed it, in a clone of your deployment repository:
 
 ```bash
 cd environments/staging
-cp backend.hcl.example backend.hcl   # then fill it in, if it isn't: the GitHub environment's TF_STATE_* values
+cp backend.hcl.example backend.hcl   # then fill it in: the GitHub environment's TF_STATE_* values
 terraform init -backend-config=backend.hcl
 export TF_VAR_subscription_id=...    # the GitHub environment's AZURE_SUBSCRIPTION_ID
 export TF_VAR_entra_client_id=...    # its ENTRA_CLIENT_ID
+```
+
+Then the secret, on its own: run this line, paste the sign-in's client secret and press
+Enter (nothing shows while you paste):
+
+```bash
 read -s TF_VAR_entra_client_secret && export TF_VAR_entra_client_secret
-# paste the sign-in's client secret and press Enter: nothing shows while you paste
 ```
 
 The GitHub values are in the deployment repository's **Settings → Environments →
@@ -665,10 +853,13 @@ it removed, disable the deploy (Actions → Deploy Assay to Azure → **Disable 
 To create it again:
 
 1. If you deleted the sign-in: make a new one, and put its client ID and secret in the
-   GitHub environment (Setting it up, steps 3 and 4).
+   GitHub environment (Deploy with the pipeline, steps 3 and 6).
 2. Push to `main`, or **Run workflow** on the deploy.
-3. Give the sign-in the new environment's address, which the run prints at the end: a new
-   environment gets a new one (`entra-app.sh redirect`, The sign-in).
+3. Give the sign-in the new environment's address, as in Deploy with the pipeline, step
+   9: a new environment gets a new one.
+
+From your machine, it's Deploy from your machine from step 5, with step 6 again for the
+new address.
 
 ## Limits
 
@@ -677,3 +868,38 @@ To create it again:
 - The module, the example and the script are checked with `terraform test` against a
   mocked provider, `terraform validate` and `bash -n` (see `.github/workflows/ci.yml`),
   not by deploying to Azure in this repository.
+
+## Using the module from your own configuration
+
+Instead of the example's layout, your own Terraform can call the module. Pin it to a
+release, so an update to Assay never changes your infrastructure unannounced:
+
+```hcl
+module "assay" {
+  source = "git::https://github.com/cupelworks/assay.git//infra/azure/modules/assay?ref=vX.Y.Z"
+
+  environment         = "prod"
+  location            = "northeurope"
+  resource_group_name = azurerm_resource_group.assay.name
+
+  entra               = { client_id = var.entra_client_id }
+  entra_client_secret = var.entra_client_secret
+  image_tag           = var.image_tag
+  fe_image_tag        = var.fe_image_tag
+}
+```
+
+Its inputs are in `modules/assay/variables.tf`:
+
+- sizes: `api`, `fe`, `worker`, `worker_enabled`, `postgres` (with `geo_redundant_backup`,
+  which can only be chosen when the server is created, and `auto_grow`);
+- `alert_emails`;
+- the network range;
+- the upload limit: `dataset_upload_max_mb`, which sets the API's limit and the FE's
+  nginx alike;
+- the judge;
+- other browser origins: `cors_allowed_origins`, empty by default;
+- any other `ASSAY_*` setting: `extra_environment`.
+
+The root that calls it configures the `azurerm` and `azapi` providers (`azapi` sets up
+the sign-in, which `azurerm` doesn't cover).
