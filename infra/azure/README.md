@@ -376,36 +376,45 @@ federated credential per file, which this template doesn't cover.
 
 **2. An Azure identity per environment**, which GitHub logs in as with OIDC (no stored
 password). Azure trusts it only from that GitHub environment, so a staging run can't
-touch production:
+touch production.
+
+**2a. Your values, and a check.** Replace `YOUR_ORG/YOUR_DEPLOYMENT_REPO`, then run:
 
 ```bash
-# the environment: staging, then again with production
 REPO=YOUR_ORG/YOUR_DEPLOYMENT_REPO
 ENV=staging
-# how GitHub names the repository to Azure: usually with ID numbers
-# (repo:org@123/repo@456), else plainly (repo:org/repo)
-PREFIX=$(gh api "repos/$REPO/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty')
-PREFIX=${PREFIX:-repo:$REPO}
+# how GitHub names a run of that environment to Azure
+PREFIX=$(gh api "repos/$REPO/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty' 2>/dev/null) \
+  && SUBJECT="${PREFIX:-repo:$REPO}:environment:${ENV}" \
+  || SUBJECT=
+echo "${SUBJECT:-Not found on GitHub: $REPO}"
+```
+
+It should print something like `repo:your-org@123/your-repo@456:environment:staging`. If
+it says **Not found on GitHub…**, fix `REPO` (or sign in with `gh auth login`) and run 2a
+again. Don't go on until it looks right.
+
+**2b. The identity**, in the same terminal. Replace `tfstateyourname` with your state's
+storage account ([Terraform's state](#terraforms-state)):
+
+```bash
 APP_ID=$(az ad app create --display-name "assay-deploy-$ENV" --query appId -o tsv)
 az ad sp create --id "$APP_ID"
-az ad app federated-credential create --id "$APP_ID" --parameters "{
-  \"name\": \"github-$ENV\",
-  \"issuer\": \"https://token.actions.githubusercontent.com\",
-  \"subject\": \"${PREFIX}:environment:${ENV}\",
-  \"audiences\": [\"api://AzureADTokenExchange\"]
-}"
+# trust GitHub's runs of that environment, and nothing else
+az ad app federated-credential create --id "$APP_ID" --parameters "{\"name\": \"github-$ENV\", \"issuer\": \"https://token.actions.githubusercontent.com\", \"subject\": \"$SUBJECT\", \"audiences\": [\"api://AzureADTokenExchange\"]}"
 # it creates resources and role assignments...
 az role assignment create --assignee "$APP_ID" --role Owner \
   --scope "/subscriptions/$(az account show --query id -o tsv)"
-# ...and writes Terraform's state
+# ...and reads and writes Terraform's state
 az role assignment create --assignee "$APP_ID" --role "Storage Blob Data Contributor" \
   --scope "$(az storage account show --name tfstateyourname --query id -o tsv)"
-# the identity's client ID: the GitHub environment's AZURE_CLIENT_ID (step 4)
+# check: the name it trusts, then its client ID (step 4's AZURE_CLIENT_ID)
+az ad app federated-credential list --id "$APP_ID" --query "[].subject" -o tsv
 echo "AZURE_CLIENT_ID: $APP_ID"
 ```
 
-If a role assignment says the identity isn't found, Azure hasn't caught up yet: wait a
-minute and run that line again.
+The check must print the same name as 2a. If a role assignment says the identity isn't
+found, Azure hasn't caught up yet: wait a minute and run that line again.
 
 Owner on the subscription is the simplest; scope it to the environment's resource group
 if your organisation requires it (the group must then exist before the first run).
@@ -505,11 +514,32 @@ the sign-in, which `azurerm` doesn't cover).
 - **`RequestDisallowedByAzure` … "not accepting new customers"** on the first apply: the
   region refuses new resources for your subscription. Destroy what was created and pick
   another region (see Before you start).
-- **The pipeline stops at "Log in to Azure" with `AADSTS700213` … "No matching federated
-  identity record"**: the identity's subject isn't the one GitHub sends, which the error
-  prints (`subject claim - repo:…`). Set that one, with `az ad app federated-credential
-  update --id <identity's app ID> --federated-credential-id github-<environment>
-  --parameters '{"subject": "<the subject>"}'`, and re-run the workflow.
+- **The pipeline stops at "Log in to Azure" with an `AADSTS…` error.** The pipeline logs
+  in without a password. For each run, GitHub gives it a signed name, printed just above
+  the error as `subject claim - repo:…:environment:staging`. Azure lets it in only if the
+  identity (`AZURE_CLIENT_ID`) trusts that exact name: its *federated credential*, from
+  Setting it up, step 2. The error code says what's wrong:
+
+  | Error | Means | Fix |
+  |---|---|---|
+  | `AADSTS70025` "has no configured federated identity credentials" | The identity trusts no name: step 2's credential was never created | Create it (below) |
+  | `AADSTS700213` "No matching federated identity record" | It trusts a different name | Correct it (below) |
+  | `AADSTS700016` "Application … was not found" | `AZURE_CLIENT_ID` names an identity that doesn't exist (deleted, or a typo) | Redo step 2, and set the new `AZURE_CLIENT_ID` |
+
+  Use the name from the error's `subject claim` line and the identity's client ID:
+
+  ```bash
+  # AADSTS70025: create it
+  az ad app federated-credential create --id <AZURE_CLIENT_ID> --parameters '{"name": "github-staging", "issuer": "https://token.actions.githubusercontent.com", "subject": "<subject claim>", "audiences": ["api://AzureADTokenExchange"]}'
+  # AADSTS700213: correct it
+  az ad app federated-credential update --id <AZURE_CLIENT_ID> --federated-credential-id github-staging --parameters '{"subject": "<subject claim>"}'
+  ```
+
+  Then open the failed run and **Re-run jobs**. If it fails the same way at once, wait a
+  minute: Azure takes a moment to apply it.
+- **"Terraform init" fails with `403` or `AuthorizationPermissionMismatch`**: the identity
+  can't read Terraform's state. It needs **Storage Blob Data Contributor** on the state's
+  storage account, step 2's last role.
 - **"Provider produced inconsistent result after apply … Root object was present, but now
   absent"**, or a 404 for something just created: Azure was slow to show a new resource.
   It does exist. Wait a minute and apply again. If Terraform then says the resource
