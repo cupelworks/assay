@@ -53,8 +53,9 @@ off, there's one app fewer, and its alert goes too.
 separate resources: the network's 2 subnets and DNS link, the server's database, the Key
 Vault's 4 secrets (5 with a judge key), 3 permissions, and the sign-in settings on the FE.
 
-**Terraform's plan says 35, not 19,** because it counts those pieces too, plus 4 helpers of
-its own that never exist in Azure (random passwords, a random name ending, a short wait).
+**Terraform's plan says 35, not 19** (with alert emails and no judge key: 36 with a judge
+key, 31 without alert emails), because it counts those pieces too, plus 4 helpers of its
+own that never exist in Azure (random passwords, a random name ending, a short wait).
 
 **Staging plus production** is twice all that. Azure also adds two things of its own: see
 [Created by Azure](#created-by-azure).
@@ -72,7 +73,7 @@ its own that never exist in Azure (random passwords, a random name ending, a sho
 | Resource | Name | Why |
 |---|---|---|
 | Virtual network | `vnet-<prefix>` | The private network. Nothing in it is reachable from the internet except the FE. |
-| Subnet (part) | `snet-apps`, a /23 | The Container Apps environment, which needs a whole subnet of at least that size. |
+| Subnet (part) | `snet-apps`, a /23 | The Container Apps environment. A /23: Azure's minimum for this kind of environment (workload profiles) is a /27; the module leaves room. |
 | Subnet (part) | `snet-database`, a /28 | PostgreSQL, delegated to it, with the `Microsoft.Storage` endpoint PostgreSQL uses for its backups. |
 | Private DNS zone | `<prefix>.private.postgres.database.azure.com` | Lets the apps find the database by name on the private network. |
 | DNS link (part) | `vnet-<prefix>` | Connects that zone to the virtual network. |
@@ -169,7 +170,7 @@ Never created in Azure; they only exist in Terraform's state.
 | Kind | Resources | How it's billed |
 |---|---|---|
 | **Billed by size and time** | The container apps and the job; PostgreSQL | Container Apps per vCPU-second and GiB-second while a replica runs (less when idle), with a monthly free allowance per subscription (180,000 vCPU-seconds and 360,000 GiB-seconds). PostgreSQL per hour by size, plus its storage. |
-| **Billed by use** | Log Analytics, the registry, Key Vault, the alerts, the DNS zone | Logs per GB taken in (31 days kept at no extra cost); the registry a small monthly fee with 10 GB included; Key Vault per operation; each alert rule a small monthly fee; the DNS zone a few cents a month. |
+| **Billed by use** | Log Analytics, the registry, Key Vault, the alerts, the DNS zone | Logs per GB taken in (31 days kept at no extra cost); the registry a small monthly fee with 10 GB included; Key Vault per operation; each alert rule a small monthly fee; the DNS zone $0.50 a month (list price as of October 2026). |
 | **Free** | The resource group, the virtual network and subnets, the identity, the role assignments, the action group's emails, the sign-in, the Container Apps environment itself | |
 
 **Most of the bill is the worker, then the database.** The worker's size is what moves the
@@ -202,7 +203,7 @@ interrupted while `Running` yet.
 
 | What | Expect |
 |---|---|
-| **Creating an environment** | About 20 minutes the first time: PostgreSQL 5–6, the Container Apps environment about 3, building the worker's image (about 1.2 GB) several more. |
+| **Creating an environment** | About 20 minutes the first time: PostgreSQL 5–6, the Container Apps environment about 3, building the worker's image (about 3.5 GB) several more. |
 | **A release** | Minutes. Every app moves to its new revision only once it's healthy. Nothing is destroyed. |
 | **Deleting an environment** | Up to about 40 minutes: the Container Apps environment releases its share of the virtual network last. `terraform destroy` waits; it isn't stuck. |
 | **Azure's read delay** | Right after creating something, Azure sometimes reports it missing, and Terraform stops with "Provider produced inconsistent result after apply". Apply again; README, "When something goes wrong". |

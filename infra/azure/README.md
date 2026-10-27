@@ -76,11 +76,12 @@ or roles yet: everyone who signs in can do everything.
 | Alerts | Optional emails: the worker isn't running, server errors, errors in the logs |
 | Network | A virtual network: one subnet for the apps, one for the database |
 
-Every app uses one managed identity: no password is stored in the apps' settings or in
-the pipeline. [AZURE-INFO.md](AZURE-INFO.md) lists every resource one by one (35 per
-environment, counting their parts), why each is there, what lives outside the module, and
-the timings and quirks to expect. Terraform's state holds every secret in plain text: keep
-it in a storage account only you and the pipeline can read, never in git.
+Every app uses one managed identity: no password is stored in the apps' settings or in the
+pipeline. [AZURE-INFO.md](AZURE-INFO.md) lists every resource one by one (35 per
+environment counting their parts, with alert emails and no judge key), why each is there,
+what lives outside the module, and the timings and quirks to expect. Terraform's state
+holds every secret in plain text: keep it in a storage account only you and the pipeline
+can read, never in git.
 
 ## Cost
 
@@ -321,10 +322,10 @@ It answers "Sign-in now returns to …". Without it, Microsoft refuses the sign-
 ("redirect URI mismatch"). An environment created anew gets a new address, and needs this
 step again.
 
-**7. The images**, built in your registry from the two clones (no Docker needed
-locally; the worker's image is about 3.5 GB and takes a while). Each is tagged with its
-version, read from the clone: Assay's from `pyproject.toml`, the FE's from its
-`package.json` (step 1 checked that the two work together).
+**7. The images**, built in your registry from the two clones (no Docker needed locally;
+the worker's image is about 3.5 GB and takes a while). Each is tagged with its version,
+read from the clone: Assay's from `pyproject.toml`, the FE's from its `package.json`
+(step 1 checked that the two work together).
 
 ```bash
 REGISTRY=$(terraform output -raw registry_name)
