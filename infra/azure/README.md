@@ -111,7 +111,11 @@ removes everything when you're done. Set a budget (below) before the first apply
   (`az login`, then `az account show` to check the subscription);
 - [Terraform](https://developer.hashicorp.com/terraform/install) 1.9 or later. On macOS,
   from HashiCorp's tap: `brew tap hashicorp/tap && brew install hashicorp/tap/terraform`
-  (Homebrew's own `terraform` stays at 1.5.7).
+  (Homebrew's own `terraform` stays at 1.5.7);
+- for the pipeline, the [GitHub CLI](https://cli.github.com), signed in (`gh auth login`);
+- **bash**: every command here is written for it. On a Mac, whose terminal runs zsh, type
+  `bash` first (and `exit` when you're done): zsh reads some of these lines differently,
+  and they'd create things with the wrong names.
 
 **Pick a region that takes your subscription.** Some regions refuse new resources for
 newer subscriptions: the first apply then fails with `RequestDisallowedByAzure` ("the
@@ -357,8 +361,9 @@ password). Azure trusts it only from that GitHub environment, so a staging run c
 touch production:
 
 ```bash
+# the environment: staging, then again with production
 REPO=YOUR_ORG/YOUR_DEPLOYMENT_REPO
-ENV=staging   # then again with production
+ENV=staging
 # how GitHub names the repository to Azure: usually with ID numbers
 # (repo:org@123/repo@456), else plainly (repo:org/repo)
 PREFIX=$(gh api "repos/$REPO/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty')
@@ -368,7 +373,7 @@ az ad sp create --id "$APP_ID"
 az ad app federated-credential create --id "$APP_ID" --parameters "{
   \"name\": \"github-$ENV\",
   \"issuer\": \"https://token.actions.githubusercontent.com\",
-  \"subject\": \"$PREFIX:environment:$ENV\",
+  \"subject\": \"${PREFIX}:environment:${ENV}\",
   \"audiences\": [\"api://AzureADTokenExchange\"]
 }"
 # it creates resources and role assignments...
@@ -377,7 +382,12 @@ az role assignment create --assignee "$APP_ID" --role Owner \
 # ...and writes Terraform's state
 az role assignment create --assignee "$APP_ID" --role "Storage Blob Data Contributor" \
   --scope "$(az storage account show --name tfstateyourname --query id -o tsv)"
+# the identity's client ID: the GitHub environment's AZURE_CLIENT_ID (step 4)
+echo "AZURE_CLIENT_ID: $APP_ID"
 ```
+
+If a role assignment says the identity isn't found, Azure hasn't caught up yet: wait a
+minute and run that line again.
 
 Owner on the subscription is the simplest; scope it to the environment's resource group
 if your organisation requires it (the group must then exist before the first run).
@@ -388,7 +398,7 @@ if your organisation requires it (the group must then exist before the first run
 
 | Kind | Name | Value |
 |---|---|---|
-| Variable | `AZURE_CLIENT_ID` | the environment's `$APP_ID` |
+| Variable | `AZURE_CLIENT_ID` | the identity's client ID, printed at the end of step 2 (later: `az ad app list --display-name assay-deploy-staging --query "[].appId" -o tsv`) |
 | Variable | `AZURE_TENANT_ID` | `az account show --query tenantId -o tsv` |
 | Variable | `AZURE_SUBSCRIPTION_ID` | your subscription's ID |
 | Variable | `TF_STATE_RESOURCE_GROUP` | `rg-terraform-state` |
