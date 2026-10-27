@@ -190,10 +190,10 @@ In the portal: Cost Management → Budgets.
 
 The steps create **staging**, from the configuration in Assay's own repository. Run them
 all in **one terminal window**: later steps use values the earlier ones set (`$ASSAY`,
-`$ASSAYFE`, `$STATE_ACCOUNT`, `$ENTRA_CLIENT_ID`, `$BE`, `$FE`). In a new one, from step 4
-on, set `ASSAY`, `ASSAYFE`, `STATE_ACCOUNT` and `ENTRA_CLIENT_ID` again, and
-`cd "$ASSAY/infra/azure/example/environments/staging"`; from step 5 on, also step 4's
-secret line, and step 8 needs step 7's `BE` and `FE`.
+`$ASSAYFE`, `$STATE_ACCOUNT`, `$ENTRA_CLIENT_ID`, `$BE`, `$FE`). In a new one, set again:
+from step 3 on, `ASSAY`; from step 4 on, also `ASSAYFE`, `STATE_ACCOUNT` and
+`ENTRA_CLIENT_ID`, and `cd "$ASSAY/infra/azure/example/environments/staging"`; from step 5
+on, also step 4's secret line, and step 8 needs step 7's `BE` and `FE`.
 
 **1. The code, at the releases you deploy.** Pick a release of each from the tags of
 [`cupelworks/assay`](https://github.com/cupelworks/assay/tags) and
@@ -413,15 +413,22 @@ new one, set again the ones the next step uses: from step 3 on, `REPO`, `ENV`, `
 `STATE_ACCOUNT`; from step 6 on, also `ENTRA_CLIENT_ID` and `APP_ID`.
 
 **1. Your repository.** Create the private repository on GitHub, empty (no README, no
-`.gitignore`, no licence): its content
-comes in step 7. In an empty folder, set its name after `REPO=` (`your-org/your-repo`),
-and clone Assay's repository, for the files to copy and the sign-in's script:
+`.gitignore`, no licence): its content comes in step 7. In an empty folder, set its name
+after `REPO=` (`your-org/your-repo`), and clone Assay's repository, for the files to copy
+and the sign-in's script:
 
 ```bash
 REPO=
 ENV=staging
 git clone https://github.com/cupelworks/assay.git
 ASSAY=$PWD/assay
+```
+
+Then clone your deployment repository beside it: that folder, named after the
+repository, is where step 7 puts the content.
+
+```bash
+git clone "https://github.com/$REPO.git"
 ```
 
 **2. Terraform's state**, once per subscription: skip this step if you already have one.
@@ -559,9 +566,10 @@ Optional repository variables `ASSAY_REPOSITORY` and `ASSAY_FE_REPOSITORY`, in S
 Secrets and variables → Actions → Variables, point the pipeline at other copies of the
 code.
 
-**7. The repository's content, then the first run.** Put in it the folders and the
-workflow the tree at the top shows, from the Assay clone, and the `.gitignore`. Then pick a release of each
-from the tags of [`cupelworks/assay`](https://github.com/cupelworks/assay/tags) and
+**7. The repository's content, then the first run.** In the deployment repository's
+folder (step 1's clone), put the folders and the workflow the tree at the top shows, from
+the Assay clone, and the `.gitignore`. Then pick a release of each from the tags of
+[`cupelworks/assay`](https://github.com/cupelworks/assay/tags) and
 [`cupelworks/assayfe`](https://github.com/cupelworks/assayfe/tags) (the newest of each is
 a safe start: the FE's names the API releases it works with, and the pipeline checks the
 pair before deploying), and set them in each `main.tf`:
@@ -585,8 +593,9 @@ The rest of each `main.tf` works as it is; what you may change:
 | *Optional* | How many workers: `min_replicas` and `max_replicas` in `worker`, both set to that number (nothing scales the worker by itself) | `worker` |
 | *Optional* | Region, resource group name, sizes, the worker's off switch, the upload limit | the module's inputs are in the Assay clone's `infra/azure/modules/assay/variables.tf` |
 
-Then commit it all, `.gitignore` included, and push it to `main` with git: the first run
-starts.
+Then commit it all, `.gitignore` included, and push it to `main`: the first run starts.
+For an empty clone, `git push -u origin HEAD:main` pushes to `main` whatever your default
+branch is called.
 
 Follow it in the repository's **Actions** tab. The first run creates the environment
 with placeholder images, then builds and releases the real ones: about 20 minutes, most
