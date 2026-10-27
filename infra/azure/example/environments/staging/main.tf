@@ -1,12 +1,13 @@
 # Staging: the releases it runs and its sizes. To release, change the versions
 # and push to main: the pipeline deploys staging.
 #
-# What to change before deploying: infra/azure/README.md, "What you change".
+# What to change before deploying: infra/azure/README.md, step 4 from your machine
+# (the settings), step 7 with GitHub Actions (the deployment repository's files).
 
 locals {
-  # The FE release staging runs (cupelworks/assayfe's tag v2.5.2). The BE's is the
+  # The FE release staging runs (cupelworks/assayfe's tag vX.Y.Z). The BE's is the
   # module's ?ref= below. The pipeline reads both from this file.
-  fe_version = "2.5.2"
+  fe_version = "X.Y.Z"
 }
 
 resource "azurerm_resource_group" "assay" {
@@ -17,7 +18,7 @@ resource "azurerm_resource_group" "assay" {
 module "assay" {
   # In your deployment repository, the module at a release, which is also the
   # BE version deployed:
-  #   source = "git::https://github.com/cupelworks/assay.git//infra/azure/modules/assay?ref=v2.4.2"
+  #   source = "git::https://github.com/cupelworks/assay.git//infra/azure/modules/assay?ref=vX.Y.Z"
   source = "../../../modules/assay"
 
   environment         = "staging"

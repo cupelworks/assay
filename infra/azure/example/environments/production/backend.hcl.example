@@ -1,8 +1,8 @@
 # From your machine: copy to backend.hcl (git-ignored), fill in, then
 #   terraform init -backend-config=backend.hcl
 # The pipeline passes the same values from the GitHub environment's variables
-# (TF_STATE_*) instead. Create the storage account once (README, "Deploy from
-# your machine", step 1).
+# (TF_STATE_*) instead. Create the storage account once (README, step 2 of
+# either way of deploying).
 resource_group_name  = "rg-terraform-state"
 storage_account_name = "tfstateyourname"
 container_name       = "tfstate"
