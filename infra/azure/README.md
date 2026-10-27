@@ -21,6 +21,7 @@ infra/azure/
 - [What it creates](#what-it-creates)
 - [Cost](#cost)
 - [Before you start](#before-you-start)
+- [Terraform's state](#terraforms-state)
 - [The sign-in](#the-sign-in)
 - [What you change](#what-you-change)
 - [Deploy from your machine](#deploy-from-your-machine)
@@ -162,6 +163,40 @@ az rest --method put --body @budget.json \
 The start date must be the first day of a month, this one or a later one. In the portal:
 Cost Management → Budgets.
 
+## Terraform's state
+
+Terraform keeps a record of everything it created, the *state*, and every run reads and
+updates it: from your machine and from the pipeline alike. It lives in a storage account
+of yours, **created once per subscription, before either way of deploying**, and shared
+by every environment (each under its own key). Removing an environment leaves it in place.
+
+The state holds every secret of the deployment, so the account allows only Microsoft
+sign-in (no access keys), and keeps old versions and deleted files for 30 days so a
+damaged state can be recovered. Its name must be unique across all of Azure: replace
+`tfstateyourname`.
+
+```bash
+az group create --name rg-terraform-state --location northeurope
+az storage account create --name tfstateyourname --resource-group rg-terraform-state \
+  --sku Standard_LRS --https-only true --min-tls-version TLS1_2 \
+  --allow-blob-public-access false --allow-shared-key-access false
+az storage account blob-service-properties update --account-name tfstateyourname \
+  --resource-group rg-terraform-state --enable-versioning true \
+  --enable-delete-retention true --delete-retention-days 30 \
+  --enable-container-delete-retention true --container-delete-retention-days 30
+# let yourself read and write the state with your Azure login (before creating the
+# container: with no access keys, creating it needs this role)
+az role assignment create --role "Storage Blob Data Contributor" \
+  --assignee "$(az ad signed-in-user show --query id -o tsv)" \
+  --scope "$(az storage account show --name tfstateyourname --query id -o tsv)"
+# the role takes a minute to apply; if this says you're not authorised, wait and retry
+az storage container create --name tfstate --account-name tfstateyourname --auth-mode login
+```
+
+Whoever runs Terraform needs the **Storage Blob Data Contributor** role on this account:
+the commands above give it to you, and the pipeline's identity gets it in Setting it up,
+step 2.
+
 ## The sign-in
 
 Each environment has its own Entra ID app registration: the "app" people sign in to.
@@ -216,28 +251,8 @@ own `az login`: for a first look, or before the pipeline is set up. It's the sam
 pipeline uses afterwards, and with the same state storage and key, the pipeline carries on
 from where you left off. The steps below use `staging`.
 
-**1. A storage account for Terraform's state**, once per subscription. The state holds
-every secret of the deployment, so the account allows only Microsoft sign-in (no access
-keys), and keeps old versions and deleted files for 30 days so a damaged state can be
-recovered. Its name must be unique across all of Azure: replace `tfstateyourname`.
-
-```bash
-az group create --name rg-terraform-state --location northeurope
-az storage account create --name tfstateyourname --resource-group rg-terraform-state \
-  --sku Standard_LRS --https-only true --min-tls-version TLS1_2 \
-  --allow-blob-public-access false --allow-shared-key-access false
-az storage account blob-service-properties update --account-name tfstateyourname \
-  --resource-group rg-terraform-state --enable-versioning true \
-  --enable-delete-retention true --delete-retention-days 30 \
-  --enable-container-delete-retention true --container-delete-retention-days 30
-# let yourself read and write the state with your Azure login (before creating the
-# container: with no access keys, creating it needs this role)
-az role assignment create --role "Storage Blob Data Contributor" \
-  --assignee "$(az ad signed-in-user show --query id -o tsv)" \
-  --scope "$(az storage account show --name tfstateyourname --query id -o tsv)"
-# the role takes a minute to apply; if this says you're not authorised, wait and retry
-az storage container create --name tfstate --account-name tfstateyourname --auth-mode login
-```
+**1. Terraform's state:** create its storage account first, once per subscription, as
+[Terraform's state](#terraforms-state) shows.
 
 **2. Your settings**, in `example/environments/staging/`:
 
@@ -347,6 +362,9 @@ the database's geo-redundant backups, and it would lose the data. Make such a ch
 deliberately, from your machine, after a backup.
 
 ### Setting it up
+
+**First, [Terraform's state](#terraforms-state)**, if your subscription doesn't have it
+yet: the pipeline keeps its state there too.
 
 **1. GitHub environments.** In the deployment repository's Settings → Environments,
 create `staging` and `production`; on `production`, limit deployment branches to `main`.
