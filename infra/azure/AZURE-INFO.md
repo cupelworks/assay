@@ -53,7 +53,7 @@ off, there's one app fewer, and its alert goes too.
 separate resources: the network's 2 subnets and DNS link, the server's database, the Key
 Vault's 4 secrets (5 with a judge key), 3 permissions, and the sign-in settings on the FE.
 
-**Terraform's plan says 35, not 19** (with alert emails and no judge key: 36 with a judge
+**Terraform's plan says 35, not 19** (with alert emails and no judge key; 36 with a judge
 key, 31 without alert emails), because it counts those pieces too, plus 4 helpers of its
 own that never exist in Azure (random passwords, a random name ending, a short wait).
 
