@@ -13,6 +13,26 @@ hyphens (`psql-assay-staging-7k2qz`); the registry and Key Vault have none, whic
 registry doesn't allow (`crassaystaging7k2qz`), and the tables write that form as
 `<compact>`.
 
+## Contents
+
+- [At a glance](#at-a-glance)
+- [Every resource](#every-resource)
+  - [The resource group](#the-resource-group)
+  - [Network](#network)
+  - [Database](#database)
+  - [Secrets](#secrets)
+  - [Images](#images)
+  - [Identity and access](#identity-and-access)
+  - [Apps](#apps)
+  - [Sign-in](#sign-in)
+  - [Monitoring](#monitoring)
+  - [Terraform's own helpers](#terraforms-own-helpers)
+- [Created by Azure](#created-by-azure)
+- [Outside the module](#outside-the-module)
+- [What it costs](#what-it-costs)
+- [The worker's off switch](#the-workers-off-switch)
+- [Timings and quirks](#timings-and-quirks)
+
 ## At a glance
 
 **One environment is 19 resources in Azure:** its resource group, and the 18 the Azure
