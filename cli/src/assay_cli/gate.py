@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
 """Whether a finished run, execution or batch passes the gate, and what to say
-about it. Pure functions over the API's replies: no I/O here."""
+about it. Pure functions over the API's replies: no I/O here. A status this CLI
+doesn't know never passes: the gate fails closed."""
 from collections import Counter
 from dataclasses import dataclass, field
 
 from assay_cli.client import SCOPE_NOUNS
 
+IN_PROGRESS = ("Pending", "Running")
+"""A run's or a batch's statuses before it has finished."""
 RUN_STATUSES = ("Green", "Amber", "Red", "NotRan")
 """A run's outcomes, once it has finished."""
 RUN_FAIL_ON = ("Amber", "Red", "NotRan")
@@ -23,6 +26,10 @@ _BATCH_VERDICT_OF_STATUS = {"Passed": "pass", "Done": "pass",
 """The verdict a status stands for, when a batch has no verdicts counted."""
 
 
+def _unknown(statuses: str) -> str:
+    return f"Assay reported a status this CLI doesn't know ({statuses}): update the CLI"
+
+
 @dataclass
 class Case:
     """One line of the report, and one JUnit test case: a run, or a batch's check."""
@@ -30,7 +37,6 @@ class Case:
     group: str
     outcome: str  # passed | failed | error | skipped
     message: str = ""
-    detail: str = ""
 
 
 @dataclass
@@ -45,7 +51,8 @@ class Outcome:
     cases: list[Case] = field(default_factory=list)
     fail_on: tuple = ()
     reason: str = ""
-    """Why it failed whatever --fail-on says (a stopped or undecided batch)."""
+    """Why it failed whatever --fail-on says: a stopped or undecided batch, a status
+    the CLI doesn't know."""
 
     @property
     def failures(self) -> list[Case]:
@@ -54,24 +61,30 @@ class Outcome:
     def to_json(self) -> dict:
         return {"kind": self.kind, "id": self.id, "scope": self.scope, "status": self.status,
                 "passed": self.passed, "summary": self.summary, "counts": self.counts,
-                "fail_on": list(self.fail_on),
+                "fail_on": list(self.fail_on), "reason": self.reason or None,
                 "failures": [{"name": c.name, "group": c.group, "outcome": c.outcome,
                               "message": c.message} for c in self.failures]}
 
 
 def run_finished(counts: dict) -> bool:
-    return not counts.get("Pending", 0) and not counts.get("Running", 0)
+    """Every run of an execution, by its counts, has finished."""
+    return not any(counts.get(status, 0) for status in IN_PROGRESS)
 
 
 def batch_finished(batch: dict) -> bool:
-    return batch.get("result") is not None or batch.get("status") in (
-        *_BATCH_VERDICT_OF_STATUS, *_BATCH_ALWAYS_FAIL)
+    return batch.get("result") is not None or batch.get("status") not in IN_PROGRESS
+
+
+def _verdict(passed: bool) -> str:
+    return "PASSED" if passed else "FAILED"
 
 
 # -- runs and executions --
 
 def _run_case(name: str, group: str, status: str, not_met: list, error: str | None,
               fail_on: tuple) -> Case:
+    if status not in RUN_STATUSES:
+        return Case(name, group, "error", _unknown(status))
     if status == "NotRan":
         message = f"Not Ran: {error or 'no reason recorded'}"
     elif status in ("Amber", "Red"):
@@ -81,10 +94,6 @@ def _run_case(name: str, group: str, status: str, not_met: list, error: str | No
     if status not in fail_on:
         return Case(name, group, "passed", "" if status == "Green" else message)
     return Case(name, group, "error" if status == "NotRan" else "failed", message)
-
-
-def _gate_counts(counts: dict, fail_on: tuple) -> bool:
-    return not any(counts.get(status, 0) for status in fail_on)
 
 
 def _distinct(cases: list[Case], ids: list[str]) -> list[Case]:
@@ -101,24 +110,27 @@ def _counts_line(counts: dict) -> str:
     return ", ".join(f"{counts.get(s, 0)} {s}" for s in RUN_STATUSES)
 
 
+def _runs(count: int) -> str:
+    return f"{count} run{'' if count == 1 else 's'}"
+
+
 def execution_outcome(scope: dict, details: dict, runs: list[dict],
                       fail_on: tuple = RUN_FAIL_ON) -> Outcome:
     counts = {s: details["runs"].get(s, 0) for s in RUN_STATUSES}
-    passed = _gate_counts(counts, fail_on)
+    reported = {s for s, n in details["runs"].items() if n} | {run["status"] for run in runs}
+    unknown = sorted(reported - {*RUN_STATUSES, *IN_PROGRESS})
+    reason = _unknown(", ".join(unknown)) if unknown else ""
+    passed = not reason and not any(counts[status] for status in fail_on)
     cases = _distinct(
         [_run_case(run.get("test_name", run["id"]), scope["name"], run["status"],
                    (run.get("checks") or {}).get("not_met", []), run.get("error"), fail_on)
          for run in runs],
         [str((run.get("test_set_entry_id") or {}).get("id") or run["id"]) for run in runs])
-    summary = (f"{'PASSED' if passed else 'FAILED'}: {SCOPE_NOUNS[scope['kind']]} "
-               f"{scope['name']!r}, "
-               f"{_runs(details.get('run_count', sum(counts.values())))}: {_counts_line(counts)}")
+    summary = (f"{_verdict(passed)}: {SCOPE_NOUNS[scope['kind']]} {scope['name']!r}, "
+               f"{_runs(details.get('run_count', sum(counts.values())))}: "
+               f"{_counts_line(counts)}" + (f". {reason}" if reason else ""))
     return Outcome("execution", str(details["id"]), scope, _execution_status(counts), passed,
-                   summary, counts, cases, fail_on)
-
-
-def _runs(count: int) -> str:
-    return f"{count} run{'' if count == 1 else 's'}"
+                   summary, counts, cases, fail_on, reason)
 
 
 def _execution_status(counts: dict) -> str:
@@ -133,15 +145,16 @@ def run_outcome(scope: dict, details: dict, fail_on: tuple = RUN_FAIL_ON) -> Out
     status = details["status"]
     results = details.get("results") or {}
     not_met = sorted(label for label, r in results.items() if not r.get("passed"))
-    case = _run_case(details.get("name", scope["name"]), scope["name"], status, not_met,
-                     details.get("error"), fail_on)
+    case = _run_case(scope["name"], scope["name"], status, not_met, details.get("error"),
+                     fail_on)
     met = len(results) - len(not_met)
     passed = case.outcome == "passed"
-    summary = (f"{'PASSED' if passed else 'FAILED'}: test {scope['name']!r}: {status}"
+    reason = "" if status in RUN_STATUSES else case.message
+    summary = (f"{_verdict(passed)}: test {scope['name']!r}: {status}"
                + (f", {met}/{len(results)} checks met" if results else "")
                + (f" ({details['error']})" if details.get("error") else ""))
     return Outcome("run", str(details["id"]), scope, status, passed, summary,
-                   {s: int(s == status) for s in RUN_STATUSES}, [case], fail_on)
+                   {s: int(s == status) for s in RUN_STATUSES}, [case], fail_on, reason)
 
 
 # -- statistics batches --
@@ -153,10 +166,13 @@ def batch_outcome(batch: dict, fail_on: tuple = BATCH_FAIL_ON) -> Outcome:
              "name": batch["scope"]["name"]}
     result = batch.get("result") or {}
     verdicts = result.get("verdicts") or batch.get("verdicts") or {}
-    why = _BATCH_ALWAYS_FAIL.get(status, "")
+    if status in _BATCH_VERDICT_OF_STATUS:
+        why = ""
+    else:
+        why = _BATCH_ALWAYS_FAIL.get(status) or _unknown(status)
     # the status and every check's verdict: an Inconclusive batch whose only
     # undecided check has no verdict, and a Failed batch's inconclusive checks
-    passed = not why and _BATCH_VERDICT_OF_STATUS.get(status) not in fail_on and not any(
+    passed = not why and _BATCH_VERDICT_OF_STATUS[status] not in fail_on and not any(
         verdicts.get(verdict, 0) for verdict in fail_on)
     # a check with no verdict is what keeps a batch Inconclusive
     undecided_fails = status == "Inconclusive" and "inconclusive" in fail_on
@@ -171,7 +187,7 @@ def batch_outcome(batch: dict, fail_on: tuple = BATCH_FAIL_ON) -> Outcome:
             cases.append(_check_case(group, check, fail_on, undecided_fails))
             ids.append(str(entry.get("entry_id") or check["label"]))
     sentence = result.get("summary") or batch.get("summary") or why or status
-    summary = (f"{'PASSED' if passed else 'FAILED'}: batch of {SCOPE_NOUNS[scope['kind']]} "
+    summary = (f"{_verdict(passed)}: batch of {SCOPE_NOUNS[scope['kind']]} "
                f"{scope['name']!r} ({batch['statistical_test']}): {status}. {sentence}")
     return Outcome("batch", str(batch["id"]), scope, status, passed, summary, verdicts,
                    _distinct(cases, ids), fail_on, why)

@@ -7,7 +7,7 @@ import re
 from xml.etree import ElementTree as ET
 
 from assay_cli.client import SCOPE_NOUNS
-from assay_cli.gate import Outcome
+from assay_cli.gate import Case, Outcome
 
 _MARK = {"passed": "✓", "failed": "✗", "error": "!", "skipped": "–"}
 MAX_LISTED = 50
@@ -62,15 +62,14 @@ def junit(outcome: Outcome) -> bytes:
                                     classname=_xml(group))
             if case.outcome in ("failed", "error", "skipped"):
                 tag = {"failed": "failure", "error": "error", "skipped": "skipped"}[case.outcome]
-                ET.SubElement(element, tag, message=_xml(case.message)).text = (
-                    _xml(case.detail) or None)
+                ET.SubElement(element, tag, message=_xml(case.message))
             elif case.message:
                 ET.SubElement(element, "system-out").text = _xml(case.message)
     ET.indent(suites)
     return ET.tostring(suites, encoding="utf-8", xml_declaration=True)
 
 
-def _label(outcome: Outcome, case) -> str:
+def _label(outcome: Outcome, case: Case) -> str:
     """A batch's check is named within its entry; a run by its test's name."""
     if outcome.kind != "batch" or case.group in ("", case.name):
         return case.name

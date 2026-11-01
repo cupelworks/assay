@@ -1,20 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""The gate's decisions on the API's replies, and the command line's parsing:
+"""The gate's decisions on the API's replies, and the reports written from them:
 the cases a real batch is slow or awkward to bring about."""
-import io
-import math
-import tomllib
-from pathlib import Path
 from xml.etree import ElementTree as ET
 
-import httpx
 import pytest
 
 from assay_cli import report
-from assay_cli.cli import EXIT_ERROR, _headers, build_parser, main
-from assay_cli.client import ApiError, AssayClient
-from assay_cli.gate import batch_finished, batch_outcome, execution_outcome
+from assay_cli.gate import batch_finished, batch_outcome, execution_outcome, run_outcome
 
 
 def _batch(status, verdicts=None, checks=()):
@@ -41,6 +34,8 @@ def _check(label, verdict, applies=True):
     ("Incomplete", ("fail",), False),
     ("NotRan", ("fail",), False),
 ])
+
+
 def test_a_batch_status_against_fail_on(status, fail_on, passed):
     assert batch_outcome(_batch(status), fail_on).passed is passed
 
@@ -86,32 +81,6 @@ def test_a_run_that_couldnt_run_is_a_junit_error():
     assert "| ! | a | Not Ran: No target URL is set |" in report.markdown(outcome)
 
 
-def test_headers_from_the_environment_and_flags():
-    args = build_parser().parse_args(["--header", "X-A: 1", "health", "--header", "X-B:2"])
-    headers = _headers(args, {"ASSAY_API_HEADERS": '{"X-C": "3", "X-A": "0"}'})
-    assert headers == {"X-A": "1", "X-B": "2", "X-C": "3"}
-    with pytest.raises(ApiError):
-        _headers(build_parser().parse_args(["health"]), {"ASSAY_API_HEADERS": "[1]"})
-
-
-def test_connection_options_before_the_command_survive_the_subcommand():
-    args = build_parser().parse_args(["--url", "http://a", "run", "test", "x"])
-    assert args.url == "http://a" and args.header == [] and args.http_timeout == 30.0
-
-
-def test_fail_on_is_checked_and_normalised():
-    args = build_parser().parse_args(["run", "test", "x", "--fail-on", "red, notran,Red"])
-    assert args.fail_on == ("Red", "NotRan")
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(["run", "test", "x", "--fail-on", "Blue"])
-
-
-def test_without_a_url_it_says_how_to_give_one():
-    err = io.StringIO()
-    assert main(["health"], env={}, out=io.StringIO(), err=err) == EXIT_ERROR
-    assert "--url or $ASSAY_API_URL" in err.getvalue()
-
-
 @pytest.mark.parametrize(("status", "verdicts", "fail_on", "passed"), [
     ("Failed", {"fail": 1, "inconclusive": 3}, ("inconclusive",), False),
     ("Failed", {"fail": 1}, ("inconclusive",), False),  # a proven failure always fails
@@ -121,11 +90,15 @@ def test_without_a_url_it_says_how_to_give_one():
     ("Inconclusive", {"pass": 2, "none": 1}, ("fail", "inconclusive"), False),
     ("Inconclusive", {"pass": 2, "none": 1}, ("fail",), True),
 ])
+
+
 def test_a_batch_is_gated_on_every_checks_verdict(status, verdicts, fail_on, passed):
     assert batch_outcome(_batch(status, verdicts), fail_on).passed is passed
 
 
 @pytest.mark.parametrize("status", ["NotRan", "Incomplete"])
+
+
 def test_a_batch_that_always_fails_reports_why_as_an_error(status):
     outcome = batch_outcome(_batch(status, checks=[_check("A", None)]))
 
@@ -154,58 +127,6 @@ def test_same_named_tests_in_an_execution_get_distinct_junit_names():
     names = [case.get("name") for case in ET.fromstring(report.junit(outcome)).iter("testcase")]
     assert names == ["Reset a password [e1]", "Reset a password [e2]", "Log in"]
     assert [c.name for c in outcome.failures] == ["Reset a password [e1]"]
-
-
-@pytest.mark.parametrize("option", ["--interval", "--timeout", "--http-timeout"])
-def test_waiting_options_refuse_impossible_values(option):
-    for value in ("-1", "inf", "nan"):
-        with pytest.raises(SystemExit):
-            build_parser().parse_args(["run", "test", "x", option, value])
-    if option != "--timeout":  # 0 waits forever
-        with pytest.raises(SystemExit):
-            build_parser().parse_args(["run", "test", "x", option, "0"])
-    assert build_parser().parse_args(["run", "test", "x", "--timeout", "0"]).timeout == 0
-
-
-def _client(reply):
-    return AssayClient(httpx.Client(base_url="http://assay", transport=httpx.MockTransport(reply)))
-
-
-@pytest.mark.parametrize(("status", "retries"), [
-    (502, math.inf), (503, math.inf), (504, math.inf), (429, math.inf),
-    (500, 3),  # a database busy for a moment passes; a bug doesn't
-    (501, 0), (505, 0), (401, 0), (404, 0)])
-def test_how_often_a_failed_read_is_worth_trying_again(status, retries):
-    with pytest.raises(ApiError) as raised:
-        _client(lambda request: httpx.Response(status)).health()
-    assert raised.value.retries == retries
-    assert raised.value.transient is (retries > 0)
-
-
-@pytest.mark.parametrize("status", [500, 502, 503, 504])
-def test_a_failure_to_start_may_have_started(status):
-    with pytest.raises(ApiError, match="it may have been carried out") as raised:
-        _client(lambda request: httpx.Response(status)).start_batch({})
-    assert not raised.value.transient
-
-
-def test_an_unreachable_api_is_transient():
-    def unreachable(request):
-        raise httpx.ConnectError("refused", request=request)
-
-    with pytest.raises(ApiError) as raised:
-        _client(unreachable).health()
-    assert raised.value.transient
-
-
-def test_anything_unforeseen_is_an_error_not_a_failed_gate():
-    class Odd:
-        def health(self):
-            raise KeyError("runs")
-
-    err = io.StringIO()
-    assert main(["health"], client=Odd(), env={}, out=io.StringIO(), err=err) == EXIT_ERROR
-    assert "unexpected error: KeyError: 'runs'" in err.getvalue()
 
 
 def test_a_check_with_no_verdict_fails_a_strict_gate_on_an_inconclusive_batch():
@@ -239,116 +160,41 @@ def test_characters_xml_cant_hold_are_left_out_of_junit():
     assert ET.fromstring(junit).find(".//testcase").get("name") == "a"
 
 
-def test_a_redirect_is_named_never_followed():
-    reply = httpx.Response(301, headers={"location": "https://assay/api/health/worker"})
-    with pytest.raises(ApiError, match="301 redirected to https://assay/api/health/worker"):
-        _client(lambda request: reply).health()
+SCOPE = {"kind": "test-set", "id": "s", "name": "Smoke"}
 
 
-def test_an_empty_reply_is_an_error():
-    with pytest.raises(ApiError, match="an empty reply"):
-        _client(lambda request: httpx.Response(200)).health()
+def test_a_run_status_the_cli_doesnt_know_never_passes():
+    details = {"id": "x", "run_count": 2, "runs": {"Green": 1, "Paused": 1}}
+    runs = [{"id": "r1", "test_name": "a", "status": "Green", "checks": {"not_met": []}},
+            {"id": "r2", "test_name": "b", "status": "Paused", "checks": None}]
+
+    outcome = execution_outcome(SCOPE, details, runs, ("Red",))
+
+    assert not outcome.passed
+    assert "a status this CLI doesn't know (Paused)" in outcome.reason
+    assert [(c.name, c.outcome) for c in outcome.failures] == [("b", "error")]
+    assert outcome.to_json()["reason"] == outcome.reason
+    assert "fails on:" not in report.text(outcome)  # --fail-on didn't decide it
 
 
-def test_a_header_replaces_one_of_the_same_name_whatever_its_case():
-    args = build_parser().parse_args(["health", "--header", "authorization: Bearer new"])
-    headers = _headers(args, {"ASSAY_API_HEADERS": '{"Authorization": "Bearer old"}'})
-    assert headers == {"authorization": "Bearer new"}
+def test_a_standalone_run_with_a_status_the_cli_doesnt_know_never_passes():
+    scope = {"kind": "test", "id": "t", "name": "lonely"}
+
+    outcome = run_outcome(scope, {"id": "r", "status": "Paused"}, ())
+
+    assert not outcome.passed and "(Paused)" in outcome.reason
 
 
-def _sent_but_unanswered(request):
-    raise httpx.ReadTimeout("timed out", request=request)
+def test_a_batch_status_the_cli_doesnt_know_never_passes():
+    batch = _batch("Archived", {"pass": 1}, [_check("A", "pass")])
+
+    assert batch_finished(batch)  # not in progress, so the wait ends
+    outcome = batch_outcome(batch)
+    assert not outcome.passed
+    assert [(c.name, c.outcome) for c in outcome.failures] == [("binomial_gate", "error")]
+    assert "(Archived)" in outcome.reason
 
 
-def test_a_start_with_no_reply_may_have_started_and_is_never_retried():
-    with pytest.raises(ApiError, match="it may have been carried out") as raised:
-        _client(_sent_but_unanswered).start_batch({})
-    assert not raised.value.transient
-
-
-def test_a_read_with_no_reply_is_tried_again():
-    with pytest.raises(ApiError, match="no reply from Assay") as raised:
-        _client(_sent_but_unanswered).health()
-    assert raised.value.transient
-
-
-def test_a_start_that_never_left_is_unreachable():
-    def unreachable(request):
-        raise httpx.ConnectError("refused", request=request)
-
-    with pytest.raises(ApiError, match="couldn't reach Assay"):
-        _client(unreachable).start_batch({})
-
-
-def test_the_time_left_caps_every_step_of_a_request():
-    seen = []
-
-    def reply(request):
-        seen.append(request.extensions["timeout"])
-        return httpx.Response(200, json={"id": "b"})
-
-    client = _client(reply)
-    client.batch("b", time_left=lambda: 2)
-    client.batch("b")
-
-    assert seen[0] == {"connect": 2, "read": 2, "write": 2, "pool": 2}
-    assert seen[1]["read"] == 5  # httpx's own default, untouched without
-
-
-def test_each_page_asks_the_time_left_afresh():
-    clock = {"now": 0}
-
-    def page(request):
-        clock["now"] += 3  # each page takes 3s
-        return httpx.Response(200, json={"items": [{"id": "r"}] * 100, "total": 500})
-
-    with pytest.raises(ApiError, match="out of time, not sent") as raised:
-        _client(page).execution_runs("test-set", "s", "e", lambda: 7 - clock["now"])
-    assert clock["now"] == 9  # pages at 0s, 3s and 6s; none at 9s
-    assert raised.value.transient
-
-
-def test_command_line_mistakes_are_caught_before_any_request():
-    class Untouched:
-        def __getattr__(self, name):
-            raise AssertionError(f"the API was called: {name}")
-
-    for argv in (["run", "test", "x", "--replay", "e"],
-                 ["batch", "test", "x", "-s", "binomial_gate", "-p", "target"]):
-        with pytest.raises(SystemExit) as raised:
-            main(argv, client=Untouched(), env={}, out=io.StringIO(), err=io.StringIO())
-        assert raised.value.code == EXIT_ERROR
-
-
-@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e400", "[NaN]"])
-def test_a_parameter_json_cant_send_is_refused(value):
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(["batch", "test", "x", "-s", "t", "-p", f"target={value}"])
-
-
-def test_parameters_are_read_as_json_when_they_parse():
-    args = build_parser().parse_args(["batch", "test", "x", "-s", "t", "-p", "target=0.9",
-                                      "-p", "label=a=b", "-p", "flag=true"])
-    assert dict(args.param) == {"target": 0.9, "label": "a=b", "flag": True}
-
-
-def test_the_version_is_written_once():
-    project = tomllib.loads((Path(__file__).parents[2] / "cli" / "pyproject.toml").read_text())
-    assert "version" not in project["project"] and "version" in project["project"]["dynamic"]
-    assert project["tool"]["hatch"]["version"]["path"] == "src/assay_cli/__init__.py"
-
-
-def test_a_finished_executions_runs_are_read_500_at_a_time():
-    limits = []
-
-    def page(request):
-        limits.append(request.url.params["limit"])
-        return httpx.Response(200, json={"items": [], "total": 0})
-
-    _client(page).execution_runs("test-set", "s", "e")
-    assert limits == ["500"]
-
-
-def test_an_errors_retries_say_whether_its_transient():
-    assert ApiError("x", 502, retries=math.inf).transient
-    assert not ApiError("x", 404).transient
+def test_a_batch_is_in_progress_only_while_pending_or_running():
+    for status in ("Pending", "Running"):
+        assert not batch_finished(_batch(status))

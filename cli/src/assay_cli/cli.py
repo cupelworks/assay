@@ -1,25 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""`assay`: start a run or a statistics batch, wait for it, report it, and exit
-0 or 1 so a pipeline step passes or fails with it."""
+"""`assay`: start a run or a statistics batch, wait for it, report it, and exit with
+a code a pipeline step acts on: 0 passed, 1 failed the gate, 2 error, 3 timed out,
+130 interrupted, 143 cancelled."""
 import argparse
 import json
-import math
 import os
 import signal
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, TextIO
 
-from assay_cli import __version__, report
-from assay_cli.client import SCOPE_NOUNS, SCOPES, ApiError, AssayClient, TimeLeft
+from assay_cli import arguments, report
+from assay_cli.client import SCOPE_NOUNS, ApiError, AssayClient
 from assay_cli.gate import (
-    BATCH_FAIL_ON,
-    BATCH_FAIL_ON_CHOICES,
-    RUN_FAIL_ON,
+    IN_PROGRESS,
     RUN_STATUSES,
     Outcome,
     batch_finished,
@@ -28,6 +27,7 @@ from assay_cli.gate import (
     run_finished,
     run_outcome,
 )
+from assay_cli.waiting import TimedOut, Waiter
 
 EXIT_PASSED = 0
 EXIT_FAILED = 1
@@ -41,20 +41,12 @@ EXIT_INTERRUPTED = 130
 EXIT_CANCELLED = 143
 """SIGTERM: the CI system cancelled the job."""
 
-RUNS_READ_SECONDS = 60
-"""After an execution finishes, how long reading its runs is tried again."""
-LAST_CHECK_SECONDS = 5
-"""A check made at the deadline still gets this long to be answered."""
+READ_SECONDS = 60
+"""How long a read outside a wait is tried again: finding what to run, the health
+check, a finished execution's runs."""
 STOP_SECONDS = 5
 """How long stopping a batch may take: within the gap a CI system leaves between its
 first signal and its SIGTERM (GitHub Actions: SIGINT, SIGTERM 7.5s later)."""
-
-URL_ENV = "ASSAY_API_URL"
-HEADERS_ENV = "ASSAY_API_HEADERS"
-
-
-class TimedOut(Exception):
-    pass
 
 
 class Cancelled(Exception):
@@ -71,198 +63,37 @@ def _on_main_thread() -> bool:
 
 
 @contextmanager
-def _sigterm_ignored():
-    previous = signal.signal(signal.SIGTERM, signal.SIG_IGN) if _on_main_thread() else None
+def _sigterm_deferred() -> Iterator[None]:
+    """A SIGTERM while the block runs waits for it to end, then ends the step as
+    cancelled: the block is what a cancel needs done."""
+    if not _on_main_thread():
+        yield
+        return
+    arrived = []
+    previous = signal.signal(signal.SIGTERM, lambda signum, frame: arrived.append(signum))
     try:
         yield
     finally:
-        if previous is not None:
-            signal.signal(signal.SIGTERM, previous)
+        _restore_sigterm(previous)
+    if arrived:
+        raise Cancelled("cancelled (SIGTERM)")
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="assay",
-        description="Run Assay's tests from a pipeline and fail the step when they fail.",
-        epilog="Exit codes: 0 passed, 1 failed the gate, 2 error, 3 timed out, "
-               "130 interrupted, 143 cancelled.")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    _connection_arguments(parser, defaults=True)
-    commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
-    # the connection's options are accepted after the command too
-    connection = argparse.ArgumentParser(add_help=False)
-    _connection_arguments(connection, defaults=False)
-
-    commands.add_parser("health", parents=[connection],
-                        help="Check the API is reachable and a worker is ready.")
-
-    run = commands.add_parser(
-        "run", parents=[connection],
-        help="Run a test, test set or plan once and gate on its runs' outcomes.",
-        description="Start a run (a live execution, or a replay of a past one), wait for "
-                    "every run to finish, and fail when any run's outcome is in --fail-on.")
-    _scope_arguments(run)
-    run.add_argument("--replay", metavar="EXECUTION_ID",
-                     help="Replay this past execution of the set or plan: exactly its entries.")
-    run.add_argument("--fail-on", type=_choices(RUN_STATUSES), default=RUN_FAIL_ON,
-                     metavar="STATUSES",
-                     help="Comma-separated run outcomes that fail the step "
-                          f"(default {','.join(RUN_FAIL_ON)}).")
-    _wait_arguments(run)
-    _output_arguments(run)
-
-    batch = commands.add_parser(
-        "batch", parents=[connection],
-        help="Run a scope N times as a statistics batch and gate on its verdicts.",
-        description="Start a statistics batch, wait for its result, and fail when a check's "
-                    "verdict is in --fail-on, or when the batch couldn't decide anything.")
-    _scope_arguments(batch)
-    batch.add_argument("--statistical-test", "-s", required=True, metavar="ID",
-                       help="A batch test's id from GET /statistics/tests.")
-    batch.add_argument("--times", "-n", type=_positive_int, metavar="N",
-                       help="Times to run the scope (default: the catalogue's suggestion).")
-    batch.add_argument("--param", "-p", action="append", default=[], type=_parameter,
-                       metavar="KEY=VALUE",
-                       help="A parameter of the statistical test, e.g. target=0.9; "
-                            "repeatable. VALUE is read as JSON when it parses.")
-    batch.add_argument("--note", help="Kept with the batch, e.g. the commit or PR it tests.")
-    batch.add_argument("--fail-on", type=_choices(BATCH_FAIL_ON_CHOICES), default=BATCH_FAIL_ON,
-                       metavar="VERDICTS",
-                       help="Comma-separated verdicts that fail the step: fail, inconclusive "
-                            f"(default {','.join(BATCH_FAIL_ON)}). A check proven to fail, and "
-                            "a batch that was stopped or couldn't decide anything, always "
-                            "fail it.")
-    batch.add_argument("--stop-on-timeout", action="store_true",
-                       help="Stop the batch when the wait ends without its result "
-                            "(--timeout reached, the job cancelled, Ctrl-C), so its "
-                            "remaining runs aren't paid for.")
-    _wait_arguments(batch)
-    _output_arguments(batch)
-    return parser
-
-
-def _connection_arguments(parser, defaults: bool) -> None:
-    """On the subcommands, an option left out mustn't overwrite one given before them."""
-    def default(value):
-        return value if defaults else argparse.SUPPRESS
-    parser.add_argument("--url", default=default(None),
-                        help=f"Assay's API, e.g. https://assay.internal/api (or ${URL_ENV}).")
-    parser.add_argument("--header", action="append", default=[] if defaults else None,
-                        dest="header" if defaults else "header_after", metavar="'NAME: VALUE'",
-                        help="A header sent with every request, e.g. for a gateway in front "
-                             f"of the API; repeatable. ${HEADERS_ENV} takes a JSON object.")
-    parser.add_argument("--http-timeout", type=_positive_float, default=default(30.0),
-                        metavar="SECONDS",
-                        help="Timeout of each request to the API (default 30).")
-
-
-def _scope_arguments(parser) -> None:
-    parser.add_argument("scope", choices=SCOPES, help="What to run.")
-    parser.add_argument("ref", metavar="ID_OR_NAME", help="Its id, or its exact name.")
-
-
-def _wait_arguments(parser) -> None:
-    parser.add_argument("--no-wait", action="store_true",
-                        help="Start it, print its id and exit 0 without waiting.")
-    parser.add_argument("--timeout", type=_non_negative_float, default=3600, metavar="SECONDS",
-                        help="Give up waiting after this long (default 3600; 0 waits forever).")
-    parser.add_argument("--interval", type=_positive_float, default=5, metavar="SECONDS",
-                        help="Time between checks on its progress (default 5).")
-
-
-def _output_arguments(parser) -> None:
-    parser.add_argument("--json", action="store_true",
-                        help="Print the outcome as JSON instead of text.")
-    parser.add_argument("--junit", type=Path, metavar="FILE",
-                        help="Write a JUnit XML report, for the CI system's test results.")
-    parser.add_argument("--markdown", type=Path, metavar="FILE",
-                        help="Append a Markdown summary to FILE. On GitHub Actions it's "
-                             "appended to $GITHUB_STEP_SUMMARY without this.")
-
-
-def _choices(allowed: tuple) -> Callable[[str], tuple]:
-    def parse(value: str) -> tuple:
-        lowered = {a.lower(): a for a in allowed}
-        chosen = [v.strip() for v in value.split(",") if v.strip()]
-        unknown = [v for v in chosen if v.lower() not in lowered]
-        if unknown or not chosen:
-            raise argparse.ArgumentTypeError(
-                f"choose from {', '.join(allowed)} (got {value!r})")
-        return tuple(dict.fromkeys(lowered[v.lower()] for v in chosen))
-    return parse
-
-
-def _positive_int(value: str) -> int:
-    number = int(value)
-    if number < 1:
-        raise argparse.ArgumentTypeError("must be at least 1")
-    return number
-
-
-def _positive_float(value: str) -> float:
-    number = float(value)
-    if not (number > 0 and math.isfinite(number)):  # NaN too
-        raise argparse.ArgumentTypeError("must be a number more than 0")
-    return number
-
-
-def _non_negative_float(value: str) -> float:
-    number = float(value)
-    if not (number >= 0 and math.isfinite(number)):
-        raise argparse.ArgumentTypeError("must be a number, 0 or more")
-    return number
-
-
-def _parameter(pair: str) -> tuple[str, object]:
-    """VALUE as JSON when it parses (`0.9`, `true`), else as text."""
-    key, sep, value = pair.partition("=")
-    if not sep or not key.strip():
-        raise argparse.ArgumentTypeError(f"expected KEY=VALUE (got {pair!r})")
-    try:
-        parsed = json.loads(value)
-    except ValueError:
-        return key.strip(), value
-    try:
-        json.dumps(parsed, allow_nan=False)
-    except ValueError:  # NaN, Infinity, 1e400: JSON can't send them
-        raise argparse.ArgumentTypeError(f"{pair!r}: not a finite number") from None
-    return key.strip(), parsed
-
-
-def _headers(args, env) -> dict[str, str]:
-    """$ASSAY_API_HEADERS, then each --header: a later one replaces an earlier one
-    of the same name, whatever its case, as HTTP names are."""
-    headers = {}
-
-    def put(name: str, value: str) -> None:
-        for given in [given for given in headers if given.lower() == name.lower()]:
-            del headers[given]
-        headers[name] = value
-
-    if env.get(HEADERS_ENV):
-        try:
-            loaded = json.loads(env[HEADERS_ENV])
-        except ValueError as exc:
-            raise ApiError(f"${HEADERS_ENV} isn't a JSON object: {exc}") from exc
-        if not isinstance(loaded, dict):
-            raise ApiError(f"${HEADERS_ENV} must be a JSON object of header names to values")
-        for name, value in loaded.items():
-            put(str(name), str(value))
-    for header in [*args.header, *(getattr(args, "header_after", None) or [])]:
-        name, sep, value = header.partition(":")
-        if not sep or not name.strip():
-            raise ApiError(f"--header {header!r}: expected 'NAME: VALUE'")
-        put(name.strip(), value.strip())
-    return headers
+def _restore_sigterm(previous) -> None:
+    # None: a handler not set from Python, which can't be put back
+    signal.signal(signal.SIGTERM, signal.SIG_DFL if previous is None else previous)
 
 
 class Runner:
-    """One invocation: the client, the clock, and where to write."""
+    """One command: the client, the clock, and where to write."""
 
-    def __init__(self, client: AssayClient, args, env, out, err,
-                 sleep: Callable[[float], None], clock: Callable[[], float]):
+    def __init__(self, client: AssayClient, args: argparse.Namespace, env: Mapping[str, str],
+                 out: TextIO, err: TextIO, sleep: Callable[[float], None],
+                 clock: Callable[[], float]):
         self.client, self.args, self.env = client, args, env
-        self.out, self.err, self.sleep, self.clock = out, err, sleep, clock
+        self.out, self.err, self.clock = out, err, clock
+        self.waiter = Waiter(clock, sleep, getattr(args, "interval", arguments.INTERVAL),
+                             self.say)
 
     def say(self, message: str) -> None:
         print(message, file=self.err, flush=True)
@@ -270,7 +101,7 @@ class Runner:
     # -- commands --
 
     def health(self) -> int:
-        health = self.client.health()
+        health = self._fetch(lambda left: self.client.health(left), "Couldn't check Assay")
         status = health.get("status")
         workers = len(health.get("workers") or [])
         print(f"Assay {health.get('version', '?')}: {status} ({workers} worker"
@@ -279,9 +110,11 @@ class Runner:
 
     def run(self) -> int:
         args = self.args
-        target = self.client.resolve(args.scope, args.ref)
+        target = self._resolve()
         scope = {"kind": args.scope, **target}
-        started = self.client.start_run(args.scope, target["id"], args.replay)
+        kind = "run" if args.scope == "test" else "execution"
+        started = self._start(
+            lambda: self.client.start_run(args.scope, target["id"], args.replay), kind)
         run_id = str(started["id"])
         if args.scope == "test":
             self.say(f"Started run {run_id} of test {target['name']!r}.")
@@ -289,31 +122,25 @@ class Runner:
             self.say(f"Started execution {run_id} of {SCOPE_NOUNS[args.scope]} "
                      f"{target['name']!r}: {started.get('run_count', '?')} runs.")
         if args.no_wait:
-            return self._started("run" if args.scope == "test" else "execution", run_id, scope)
+            return self._started(kind, run_id, scope)
 
         if args.scope == "test":
-            details = self._wait(lambda left: self.client.standalone_run(target["id"], run_id,
-                                                                         left),
-                                 lambda d: d["status"] not in ("Pending", "Running"),
-                                 lambda d: d["status"])
-            outcome = run_outcome(scope, details, args.fail_on)
-        else:
-            details = self._wait(
-                lambda left: self.client.execution(args.scope, target["id"], run_id, left),
-                lambda d: run_finished(d["runs"]),
-                lambda d: _progress(d["runs"], d.get("run_count")))
-            # finished: its own time to read the runs, and a failure is an error
-            runs = self._read(
-                lambda left: self.client.execution_runs(args.scope, target["id"], run_id, left),
-                self.clock() + RUNS_READ_SECONDS,
-                lambda exc: ApiError(f"It finished, but its runs couldn't be read: {exc}",
-                                     exc.status_code))
-            outcome = execution_outcome(scope, details, runs, args.fail_on)
-        return self._report(outcome)
+            details = self.waiter.until(
+                lambda left: self.client.standalone_run(target["id"], run_id, left),
+                lambda d: d["status"] not in IN_PROGRESS, lambda d: d["status"], args.timeout)
+            return self._report(run_outcome(scope, details, args.fail_on))
+        details = self.waiter.until(
+            lambda left: self.client.execution(args.scope, target["id"], run_id, left),
+            lambda d: run_finished(d["runs"]),
+            lambda d: _progress(d["runs"], d.get("run_count")), args.timeout)
+        runs = self._fetch(
+            lambda left: self.client.execution_runs(args.scope, target["id"], run_id, left),
+            "It finished, but its runs couldn't be read")
+        return self._report(execution_outcome(scope, details, runs, args.fail_on))
 
     def batch(self) -> int:
         args = self.args
-        target = self.client.resolve(args.scope, args.ref)
+        target = self._resolve()
         body = {f"{args.scope.replace('-', '_')}_id": target["id"],
                 "statistical_test": args.statistical_test,
                 "parameters": dict(args.param)}
@@ -323,7 +150,7 @@ class Runner:
             body["note"] = args.note
         batch_id = None
         try:
-            started = self.client.start_batch(body)
+            started = self._start(lambda: self.client.start_batch(body), "batch")
             batch_id = str(started["id"])
             progress = started.get("progress") or {}
             self.say(f"Started batch {batch_id} of {SCOPE_NOUNS[args.scope]} "
@@ -332,8 +159,9 @@ class Runner:
                      f"{progress.get('runs_total', '?')} runs.")
             if args.no_wait:
                 return self._started("batch", batch_id, {"kind": args.scope, **target})
-            batch = self._wait(lambda left: self.client.batch(batch_id, time_left=left),
-                               batch_finished, _batch_progress)
+            batch = self.waiter.until(
+                lambda left: self.client.batch(batch_id, time_left=left), batch_finished,
+                _batch_progress, args.timeout)
         except (Exception, KeyboardInterrupt):
             # however it ends without a result once started: timeout, cancel, any error
             if args.stop_on_timeout and batch_id:
@@ -341,74 +169,42 @@ class Runner:
             raise
         return self._report(batch_outcome(batch, args.fail_on))
 
+    # -- the steps they share --
+
+    def _fetch(self, read: Callable, failed: str) -> Any:
+        """A read outside a wait, tried again for READ_SECONDS: then `failed`, an error."""
+        return self.waiter.read(read, self.clock() + READ_SECONDS,
+                                lambda exc: ApiError(f"{failed}: {exc}", exc.status_code))
+
+    def _resolve(self) -> dict:
+        args = self.args
+        return self._fetch(lambda left: self.client.resolve(args.scope, args.ref, left),
+                           f"Couldn't look up the {SCOPE_NOUNS[args.scope]} {args.ref!r}")
+
+    def _start(self, start: Callable[[], dict], what: str) -> dict:
+        """Never tried again, as Assay may have carried it out; an interrupt while
+        it's in flight says so too."""
+        try:
+            return start()
+        except (KeyboardInterrupt, Cancelled):
+            self.say(f"Interrupted while starting the {what}: it may have started, so "
+                     "look in Assay before running it again.")
+            raise
+
     def _stop(self, batch_id: str) -> None:
         """Best effort, and quick: a failed or interrupted stop is reported, and the
-        step's own ending kept. A SIGTERM meanwhile is ignored: the stop is what a
-        cancel needs, and the CI system kills the step soon after anyway."""
-        try:
-            with _sigterm_ignored():
-                self.client.stop_batch(batch_id,
-                                       self._time_left(self.clock() + STOP_SECONDS))
-        except (ApiError, Cancelled, KeyboardInterrupt) as exc:
-            reason = exc if isinstance(exc, ApiError) else "interrupted"
-            self.say(f"Couldn't stop batch {batch_id} ({reason}): its remaining runs may "
-                     "still run; stop it in Assay.")
-        else:
-            self.say(f"Stopped batch {batch_id}: its remaining runs are cancelled.")
-
-    # -- waiting and reporting --
-
-    def _wait(self, read, finished, describe):
-        deadline = self.clock() + self.args.timeout if self.args.timeout > 0 else None
-        timeout = f"Still not finished after {self.args.timeout:g}s"
-        last = None
-        while True:
-            current = self._read(read, deadline,
-                                 lambda exc: TimedOut(f"{timeout}: the last check failed ({exc})"))
-            line = describe(current)
-            if line != last:
-                self.say(f"  {line}")
-                last = line
-            if finished(current):
-                return current
-            if self._past(deadline):
-                raise TimedOut(f"{timeout}: {line}")
-            self._pause(deadline)
-
-    def _read(self, read, deadline: float | None,
-              out_of_time: Callable[[ApiError], Exception]):
-        """A read that changes nothing, so a failure that may pass is tried again, as
-        many times in a row as it says, until the deadline; any other refusal ends it.
-        Each try, all its pages included, ends by the deadline (a try at the deadline
-        gets LAST_CHECK_SECONDS)."""
-        failures, kind = 0, None  # in a row, of the same kind: each kind has its own count
-        while True:
-            ends = None if deadline is None else max(deadline,
-                                                     self.clock() + LAST_CHECK_SECONDS)
+        step's own ending kept, but for a SIGTERM meanwhile, which ends it as
+        cancelled once the stop is done."""
+        with _sigterm_deferred():
             try:
-                return read(self._time_left(ends))
-            except ApiError as exc:
-                failures = failures + 1 if exc.retries == kind else 1
-                kind = exc.retries
-                if failures > exc.retries:
-                    raise
-                if self._past(deadline):
-                    raise out_of_time(exc) from exc
-                self.say(f"  {exc}; trying again")
-                self._pause(deadline)
-
-    def _time_left(self, ends: float | None) -> TimeLeft | None:
-        return None if ends is None else lambda: ends - self.clock()
-
-    def _past(self, deadline: float | None) -> bool:
-        return deadline is not None and self.clock() >= deadline
-
-    def _pause(self, deadline: float | None) -> None:
-        """The interval, but never past the deadline: the last check comes on time."""
-        wait = self.args.interval
-        if deadline is not None:
-            wait = min(wait, max(deadline - self.clock(), 0.0))
-        self.sleep(wait)
+                self.client.stop_batch(batch_id,
+                                       self.waiter.time_left(self.clock() + STOP_SECONDS))
+            except (ApiError, KeyboardInterrupt) as exc:
+                reason = exc if isinstance(exc, ApiError) else "interrupted"
+                self.say(f"Couldn't stop batch {batch_id} ({reason}): its remaining runs "
+                         "may still run; stop it in Assay.")
+            else:
+                self.say(f"Stopped batch {batch_id}: its remaining runs are cancelled.")
 
     def _started(self, kind: str, started_id: str, scope: dict) -> int:
         if self.args.json:
@@ -460,8 +256,8 @@ def _append(path: Path, text: str) -> None:
 
 def _progress(counts: dict, total: int | None) -> str:
     done = sum(counts.get(s, 0) for s in RUN_STATUSES)
-    total = total if total is not None else done + counts.get("Pending", 0) + counts.get(
-        "Running", 0)
+    if total is None:
+        total = done + sum(counts.get(s, 0) for s in IN_PROGRESS)
     shown = ", ".join(f"{counts[s]} {s}" for s in RUN_STATUSES if counts.get(s))
     return f"{done}/{total} runs finished" + (f" ({shown})" if shown else "")
 
@@ -477,7 +273,7 @@ def _batch_progress(batch: dict) -> str:
     return line
 
 
-def _utf8(stream):
+def _utf8(stream: TextIO) -> TextIO:
     """The report's marks and any test's name, whatever the locale: a pipe on a
     Windows runner is cp1252 otherwise, and can't hold them."""
     reconfigure = getattr(stream, "reconfigure", None)
@@ -487,15 +283,13 @@ def _utf8(stream):
 
 
 def main(argv: list[str] | None = None, *, client: AssayClient | None = None,
-         env=None, out=None, err=None, sleep: Callable[[float], None] = time.sleep,
+         env: Mapping[str, str] | None = None, out: TextIO | None = None,
+         err: TextIO | None = None, sleep: Callable[[float], None] = time.sleep,
          clock: Callable[[], float] = time.monotonic) -> int:
     env = os.environ if env is None else env
     out = out or _utf8(sys.stdout)
     err = err or _utf8(sys.stderr)
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    if getattr(args, "replay", None) and args.scope == "test":
-        parser.error("--replay: a standalone test has no executions to replay")
+    args = arguments.parse(argv)
     # a CI system cancels a job with SIGTERM: end the wait like Ctrl-C does, so a
     # batch can still be stopped
     on_main_thread = _on_main_thread()
@@ -508,22 +302,23 @@ def main(argv: list[str] | None = None, *, client: AssayClient | None = None,
         return EXIT_CANCELLED
     finally:
         if on_main_thread:
-            # None: a handler not set from Python, which can't be put back
-            signal.signal(signal.SIGTERM, signal.SIG_DFL if previous is None else previous)
+            _restore_sigterm(previous)
 
 
-def _run(args, client: AssayClient | None, env, out, err, sleep, clock) -> int:
+def _run(args: argparse.Namespace, client: AssayClient | None, env: Mapping[str, str],
+         out: TextIO, err: TextIO, sleep: Callable[[float], None],
+         clock: Callable[[], float]) -> int:
     owned = client is None
     try:
         if owned:
-            url = args.url or env.get(URL_ENV)
+            url = args.url or env.get(arguments.URL_ENV)
             if not url:
-                print(f"assay: give the API's URL with --url or ${URL_ENV}", file=err)
+                print(f"assay: give the API's URL with --url or ${arguments.URL_ENV}", file=err)
                 return EXIT_ERROR
-            client = AssayClient.connect(url, _headers(args, env), args.http_timeout)
+            client = AssayClient.connect(url, arguments.headers(args, env), args.http_timeout)
         runner = Runner(client, args, env, out, err, sleep, clock)
         return getattr(runner, args.command)()
-    except ApiError as exc:
+    except (ApiError, arguments.ArgumentError) as exc:
         print(f"assay: {exc}", file=err)
         return EXIT_ERROR
     except TimedOut as exc:

@@ -19,6 +19,7 @@ from assay_cli.cli import (
     EXIT_INTERRUPTED,
     EXIT_PASSED,
     EXIT_TIMED_OUT,
+    READ_SECONDS,
     STOP_SECONDS,
     Cancelled,
     _cancel,
@@ -436,11 +437,10 @@ def test_stopping_a_batch_is_quick(db, cli):
     assert stops == [STOP_SECONDS]
 
 
-@pytest.mark.parametrize("interrupt", [Cancelled("cancelled (SIGTERM)"), KeyboardInterrupt()])
-def test_an_interrupted_stop_keeps_the_steps_own_ending(db, cli, interrupt):
+def test_a_second_ctrl_c_while_stopping_keeps_the_steps_own_ending(db, cli):
     test = db.test(name="a")
     cli.worker_running = False
-    client = Flaky(db.client, lambda method, path: path.endswith("/stop"), interrupt)
+    client = Flaky(db.client, lambda method, path: path.endswith("/stop"), KeyboardInterrupt())
 
     code = cli("batch", "test", test["id"], "-s", "binomial_gate", "--timeout", "1",
                "--stop-on-timeout", client=client)
@@ -521,7 +521,7 @@ def _server_error():
     return ApiError("GET …: 500 Warming up", 500, retries=3)
 
 
-def test_each_kind_of_failure_is_counted_in_a_row_on_its_own(db, cli):
+def test_gateway_failures_dont_use_up_a_500s_tries(db, cli):
     db.test_set("Smoke", [db.test(name="a")])
     # the API restarting: a gateway's 502s, then its own 500s while it warms up
     errors = [GATEWAY_DOWN] * 4 + [_server_error() for _ in range(3)]
@@ -533,13 +533,13 @@ def test_each_kind_of_failure_is_counted_in_a_row_on_its_own(db, cli):
     assert cli.err.getvalue().count("500 Warming up; trying again") == 3
 
 
-def test_four_500s_in_a_row_end_the_wait_whatever_came_before(db, cli):
+def test_a_fourth_500_ends_the_wait_whatever_gateway_failures_came_between(db, cli):
     db.test_set("Smoke", [db.test(name="a")])
-    errors = [_server_error(), GATEWAY_DOWN] + [_server_error() for _ in range(4)]
+    errors = [_server_error(), GATEWAY_DOWN] * 3 + [_server_error()]
     client = Failures(db.client, _reading_an_execution, errors)
 
-    assert cli("run", "test-set", "Smoke", "--interval", "1", client=client) == EXIT_ERROR
-    assert cli.err.getvalue().count("500 Warming up; trying again") == 4  # 1, then 3
+    assert cli("run", "test-set", "Smoke", "--timeout", "0", client=client) == EXIT_ERROR
+    assert cli.err.getvalue().count("500 Warming up; trying again") == 3
 
 
 def test_a_test_named_like_an_id_is_found_by_its_name(db, cli):
@@ -551,7 +551,7 @@ def test_a_test_named_like_an_id_is_found_by_its_name(db, cli):
     assert "No test has the id or the name '00000000-" in cli.err.getvalue()
 
 
-def test_a_sigterm_while_stopping_is_ignored(db, cli):
+def test_a_sigterm_while_stopping_waits_for_the_stop_then_cancels(db, cli):
     test = db.test(name="a")
     cli.worker_running = False
 
@@ -564,8 +564,9 @@ def test_a_sigterm_while_stopping_is_ignored(db, cli):
     code = cli("batch", "test", test["id"], "-s", "binomial_gate", "--timeout", "1",
                "--stop-on-timeout", client=Stubborn(db.client))
 
-    assert code == EXIT_TIMED_OUT
+    assert code == EXIT_CANCELLED  # the job was cancelled, whatever timed out before
     assert "Stopped batch" in cli.err.getvalue()
+    assert db.client.get("/statistics/batches").json()["items"][0]["stopped_at"] is not None
     assert signal.getsignal(signal.SIGTERM) is not _cancel
 
 
@@ -585,3 +586,45 @@ def test_a_sigterm_while_cleaning_up_is_a_cancel_not_a_failed_gate(db, cli, monk
 
     assert code == EXIT_CANCELLED
     assert "assay: cancelled (SIGTERM)" in err.getvalue()
+
+
+def _looking_up_a_set(method, path):
+    return method == "GET" and path == "/test-sets"
+
+
+def test_a_gateways_passing_failure_while_looking_it_up_is_tried_again(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = Flaky(db.client, _looking_up_a_set, GATEWAY_DOWN, times=2)
+
+    code = cli("run", "test-set", "Smoke", "--interval", "1", client=client)
+
+    assert code == EXIT_PASSED, cli.err.getvalue()
+    assert cli.err.getvalue().count("502 Bad Gateway; trying again") == 2
+
+
+def test_a_lookup_that_keeps_failing_is_an_error_naming_what_it_looked_for(db, cli):
+    client = Flaky(db.client, _looking_up_a_set, GATEWAY_DOWN, times=1000)
+
+    assert cli("run", "test-set", "Smoke", client=client) == EXIT_ERROR
+    assert "Couldn't look up the test set 'Smoke': GET …: 502" in cli.err.getvalue()
+    assert cli.now == READ_SECONDS
+
+
+@pytest.mark.parametrize(("interrupt", "exit_code"), [
+    (KeyboardInterrupt(), EXIT_INTERRUPTED), (Cancelled("cancelled (SIGTERM)"), EXIT_CANCELLED)])
+def test_an_interrupt_while_starting_says_it_may_have_started(db, cli, interrupt, exit_code):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = Flaky(db.client, lambda method, path: method == "POST", interrupt)
+
+    assert cli("run", "test-set", "Smoke", client=client) == exit_code
+    assert "Interrupted while starting the execution: it may have started" in cli.err.getvalue()
+
+
+def test_anything_unforeseen_is_an_error_not_a_failed_gate():
+    class Odd:
+        def health(self, time_left=None):
+            raise KeyError("runs")
+
+    err = io.StringIO()
+    assert main(["health"], client=Odd(), env={}, out=io.StringIO(), err=err) == EXIT_ERROR
+    assert "unexpected error: KeyError: 'runs'" in err.getvalue()

@@ -335,6 +335,9 @@ The batch ends with one status:
 | `NotRan` | Nothing could be decided: every run Not Ran, or every check errored in every run. Fix the cause; a bigger batch wouldn't help | **Always** |
 | `Done` | A trial finished | No |
 
+A status this version of the CLI doesn't know fails the step, saying so: the gate never
+passes on something it can't read. The same goes for a run's status. Update the CLI then.
+
 ### Choosing what fails the step: `--fail-on`
 
 ```bash
@@ -367,9 +370,12 @@ ends early, from the moment the batch is started:
 
 Stopping gets 5 seconds, since the CI system kills the step soon after it cancels it
 (GitHub Actions sends SIGINT, then SIGTERM 7.5 seconds later, then kills it). A SIGTERM
-while the stop is being sent is ignored, so it isn't cut short. If Assay refuses the stop,
-it takes longer, or it's interrupted (a second Ctrl-C), the CLI says so and exits as it
-would have: stop the batch in Assay then.
+while the stop is being sent waits for it, so it isn't cut short, and the step then exits
+143 (cancelled). If Assay refuses the stop, it takes longer, or it's interrupted (a second
+Ctrl-C), the CLI says so and exits as it would have: stop the batch in Assay then.
+
+If the job is cancelled while the request starting a run or batch is on its way, the CLI
+can't know whether it started: it says so. Look in Assay before running it again.
 
 Without `--stop-on-timeout`, nothing stops a batch but you: in the UI, or with
 `POST /statistics/batches/{id}/stop`.
@@ -404,11 +410,13 @@ Per-check targets and leaving checks out of a batch are possible through the API
 - **A passing failure doesn't end the wait.** When a check on its progress can't reach the
   API, gets no reply, or gets a `429`, `502`, `503` or `504` (a gateway, or a busy API), the
   CLI says so and tries again after `--interval`, until `--timeout`. A `500` (the API's own
-  failure: its database busy for a moment, or a bug) is tried again 3 times in a row, then
-  ends it with exit 2; a gateway's failures before or between them don't count against
-  those 3. Any other refusal, such as a `401`, ends it with exit 2 at once. Once an
-  execution has finished, reading its runs is tried again for up to a minute, whatever
-  `--timeout` is left.
+  failure: its database busy for a moment, or a bug) is tried again 3 times, then ends it
+  with exit 2; a gateway's failures before or between them don't count. Any other refusal,
+  such as a `401`, ends it with exit 2 at once.
+- **Reads outside the wait get a minute.** Looking up what to run, `assay health`, and
+  reading an execution's runs once it has finished are tried again the same way for up to
+  a minute, whatever `--timeout` is. Starting a run or a batch is never tried again: it may
+  have started.
 - **The last check comes on time.** The CLI never sleeps past `--timeout`, and no request,
   each page of a list included, is sent after the time left (or 5 seconds, for the check at
   the deadline). Each step of a request (connecting, sending, each read of the reply) waits
@@ -461,6 +469,7 @@ Prints one JSON object instead of the text, for scripts:
   "summary": "FAILED: test set 'Smoke', 3 runs: 1 Green, 1 Amber, 0 Red, 1 NotRan",
   "counts": {"Green": 1, "Amber": 1, "Red": 0, "NotRan": 1},
   "fail_on": ["Amber", "Red", "NotRan"],
+  "reason": null,
   "failures": [
     {"name": "Refund policy", "group": "Smoke", "outcome": "failed",
      "message": "Amber: not met: Correctness"},
@@ -479,6 +488,7 @@ Prints one JSON object instead of the text, for scripts:
 | `passed` | Whether the step passed: the same as exit code 0 |
 | `counts` | Runs by outcome; for a batch, checks by verdict (`pass`, `fail`, `inconclusive`, `none`) |
 | `fail_on` | The rule it was judged by |
+| `reason` | Why it failed whatever `fail_on` says: a batch stopped or undecided, a status the CLI doesn't know; `null` otherwise |
 | `failures` | What failed the step: `outcome` is `failed` or `error` (a run that couldn't run, or a batch that ended `Incomplete` or `NotRan`) |
 
 For example, `assay run test-set Smoke --json | jq -r '.failures[].name'`.
@@ -738,7 +748,7 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 | `the reply isn't JSON — is the URL Assay's API?` | The URL points at something else, e.g. the web interface, or a proxy's sign-in page. Point it at the API, including its path (`/api`) |
 | `404 …` on every command | The URL is missing the path the API is served under |
 | `No test set is named 'X'` | Names must match exactly, including case. Check spelling and quotes, or use the id |
-| `2 tests are named 'X' (…)` | Use one of the ids listed |
+| `At least 2 tests are named 'X' (…)` | Use one of the ids listed |
 | `409 No Test Set Entries found …` | The set is empty: add tests to it |
 | `409 No test types assigned …` | An entry has no checks: assign at least one |
 | `422 …` on `batch` | A parameter is out of range, `--times` is below the test's floor, or the statistical test id is unknown. The message says which |
@@ -821,7 +831,8 @@ assay batch {test,test-set,test-plan} ID_OR_NAME
 ## Development
 
 The CLI lives in `cli/` as a package of its own (`assay-cli`); its tests are in
-`tests/cli/` and run with the backend's suite, end to end against the real API in-process.
+`tests/cli/` and run with the backend's suite: one file per module, and one end to end
+against the real API in-process, with a stand-in worker.
 
 ```bash
 pip install -e ".[dev]" -e ./cli
@@ -831,8 +842,10 @@ ruff check cli/ tests/cli
 
 | Module | What it holds |
 |---|---|
-| `cli.py` | The commands, their options, waiting, and the exit codes |
-| `client.py` | The API calls: finding by name, starting, reading |
+| `cli.py` | The commands and the exit codes; cancels, and stopping a batch |
+| `arguments.py` | The options, and every rule about them checked before a request is sent |
+| `client.py` | The API calls: finding by name, starting, reading; how each failure is classed |
+| `waiting.py` | Waiting and trying again: what's retried, how often, and the deadlines |
 | `gate.py` | Whether an outcome passes the step: pure functions of the API's replies |
 | `report.py` | The text, Markdown and JUnit outputs |
 
