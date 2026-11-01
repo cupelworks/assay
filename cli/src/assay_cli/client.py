@@ -2,9 +2,9 @@
 # Copyright (C) 2026 Francesco Campanile
 """A thin, synchronous client for the parts of Assay's API a pipeline needs:
 start a run or a statistics batch, read how it stands, list its runs."""
+import math
 import uuid
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import httpx
@@ -21,28 +21,38 @@ _NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 """Failures before the request left: Assay never saw it."""
 
 
-def _transient(status: int) -> bool:
-    """Replies a gateway or a busy API gives in passing (a database busy for a
-    moment): worth asking again."""
-    return status == 429 or status >= 500
+_GATEWAY_STATUSES = frozenset({429, 502, 503, 504})
+"""Replies a gateway or a busy API gives in passing: worth asking again until the
+deadline. To a write, they leave open whether the API carried it out."""
+SERVER_ERROR_RETRIES = 3
+"""A 500 is the API's own failure: a database busy for a moment passes, a bug doesn't."""
+_MAYBE_DONE = "; it may have been carried out, so look in Assay before trying again"
+TimeLeft = Callable[[], float]
+"""Seconds a request may still wait, asked just before it's sent."""
+
+
+def _retries(status: int) -> float:
+    if status in _GATEWAY_STATUSES:
+        return math.inf
+    return SERVER_ERROR_RETRIES if status == 500 else 0
 
 
 class ApiError(Exception):
-    """The API refused a request, or couldn't be reached. `transient`: the network,
-    a gateway or the API failed in passing (unreachable, 429, any 5xx), so the same
-    read may succeed later."""
+    """The API refused a request, or couldn't be reached. `retries`: how many times
+    in a row the same read is worth trying again (`transient`: at all), until the
+    deadline; `inf` for the network or a gateway failing in passing."""
 
     def __init__(self, message: str, status_code: int | None = None,
-                 transient: bool = False):
+                 transient: bool = False, retries: float | None = None):
         super().__init__(message)
         self.status_code = status_code
-        self.transient = transient
+        self.retries = (math.inf if transient else 0) if retries is None else retries
+        self.transient = self.retries > 0
 
 
 class AssayClient:
     def __init__(self, http: httpx.Client):
         self.http = http
-        self._limit: float | None = None
 
     @classmethod
     def connect(cls, base_url: str, headers: dict[str, str] | None = None,
@@ -53,22 +63,18 @@ class AssayClient:
     def close(self) -> None:
         self.http.close()
 
-    @contextmanager
-    def within(self, seconds: float | None):
-        """Requests made inside wait at most `seconds` for each step (connecting,
-        each read), however long --http-timeout is; None: no limit of its own."""
-        self._limit = seconds
-        try:
-            yield self
-        finally:
-            self._limit = None
-
     # -- plumbing --
 
-    def _request(self, method: str, path: str, **kwargs) -> Any:
-        if self._limit is not None:
+    def _request(self, method: str, path: str, time_left: TimeLeft | None = None,
+                 **kwargs) -> Any:
+        """`time_left`: each step of the request (connecting, each read) waits no
+        longer than it says, however long --http-timeout is."""
+        if time_left is not None:
+            left = time_left()
+            if left <= 0:
+                raise ApiError(f"{method} {path}: out of time, not sent", transient=True)
             kwargs["timeout"] = httpx.Timeout(**{
-                step: self._limit if limit is None else min(limit, self._limit)
+                step: left if limit is None else min(limit, left)
                 for step, limit in self.http.timeout.as_dict().items()})
         try:
             response = self.http.request(method, path, **kwargs)
@@ -80,16 +86,19 @@ class AssayClient:
                 raise ApiError(f"{method} {path}: no reply from Assay ({exc})",
                                transient=True) from exc
             # sent, so Assay may have acted on it: never assume it didn't
-            raise ApiError(f"{method} {path}: no reply from Assay ({exc}); it may have "
-                           "been carried out, so look in Assay before trying again") from exc
+            raise ApiError(f"{method} {path}: no reply from Assay ({exc}){_MAYBE_DONE}") from exc
         if response.is_redirect:
             # never followed: a redirected POST could start nothing, or start it twice
             where = response.headers.get("location", "elsewhere")
             raise ApiError(f"{method} {path}: {response.status_code} redirected to {where}; "
                            "give the API's final address with --url", response.status_code)
-        if response.status_code >= 400:
-            raise ApiError(f"{method} {path}: {response.status_code} {_detail(response)}",
-                           response.status_code, transient=_transient(response.status_code))
+        status = response.status_code
+        if status >= 400:
+            message = f"{method} {path}: {status} {_detail(response)}"
+            if method != "GET" and status in _GATEWAY_STATUSES - {429}:
+                # a gateway gave up waiting: the API behind it may have carried it out
+                raise ApiError(message + _MAYBE_DONE, status)
+            raise ApiError(message, status, retries=_retries(status))
         if not response.content:
             raise ApiError(f"{method} {path}: an empty reply — is the URL Assay's API?",
                            response.status_code)
@@ -100,11 +109,12 @@ class AssayClient:
                            response.status_code) from exc
 
     def _pages(self, path: str, params: dict | None = None, limit: int = 100,
-               key: str = "items") -> Iterator[dict]:
+               key: str = "items", time_left: TimeLeft | None = None) -> Iterator[dict]:
+        """Every page, each asking `time_left` afresh."""
         offset = 0
         while True:
-            page = self._request("GET", path, params={**(params or {}),
-                                                      "offset": offset, "limit": limit})
+            page = self._request("GET", path, time_left=time_left,
+                                 params={**(params or {}), "offset": offset, "limit": limit})
             items = page.get(key, [])
             yield from items
             offset += len(items)
@@ -135,36 +145,41 @@ class AssayClient:
     # -- runs --
 
     def start_run(self, scope: str, scope_id: str, replay: str | None = None) -> dict:
+        """`replay`: a past execution of the set or plan."""
         if scope == "test":
-            if replay:
-                raise ValueError("a standalone test has no executions to replay")
             return self._request("POST", f"/runs/standalone/{scope_id}")
         path = f"/runs/{scope}s/{scope_id}"
         if replay:
             path += f"/executions/{replay}"
         return self._request("POST", path)
 
-    def standalone_run(self, test_id: str, run_id: str) -> dict:
-        return self._request("GET", f"/runs/standalone/{test_id}/test-runs/{run_id}")
+    def standalone_run(self, test_id: str, run_id: str,
+                       time_left: TimeLeft | None = None) -> dict:
+        return self._request("GET", f"/runs/standalone/{test_id}/test-runs/{run_id}",
+                             time_left=time_left)
 
-    def execution(self, scope: str, scope_id: str, execution_id: str) -> dict:
-        return self._request("GET", f"/runs/{scope}s/{scope_id}/executions/{execution_id}")
+    def execution(self, scope: str, scope_id: str, execution_id: str,
+                  time_left: TimeLeft | None = None) -> dict:
+        return self._request("GET", f"/runs/{scope}s/{scope_id}/executions/{execution_id}",
+                             time_left=time_left)
 
-    def execution_runs(self, scope: str, scope_id: str, execution_id: str) -> list[dict]:
+    def execution_runs(self, scope: str, scope_id: str, execution_id: str,
+                       time_left: TimeLeft | None = None) -> list[dict]:
         path = f"/runs/{scope}s/{scope_id}/executions/{execution_id}/test-runs"
-        return list(self._pages(path, {"sort": "worst_first"}))
+        return list(self._pages(path, {"sort": "worst_first"}, time_left=time_left))
 
     # -- statistics batches --
 
     def start_batch(self, body: dict) -> dict:
         return self._request("POST", "/statistics/batches", json=body)
 
-    def batch(self, batch_id: str, series: bool = False) -> dict:
-        return self._request("GET", f"/statistics/batches/{batch_id}",
+    def batch(self, batch_id: str, series: bool = False,
+              time_left: TimeLeft | None = None) -> dict:
+        return self._request("GET", f"/statistics/batches/{batch_id}", time_left=time_left,
                              params={"series": str(series).lower()})
 
-    def stop_batch(self, batch_id: str) -> dict:
-        return self._request("POST", f"/statistics/batches/{batch_id}/stop")
+    def stop_batch(self, batch_id: str, time_left: TimeLeft | None = None) -> dict:
+        return self._request("POST", f"/statistics/batches/{batch_id}/stop", time_left=time_left)
 
 
 def _is_uuid(value: str) -> bool:

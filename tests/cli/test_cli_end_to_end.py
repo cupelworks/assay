@@ -19,6 +19,8 @@ from assay_cli.cli import (
     EXIT_INTERRUPTED,
     EXIT_PASSED,
     EXIT_TIMED_OUT,
+    STOP_SECONDS,
+    Cancelled,
     _cancel,
     main,
 )
@@ -389,9 +391,9 @@ class Limits(AssayClient):
         super().__init__(http)
         self.limits = []
 
-    def _request(self, method, path, **kwargs):
-        self.limits.append((method, self._limit))
-        return super()._request(method, path, **kwargs)
+    def _request(self, method, path, time_left=None, **kwargs):
+        self.limits.append((method, path, time_left and time_left()))
+        return super()._request(method, path, time_left=time_left, **kwargs)
 
 
 def test_no_check_waits_past_the_time_left(db, cli):
@@ -402,10 +404,61 @@ def test_no_check_waits_past_the_time_left(db, cli):
     code = cli("run", "test-set", "Smoke", "--timeout", "7", "--interval", "5", client=client)
 
     assert code == EXIT_TIMED_OUT
-    reads = [limit for method, limit in client.limits if method == "GET"]
+    reads = [limit for method, _, limit in client.limits if method == "GET"]
     # at 0s, 7s left; at 5s, 2s left, but a check gets 5s; at 7s, the last one, 5s
     assert reads[-3:] == [7, 5, 5]
-    assert ("POST", None) in client.limits  # starting it isn't limited
+    assert [limit for method, _, limit in client.limits if method == "POST"] == [None]
+
+
+def test_stopping_a_batch_is_quick(db, cli):
+    test = db.test(name="a")
+    cli.worker_running = False
+    client = Limits(db.client)
+
+    code = cli("batch", "test", test["id"], "-s", "binomial_gate", "--timeout", "1",
+               "--stop-on-timeout", client=client)
+
+    assert code == EXIT_TIMED_OUT
+    stops = [limit for _, path, limit in client.limits if path.endswith("/stop")]
+    assert stops == [STOP_SECONDS]
+
+
+@pytest.mark.parametrize("interrupt", [Cancelled("cancelled (SIGTERM)"), KeyboardInterrupt()])
+def test_an_interrupted_stop_keeps_the_steps_own_ending(db, cli, interrupt):
+    test = db.test(name="a")
+    cli.worker_running = False
+    client = Flaky(db.client, lambda method, path: path.endswith("/stop"), interrupt)
+
+    code = cli("batch", "test", test["id"], "-s", "binomial_gate", "--timeout", "1",
+               "--stop-on-timeout", client=client)
+
+    assert code == EXIT_TIMED_OUT
+    assert "Couldn't stop batch" in cli.err.getvalue()
+    assert "(interrupted)" in cli.err.getvalue()
+
+
+def test_a_steady_500_ends_the_wait_after_three_tries(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = Flaky(db.client, _reading_an_execution,
+                   ApiError("GET …: 500 A bug", 500, retries=3), times=1000)
+
+    assert cli("run", "test-set", "Smoke", "--timeout", "0", client=client) == EXIT_ERROR
+    assert cli.err.getvalue().count("500 A bug; trying again") == 3
+
+
+def test_a_report_that_cant_be_written_keeps_the_outcome(db, cli, tmp_path):
+    db.test_set("Smoke", [db.test(name="bad", checks=[MISSES])])
+    summary = tmp_path / "summary.md"
+
+    # a folder can't be written as a file
+    code = cli("run", "test-set", "Smoke", "--junit", str(tmp_path),
+               env={"GITHUB_STEP_SUMMARY": str(summary)})
+
+    assert code == EXIT_ERROR
+    assert cli.out.getvalue().startswith("FAILED: test set 'Smoke'")
+    assert f"couldn't write {tmp_path}:" in cli.err.getvalue()
+    assert "JUnit report" not in cli.err.getvalue()
+    assert "❌ Assay: test set `Smoke`" in summary.read_text()
 
 
 class CancelOn(io.StringIO):

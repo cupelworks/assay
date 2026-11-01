@@ -3,6 +3,7 @@
 """The gate's decisions on the API's replies, and the command line's parsing:
 the cases a real batch is slow or awkward to bring about."""
 import io
+import math
 import tomllib
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -170,12 +171,22 @@ def _client(reply):
     return AssayClient(httpx.Client(base_url="http://assay", transport=httpx.MockTransport(reply)))
 
 
-@pytest.mark.parametrize(("status", "transient"), [(502, True), (503, True), (429, True),
-                                                   (500, True), (401, False), (404, False)])
-def test_a_passing_failure_is_marked_transient(status, transient):
+@pytest.mark.parametrize(("status", "retries"), [
+    (502, math.inf), (503, math.inf), (504, math.inf), (429, math.inf),
+    (500, 3),  # a database busy for a moment passes; a bug doesn't
+    (501, 0), (505, 0), (401, 0), (404, 0)])
+def test_how_often_a_failed_read_is_worth_trying_again(status, retries):
     with pytest.raises(ApiError) as raised:
         _client(lambda request: httpx.Response(status)).health()
-    assert raised.value.transient is transient
+    assert raised.value.retries == retries
+    assert raised.value.transient is (retries > 0)
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_a_gateways_failure_to_start_may_have_started(status):
+    with pytest.raises(ApiError, match="it may have been carried out") as raised:
+        _client(lambda request: httpx.Response(status)).start_batch({})
+    assert not raised.value.transient
 
 
 def test_an_unreachable_api_is_transient():
@@ -269,20 +280,32 @@ def test_a_start_that_never_left_is_unreachable():
         _client(unreachable).start_batch({})
 
 
-def test_within_caps_every_step_of_a_request():
+def test_the_time_left_caps_every_step_of_a_request():
     seen = []
 
     def reply(request):
         seen.append(request.extensions["timeout"])
-        return httpx.Response(200, json={"status": "ready"})
+        return httpx.Response(200, json={"id": "b"})
 
     client = _client(reply)
-    with client.within(2):
-        client.health()
-    client.health()
+    client.batch("b", time_left=lambda: 2)
+    client.batch("b")
 
     assert seen[0] == {"connect": 2, "read": 2, "write": 2, "pool": 2}
-    assert seen[1]["read"] == 5  # httpx's own default, untouched outside
+    assert seen[1]["read"] == 5  # httpx's own default, untouched without
+
+
+def test_each_page_asks_the_time_left_afresh():
+    clock = {"now": 0}
+
+    def page(request):
+        clock["now"] += 3  # each page takes 3s
+        return httpx.Response(200, json={"items": [{"id": "r"}] * 100, "total": 500})
+
+    with pytest.raises(ApiError, match="out of time, not sent") as raised:
+        _client(page).execution_runs("test-set", "s", "e", lambda: 7 - clock["now"])
+    assert clock["now"] == 9  # pages at 0s, 3s and 6s; none at 9s
+    assert raised.value.transient
 
 
 def test_command_line_mistakes_are_caught_before_any_request():
@@ -295,6 +318,12 @@ def test_command_line_mistakes_are_caught_before_any_request():
         with pytest.raises(SystemExit) as raised:
             main(argv, client=Untouched(), env={}, out=io.StringIO(), err=io.StringIO())
         assert raised.value.code == EXIT_ERROR
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e400", "[NaN]"])
+def test_a_parameter_json_cant_send_is_refused(value):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["batch", "test", "x", "-s", "t", "-p", f"target={value}"])
 
 
 def test_parameters_are_read_as_json_when_they_parse():

@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from assay_cli import __version__, report
-from assay_cli.client import SCOPE_NOUNS, SCOPES, ApiError, AssayClient
+from assay_cli.client import SCOPE_NOUNS, SCOPES, ApiError, AssayClient, TimeLeft
 from assay_cli.gate import (
     BATCH_FAIL_ON,
     BATCH_FAIL_ON_CHOICES,
@@ -44,6 +44,8 @@ RUNS_READ_SECONDS = 60
 """After an execution finishes, how long reading its runs is tried again."""
 LAST_CHECK_SECONDS = 5
 """A check made at the deadline still gets this long to be answered."""
+STOP_SECONDS = 10
+"""How long stopping a batch may take: the CI system may kill the step soon after."""
 
 URL_ENV = "ASSAY_API_URL"
 HEADERS_ENV = "ASSAY_API_HEADERS"
@@ -200,9 +202,14 @@ def _parameter(pair: str) -> tuple[str, object]:
     if not sep or not key.strip():
         raise argparse.ArgumentTypeError(f"expected KEY=VALUE (got {pair!r})")
     try:
-        return key.strip(), json.loads(value)
+        parsed = json.loads(value)
     except ValueError:
         return key.strip(), value
+    try:
+        json.dumps(parsed, allow_nan=False)
+    except ValueError:  # NaN, Infinity, 1e400: JSON can't send them
+        raise argparse.ArgumentTypeError(f"{pair!r}: not a finite number") from None
+    return key.strip(), parsed
 
 
 def _headers(args, env) -> dict[str, str]:
@@ -268,18 +275,19 @@ class Runner:
             return self._started("run" if args.scope == "test" else "execution", run_id, scope)
 
         if args.scope == "test":
-            details = self._wait(lambda: self.client.standalone_run(target["id"], run_id),
+            details = self._wait(lambda left: self.client.standalone_run(target["id"], run_id,
+                                                                         left),
                                  lambda d: d["status"] not in ("Pending", "Running"),
                                  lambda d: d["status"])
             outcome = run_outcome(scope, details, args.fail_on)
         else:
             details = self._wait(
-                lambda: self.client.execution(args.scope, target["id"], run_id),
+                lambda left: self.client.execution(args.scope, target["id"], run_id, left),
                 lambda d: run_finished(d["runs"]),
                 lambda d: _progress(d["runs"], d.get("run_count")))
             # finished: its own time to read the runs, and a failure is an error
             runs = self._read(
-                lambda: self.client.execution_runs(args.scope, target["id"], run_id),
+                lambda left: self.client.execution_runs(args.scope, target["id"], run_id, left),
                 self.clock() + RUNS_READ_SECONDS,
                 lambda exc: ApiError(f"It finished, but its runs couldn't be read: {exc}",
                                      exc.status_code))
@@ -307,8 +315,8 @@ class Runner:
                      f"{progress.get('runs_total', '?')} runs.")
             if args.no_wait:
                 return self._started("batch", batch_id, {"kind": args.scope, **target})
-            batch = self._wait(lambda: self.client.batch(batch_id), batch_finished,
-                               _batch_progress)
+            batch = self._wait(lambda left: self.client.batch(batch_id, time_left=left),
+                               batch_finished, _batch_progress)
         except (Exception, KeyboardInterrupt):
             # however it ends without a result once started: timeout, cancel, any error
             if args.stop_on_timeout and batch_id:
@@ -317,11 +325,13 @@ class Runner:
         return self._report(batch_outcome(batch, args.fail_on))
 
     def _stop(self, batch_id: str) -> None:
-        """Best effort: a failed stop is reported, and the wait's own ending kept."""
+        """Best effort, and quick: a failed or interrupted stop is reported, and the
+        step's own ending kept."""
         try:
-            self.client.stop_batch(batch_id)
-        except ApiError as exc:
-            self.say(f"Couldn't stop batch {batch_id} ({exc}): its remaining runs may "
+            self.client.stop_batch(batch_id, self._time_left(self.clock() + STOP_SECONDS))
+        except (ApiError, Cancelled, KeyboardInterrupt) as exc:
+            reason = exc if isinstance(exc, ApiError) else "interrupted"
+            self.say(f"Couldn't stop batch {batch_id} ({reason}): its remaining runs may "
                      "still run; stop it in Assay.")
         else:
             self.say(f"Stopped batch {batch_id}: its remaining runs are cancelled.")
@@ -347,22 +357,27 @@ class Runner:
 
     def _read(self, read, deadline: float | None,
               out_of_time: Callable[[ApiError], Exception]):
-        """A read that changes nothing, so a failure that may pass is tried again
-        until the deadline; any other refusal ends it. Each try waits no longer than
-        the time left (a check at the deadline gets LAST_CHECK_SECONDS)."""
+        """A read that changes nothing, so a failure that may pass is tried again, as
+        many times in a row as it says, until the deadline; any other refusal ends it.
+        Each try, all its pages included, ends by the deadline (a try at the deadline
+        gets LAST_CHECK_SECONDS)."""
+        failures = 0
         while True:
-            left = None if deadline is None else max(deadline - self.clock(),
-                                                      LAST_CHECK_SECONDS)
+            ends = None if deadline is None else max(deadline,
+                                                     self.clock() + LAST_CHECK_SECONDS)
             try:
-                with self.client.within(left):
-                    return read()
+                return read(self._time_left(ends))
             except ApiError as exc:
-                if not exc.transient:
+                failures += 1
+                if failures > exc.retries:
                     raise
                 if self._past(deadline):
                     raise out_of_time(exc) from exc
                 self.say(f"  {exc}; trying again")
                 self._pause(deadline)
+
+    def _time_left(self, ends: float | None) -> TimeLeft | None:
+        return None if ends is None else lambda: ends - self.clock()
 
     def _past(self, deadline: float | None) -> bool:
         return deadline is not None and self.clock() >= deadline
@@ -382,22 +397,44 @@ class Runner:
         return EXIT_PASSED
 
     def _report(self, outcome: Outcome) -> int:
-        # the files first: they're what the CI system keeps
+        # the files first: they're what the CI system keeps; one that can't be
+        # written leaves the others and the outcome, and makes the step an error
+        unwritten = {}
         if self.args.junit:
-            self.args.junit.parent.mkdir(parents=True, exist_ok=True)
-            self.args.junit.write_bytes(report.junit(outcome))
+            junit = report.junit(outcome)
+            unwritten[self.args.junit] = _write(self.args.junit,
+                                                lambda path: path.write_bytes(junit))
         given = (self.args.markdown, self.env.get("GITHUB_STEP_SUMMARY"))
-        for path in dict.fromkeys(Path(p).resolve() for p in given if p):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as summary:
-                summary.write(report.markdown(outcome))
+        summary = report.markdown(outcome)
+        for target in dict.fromkeys(Path(p).resolve() for p in given if p):
+            unwritten[target] = _write(target, lambda path: _append(path, summary))
+        unwritten = {path: reason for path, reason in unwritten.items() if reason}
         if self.args.json:
             print(json.dumps(outcome.to_json(), indent=2), file=self.out)
         else:
             print(report.text(outcome), file=self.out)
-        if self.args.junit:
+        if self.args.junit and self.args.junit not in unwritten:
             self.say(f"JUnit report: {self.args.junit}")
+        for path, reason in unwritten.items():
+            self.say(f"assay: couldn't write {path}: {reason}")
+        if unwritten:
+            return EXIT_ERROR
         return EXIT_PASSED if outcome.passed else EXIT_FAILED
+
+
+def _write(path: Path, write: Callable[[Path], object]) -> str:
+    """"" once written, else why it couldn't be."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write(path)
+    except OSError as exc:
+        return exc.strerror or str(exc)
+    return ""
+
+
+def _append(path: Path, text: str) -> None:
+    with path.open("a", encoding="utf-8") as file:
+        file.write(text)
 
 
 def _progress(counts: dict, total: int | None) -> str:
