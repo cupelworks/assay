@@ -1,6 +1,6 @@
 [project]
 name = "assay-cli"
-version = "0.1.0"
+dynamic = ["version"]
 authors = [{ name = "Francesco Campanile" }]
 description = "Assay's command line: run Assay's tests, test sets, plans and statistics batches from a CI/CD pipeline, and fail the step when they fail."
 readme = "README.md"
@@ -17,6 +17,9 @@ assay = "assay_cli.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/assay_cli/__init__.py"  # the one place the version is written
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/assay_cli"]

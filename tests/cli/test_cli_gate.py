@@ -3,6 +3,8 @@
 """The gate's decisions on the API's replies, and the command line's parsing:
 the cases a real batch is slow or awkward to bring about."""
 import io
+import tomllib
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -139,11 +141,11 @@ def test_same_named_tests_in_an_execution_get_distinct_junit_names():
     scope = {"kind": "test-plan", "id": "p", "name": "Release"}
     details = {"id": "x", "run_count": 3,
                "runs": {"Green": 2, "Red": 1, "Amber": 0, "NotRan": 0}}
-    runs = [{"id": "r1", "test_set_entry_id": "e1", "test_name": "Reset a password",
+    runs = [{"id": "r1", "test_set_entry_id": {"id": "e1"}, "test_name": "Reset a password",
              "status": "Red", "checks": {"not_met": ["Contains"]}},
-            {"id": "r2", "test_set_entry_id": "e2", "test_name": "Reset a password",
+            {"id": "r2", "test_set_entry_id": {"id": "e2"}, "test_name": "Reset a password",
              "status": "Green", "checks": {"not_met": []}},
-            {"id": "r3", "test_set_entry_id": "e3", "test_name": "Log in",
+            {"id": "r3", "test_set_entry_id": {"id": "e3"}, "test_name": "Log in",
              "status": "Green", "checks": {"not_met": []}}]
 
     outcome = execution_outcome(scope, details, runs)
@@ -155,8 +157,9 @@ def test_same_named_tests_in_an_execution_get_distinct_junit_names():
 
 @pytest.mark.parametrize("option", ["--interval", "--timeout", "--http-timeout"])
 def test_waiting_options_refuse_impossible_values(option):
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(["run", "test", "x", option, "-1"])
+    for value in ("-1", "inf", "nan"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["run", "test", "x", option, value])
     if option != "--timeout":  # 0 waits forever
         with pytest.raises(SystemExit):
             build_parser().parse_args(["run", "test", "x", option, "0"])
@@ -168,8 +171,8 @@ def _client(reply):
 
 
 @pytest.mark.parametrize(("status", "transient"), [(502, True), (503, True), (429, True),
-                                                   (500, False), (404, False)])
-def test_a_gateways_passing_failure_is_marked_transient(status, transient):
+                                                   (500, True), (401, False), (404, False)])
+def test_a_passing_failure_is_marked_transient(status, transient):
     with pytest.raises(ApiError) as raised:
         _client(lambda request: httpx.Response(status)).health()
     assert raised.value.transient is transient
@@ -234,3 +237,73 @@ def test_a_redirect_is_named_never_followed():
 def test_an_empty_reply_is_an_error():
     with pytest.raises(ApiError, match="an empty reply"):
         _client(lambda request: httpx.Response(200)).health()
+
+
+def test_a_header_replaces_one_of_the_same_name_whatever_its_case():
+    args = build_parser().parse_args(["health", "--header", "authorization: Bearer new"])
+    headers = _headers(args, {"ASSAY_API_HEADERS": '{"Authorization": "Bearer old"}'})
+    assert headers == {"authorization": "Bearer new"}
+
+
+def _sent_but_unanswered(request):
+    raise httpx.ReadTimeout("timed out", request=request)
+
+
+def test_a_start_with_no_reply_may_have_started_and_is_never_retried():
+    with pytest.raises(ApiError, match="it may have been carried out") as raised:
+        _client(_sent_but_unanswered).start_batch({})
+    assert not raised.value.transient
+
+
+def test_a_read_with_no_reply_is_tried_again():
+    with pytest.raises(ApiError, match="no reply from Assay") as raised:
+        _client(_sent_but_unanswered).health()
+    assert raised.value.transient
+
+
+def test_a_start_that_never_left_is_unreachable():
+    def unreachable(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    with pytest.raises(ApiError, match="couldn't reach Assay"):
+        _client(unreachable).start_batch({})
+
+
+def test_within_caps_every_step_of_a_request():
+    seen = []
+
+    def reply(request):
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, json={"status": "ready"})
+
+    client = _client(reply)
+    with client.within(2):
+        client.health()
+    client.health()
+
+    assert seen[0] == {"connect": 2, "read": 2, "write": 2, "pool": 2}
+    assert seen[1]["read"] == 5  # httpx's own default, untouched outside
+
+
+def test_command_line_mistakes_are_caught_before_any_request():
+    class Untouched:
+        def __getattr__(self, name):
+            raise AssertionError(f"the API was called: {name}")
+
+    for argv in (["run", "test", "x", "--replay", "e"],
+                 ["batch", "test", "x", "-s", "binomial_gate", "-p", "target"]):
+        with pytest.raises(SystemExit) as raised:
+            main(argv, client=Untouched(), env={}, out=io.StringIO(), err=io.StringIO())
+        assert raised.value.code == EXIT_ERROR
+
+
+def test_parameters_are_read_as_json_when_they_parse():
+    args = build_parser().parse_args(["batch", "test", "x", "-s", "t", "-p", "target=0.9",
+                                      "-p", "label=a=b", "-p", "flag=true"])
+    assert dict(args.param) == {"target": 0.9, "label": "a=b", "flag": True}
+
+
+def test_the_version_is_written_once():
+    project = tomllib.loads((Path(__file__).parents[2] / "cli" / "pyproject.toml").read_text())
+    assert "version" not in project["project"] and "version" in project["project"]["dynamic"]
+    assert project["tool"]["hatch"]["version"]["path"] == "src/assay_cli/__init__.py"

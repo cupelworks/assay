@@ -4,6 +4,7 @@
 0 or 1 so a pipeline step passes or fails with it."""
 import argparse
 import json
+import math
 import os
 import signal
 import sys
@@ -41,6 +42,8 @@ EXIT_CANCELLED = 143
 
 RUNS_READ_SECONDS = 60
 """After an execution finishes, how long reading its runs is tried again."""
+LAST_CHECK_SECONDS = 5
+"""A check made at the deadline still gets this long to be answered."""
 
 URL_ENV = "ASSAY_API_URL"
 HEADERS_ENV = "ASSAY_API_HEADERS"
@@ -99,7 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="A batch test's id from GET /statistics/tests.")
     batch.add_argument("--times", "-n", type=_positive_int, metavar="N",
                        help="Times to run the scope (default: the catalogue's suggestion).")
-    batch.add_argument("--param", "-p", action="append", default=[], metavar="KEY=VALUE",
+    batch.add_argument("--param", "-p", action="append", default=[], type=_parameter,
+                       metavar="KEY=VALUE",
                        help="A parameter of the statistical test, e.g. target=0.9; "
                             "repeatable. VALUE is read as JSON when it parses.")
     batch.add_argument("--note", help="Kept with the batch, e.g. the commit or PR it tests.")
@@ -178,33 +182,39 @@ def _positive_int(value: str) -> int:
 
 def _positive_float(value: str) -> float:
     number = float(value)
-    if not number > 0:  # NaN too
-        raise argparse.ArgumentTypeError("must be more than 0")
+    if not (number > 0 and math.isfinite(number)):  # NaN too
+        raise argparse.ArgumentTypeError("must be a number more than 0")
     return number
 
 
 def _non_negative_float(value: str) -> float:
     number = float(value)
-    if not number >= 0:
-        raise argparse.ArgumentTypeError("must be 0 or more")
+    if not (number >= 0 and math.isfinite(number)):
+        raise argparse.ArgumentTypeError("must be a number, 0 or more")
     return number
 
 
-def _parameters(pairs: list[str]) -> dict:
-    parameters = {}
-    for pair in pairs:
-        key, sep, value = pair.partition("=")
-        if not sep or not key.strip():
-            raise ApiError(f"--param {pair!r}: expected KEY=VALUE")
-        try:
-            parameters[key.strip()] = json.loads(value)
-        except ValueError:
-            parameters[key.strip()] = value
-    return parameters
+def _parameter(pair: str) -> tuple[str, object]:
+    """VALUE as JSON when it parses (`0.9`, `true`), else as text."""
+    key, sep, value = pair.partition("=")
+    if not sep or not key.strip():
+        raise argparse.ArgumentTypeError(f"expected KEY=VALUE (got {pair!r})")
+    try:
+        return key.strip(), json.loads(value)
+    except ValueError:
+        return key.strip(), value
 
 
 def _headers(args, env) -> dict[str, str]:
+    """$ASSAY_API_HEADERS, then each --header: a later one replaces an earlier one
+    of the same name, whatever its case, as HTTP names are."""
     headers = {}
+
+    def put(name: str, value: str) -> None:
+        for given in [given for given in headers if given.lower() == name.lower()]:
+            del headers[given]
+        headers[name] = value
+
     if env.get(HEADERS_ENV):
         try:
             loaded = json.loads(env[HEADERS_ENV])
@@ -212,12 +222,13 @@ def _headers(args, env) -> dict[str, str]:
             raise ApiError(f"${HEADERS_ENV} isn't a JSON object: {exc}") from exc
         if not isinstance(loaded, dict):
             raise ApiError(f"${HEADERS_ENV} must be a JSON object of header names to values")
-        headers.update({str(k): str(v) for k, v in loaded.items()})
+        for name, value in loaded.items():
+            put(str(name), str(value))
     for header in [*args.header, *(getattr(args, "header_after", None) or [])]:
         name, sep, value = header.partition(":")
         if not sep or not name.strip():
             raise ApiError(f"--header {header!r}: expected 'NAME: VALUE'")
-        headers[name.strip()] = value.strip()
+        put(name.strip(), value.strip())
     return headers
 
 
@@ -280,26 +291,27 @@ class Runner:
         target = self.client.resolve(args.scope, args.ref)
         body = {f"{args.scope.replace('-', '_')}_id": target["id"],
                 "statistical_test": args.statistical_test,
-                "parameters": _parameters(args.param)}
+                "parameters": dict(args.param)}
         if args.times:
             body["times"] = args.times
         if args.note:
             body["note"] = args.note
-        started = self.client.start_batch(body)
-        batch_id = str(started["id"])
-        progress = started.get("progress") or {}
-        self.say(f"Started batch {batch_id} of {SCOPE_NOUNS[args.scope]} "
-                 f"{target['name']!r}: {args.statistical_test}, "
-                 f"{progress.get('times_requested', '?')} times, "
-                 f"{progress.get('runs_total', '?')} runs.")
-        if args.no_wait:
-            return self._started("batch", batch_id, {"kind": args.scope, **target})
+        batch_id = None
         try:
+            started = self.client.start_batch(body)
+            batch_id = str(started["id"])
+            progress = started.get("progress") or {}
+            self.say(f"Started batch {batch_id} of {SCOPE_NOUNS[args.scope]} "
+                     f"{target['name']!r}: {args.statistical_test}, "
+                     f"{progress.get('times_requested', '?')} times, "
+                     f"{progress.get('runs_total', '?')} runs.")
+            if args.no_wait:
+                return self._started("batch", batch_id, {"kind": args.scope, **target})
             batch = self._wait(lambda: self.client.batch(batch_id), batch_finished,
                                _batch_progress)
         except (Exception, KeyboardInterrupt):
-            # however the wait ends without a result: timeout, cancel, any error
-            if args.stop_on_timeout:
+            # however it ends without a result once started: timeout, cancel, any error
+            if args.stop_on_timeout and batch_id:
                 self._stop(batch_id)
             raise
         return self._report(batch_outcome(batch, args.fail_on))
@@ -336,13 +348,16 @@ class Runner:
     def _read(self, read, deadline: float | None,
               out_of_time: Callable[[ApiError], Exception]):
         """A read that changes nothing, so a failure that may pass is tried again
-        until the deadline: the network, a gateway, the API's own 5xx (a database
-        busy for a moment). Any other refusal ends it."""
+        until the deadline; any other refusal ends it. Each try waits no longer than
+        the time left (a check at the deadline gets LAST_CHECK_SECONDS)."""
         while True:
+            left = None if deadline is None else max(deadline - self.clock(),
+                                                      LAST_CHECK_SECONDS)
             try:
-                return read()
+                with self.client.within(left):
+                    return read()
             except ApiError as exc:
-                if not (exc.transient or (exc.status_code or 0) >= 500):
+                if not exc.transient:
                     raise
                 if self._past(deadline):
                     raise out_of_time(exc) from exc
@@ -367,19 +382,21 @@ class Runner:
         return EXIT_PASSED
 
     def _report(self, outcome: Outcome) -> int:
-        if self.args.json:
-            print(json.dumps(outcome.to_json(), indent=2), file=self.out)
-        else:
-            print(report.text(outcome), file=self.out)
+        # the files first: they're what the CI system keeps
         if self.args.junit:
             self.args.junit.parent.mkdir(parents=True, exist_ok=True)
             self.args.junit.write_bytes(report.junit(outcome))
-            self.say(f"JUnit report: {self.args.junit}")
         given = (self.args.markdown, self.env.get("GITHUB_STEP_SUMMARY"))
         for path in dict.fromkeys(Path(p).resolve() for p in given if p):
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as summary:
                 summary.write(report.markdown(outcome))
+        if self.args.json:
+            print(json.dumps(outcome.to_json(), indent=2), file=self.out)
+        else:
+            print(report.text(outcome), file=self.out)
+        if self.args.junit:
+            self.say(f"JUnit report: {self.args.junit}")
         return EXIT_PASSED if outcome.passed else EXIT_FAILED
 
 
@@ -402,13 +419,25 @@ def _batch_progress(batch: dict) -> str:
     return line
 
 
+def _utf8(stream):
+    """The report's marks and any test's name, whatever the locale: a pipe on a
+    Windows runner is cp1252 otherwise, and can't hold them."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure and (stream.encoding or "").lower().replace("-", "") != "utf8":
+        reconfigure(encoding="utf-8", errors="replace")
+    return stream
+
+
 def main(argv: list[str] | None = None, *, client: AssayClient | None = None,
          env=None, out=None, err=None, sleep: Callable[[float], None] = time.sleep,
          clock: Callable[[], float] = time.monotonic) -> int:
     env = os.environ if env is None else env
-    out = out or sys.stdout
-    err = err or sys.stderr
-    args = build_parser().parse_args(argv)
+    out = out or _utf8(sys.stdout)
+    err = err or _utf8(sys.stderr)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if getattr(args, "replay", None) and args.scope == "test":
+        parser.error("--replay: a standalone test has no executions to replay")
     owned = client is None
     # a CI system cancels a job with SIGTERM: end the wait like Ctrl-C does, so a
     # batch can still be stopped (signals are only handled on the main thread)

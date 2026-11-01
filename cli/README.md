@@ -143,7 +143,7 @@ assay --url https://assay.internal.example.com health
   ```
 
   Headers from `--header` are added to those in `ASSAY_API_HEADERS`; when both give the
-  same name, `--header` wins. Keep tokens in your CI system's secrets, never in the
+  same name, in any case (`authorization` and `Authorization`), `--header` wins. Keep tokens in your CI system's secrets, never in the
   pipeline file.
 
 ## Name what to run
@@ -243,7 +243,8 @@ application again, so their answers can differ from the original run's.
 - The execution must belong to the set or plan you name.
 - Find execution ids with `GET /runs/test-sets/{id}/executions` (or `/runs/test-plans/…`),
   in the UI, or in the CLI's output.
-- A standalone test has no executions, so `--replay` with `test` is an error.
+- A standalone test has no executions, so `--replay` with `test` is an error, caught
+  before anything is sent to Assay.
 
 ### All options
 
@@ -300,8 +301,9 @@ test can conclude at (`floor`).
 
 - **`--param KEY=VALUE`**, repeatable, sets one of the test's parameters. VALUE is read as
   JSON when it can be (`0.9` is a number, `true` a boolean); otherwise it's text.
-  Parameters you leave out take their defaults. A value out of range is refused (exit 2,
-  with the API's reason).
+  Parameters you leave out take their defaults. One without `=` is refused before anything
+  is sent (exit 2); a value out of range is refused by Assay (exit 2, with the API's
+  reason).
 - **`--times N`** is how many times to run the scope. Left out, Assay uses the catalogue's
   suggestion for that test and its parameters. Fewer than the test's floor is refused:
   with that few runs it could never conclude anything.
@@ -353,8 +355,8 @@ assay batch test-set "Smoke" -s binomial_gate --fail-on fail,inconclusive
 
 If the step stops waiting before the batch's result, the batch normally carries on in Assay
 and you keep paying for its runs. With `--stop-on-timeout`, the CLI stops it first: runs not
-yet started are cancelled, and the batch ends `Incomplete`. It does so however the wait
-ends early:
+yet started are cancelled, and the batch ends `Incomplete`. It does so however the step
+ends early, from the moment the batch is started:
 
 - `--timeout` is reached: the step still exits 3 (timed out);
 - the CI system cancels the job (it sends SIGTERM): exit 143;
@@ -387,7 +389,7 @@ Per-check targets and leaving checks out of a batch are possible through the API
 | Option | Default | What it does |
 |---|---|---|
 | `--timeout SECONDS` | `3600` (an hour) | Give up waiting after this long and exit 3. `0` waits forever |
-| `--interval SECONDS` | `5` | Time between two checks on its progress; more than 0 |
+| `--interval SECONDS` | `5` | Time between two checks on its progress; a number more than 0 |
 | `--no-wait` | | Start it, print its id, and exit 0 straight away |
 
 - **Progress** is printed to stderr each time it changes: runs finished by outcome for a
@@ -395,12 +397,14 @@ Per-check targets and leaving checks out of a batch are possible through the API
 - **Set the CLI's `--timeout` below your CI job's own time limit,** so the CLI reports the
   timeout (and can stop a batch) before the CI system kills the step.
 - **A passing failure doesn't end the wait.** When a check on its progress can't reach the
-  API, or gets a `429` or any `5xx` (a gateway, or the API's database busy for a moment),
+  API, gets no reply, or gets a `429` or any `5xx` (a gateway, or the API's database busy for a moment),
   the CLI says so and tries again after `--interval`, until `--timeout`. Any other refusal,
   such as a `401`, ends it with exit 2. Once an execution has finished, reading its runs is
   tried again for up to a minute, whatever `--timeout` is left.
-- **The last check comes on time.** The CLI never sleeps past `--timeout`, so it reports the
-  timeout (and stops a batch) when you said.
+- **The last check comes on time.** The CLI never sleeps past `--timeout`, and no check
+  waits longer than the time left (or 5 seconds, for the check at the deadline), whatever
+  `--http-timeout` is. So the step reports the timeout (and stops a batch) at most about 5
+  seconds after `--timeout`.
 - **Timing out stops waiting, not the work.** The runs carry on in Assay and their results
   are kept there. Only a batch with `--stop-on-timeout` is stopped.
 - **`--no-wait`** prints the new execution's, run's or batch's id on stdout (with `--json`:
@@ -410,7 +414,8 @@ Per-check targets and leaving checks out of a batch are possible through the API
 ## Output
 
 The outcome is printed on **stdout**. Progress, "Started …" lines and errors go to
-**stderr**, so you can capture or pipe the outcome on its own.
+**stderr**, so you can capture or pipe the outcome on its own. Both are UTF-8 on every
+runner, Windows included. The report files are written before the outcome is printed.
 
 ### Text (the default)
 
@@ -713,6 +718,7 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 | You see | What it means, and what to do |
 |---|---|
 | `give the API's URL with --url or $ASSAY_API_URL` | Set one of them |
+| `POST …: no reply from Assay (…); it may have been carried out …` | Assay got the request but didn't answer within `--http-timeout`: the run or batch may have started, and the CLI has no id for it. Look in Assay's lists before running it again (and stop a batch there if needed). Raise `--http-timeout` if the API is slow |
 | `couldn't reach Assay (…)` | Wrong URL, or the runner can't reach the network the API is in: see [Before you start](#before-you-start). Check it with `curl $ASSAY_API_URL/health` from the runner |
 | `301 redirected to …` (or `302`, `307`, `308`) | Give the address it names with `--url`: the CLI never follows a redirect, so a run is never started twice or not at all |
 | `an empty reply — is the URL Assay's API?` | As below |

@@ -4,6 +4,7 @@
 start a run or a statistics batch, read how it stands, list its runs."""
 import uuid
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
@@ -16,13 +17,20 @@ _LIST_KEYS = {"test": "test_cases"}
 """Where a list's items are, when not under `items`."""
 SCOPE_NOUNS = {"test": "test", "test-set": "test set", "test-plan": "test plan"}
 """Each scope as a sentence spells it."""
-_TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
-"""Replies a gateway or a busy API gives in passing: worth asking again."""
+_NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+"""Failures before the request left: Assay never saw it."""
+
+
+def _transient(status: int) -> bool:
+    """Replies a gateway or a busy API gives in passing (a database busy for a
+    moment): worth asking again."""
+    return status == 429 or status >= 500
 
 
 class ApiError(Exception):
-    """The API refused a request, or couldn't be reached. `transient`: the network
-    or a gateway failed in passing, so the same request may succeed later."""
+    """The API refused a request, or couldn't be reached. `transient`: the network,
+    a gateway or the API failed in passing (unreachable, 429, any 5xx), so the same
+    read may succeed later."""
 
     def __init__(self, message: str, status_code: int | None = None,
                  transient: bool = False):
@@ -34,6 +42,7 @@ class ApiError(Exception):
 class AssayClient:
     def __init__(self, http: httpx.Client):
         self.http = http
+        self._limit: float | None = None
 
     @classmethod
     def connect(cls, base_url: str, headers: dict[str, str] | None = None,
@@ -44,14 +53,35 @@ class AssayClient:
     def close(self) -> None:
         self.http.close()
 
+    @contextmanager
+    def within(self, seconds: float | None):
+        """Requests made inside wait at most `seconds` for each step (connecting,
+        each read), however long --http-timeout is; None: no limit of its own."""
+        self._limit = seconds
+        try:
+            yield self
+        finally:
+            self._limit = None
+
     # -- plumbing --
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
+        if self._limit is not None:
+            kwargs["timeout"] = httpx.Timeout(**{
+                step: self._limit if limit is None else min(limit, self._limit)
+                for step, limit in self.http.timeout.as_dict().items()})
         try:
             response = self.http.request(method, path, **kwargs)
-        except httpx.HTTPError as exc:
+        except _NOT_SENT as exc:
             raise ApiError(f"{method} {path}: couldn't reach Assay ({exc})",
                            transient=True) from exc
+        except httpx.HTTPError as exc:
+            if method == "GET":
+                raise ApiError(f"{method} {path}: no reply from Assay ({exc})",
+                               transient=True) from exc
+            # sent, so Assay may have acted on it: never assume it didn't
+            raise ApiError(f"{method} {path}: no reply from Assay ({exc}); it may have "
+                           "been carried out, so look in Assay before trying again") from exc
         if response.is_redirect:
             # never followed: a redirected POST could start nothing, or start it twice
             where = response.headers.get("location", "elsewhere")
@@ -59,8 +89,7 @@ class AssayClient:
                            "give the API's final address with --url", response.status_code)
         if response.status_code >= 400:
             raise ApiError(f"{method} {path}: {response.status_code} {_detail(response)}",
-                           response.status_code,
-                           transient=response.status_code in _TRANSIENT_STATUSES)
+                           response.status_code, transient=_transient(response.status_code))
         if not response.content:
             raise ApiError(f"{method} {path}: an empty reply — is the URL Assay's API?",
                            response.status_code)
@@ -108,7 +137,7 @@ class AssayClient:
     def start_run(self, scope: str, scope_id: str, replay: str | None = None) -> dict:
         if scope == "test":
             if replay:
-                raise ApiError("A standalone test has no executions to replay.")
+                raise ValueError("a standalone test has no executions to replay")
             return self._request("POST", f"/runs/standalone/{scope_id}")
         path = f"/runs/{scope}s/{scope_id}"
         if replay:

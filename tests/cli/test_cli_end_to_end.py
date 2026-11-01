@@ -7,6 +7,7 @@ import io
 import json
 import os
 import signal
+import sys
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -22,6 +23,10 @@ from assay_cli.cli import (
     main,
 )
 from assay_cli.client import ApiError, AssayClient
+
+# the in-process client ignores each request's own timeout, which the waits pass
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:You should not use the 'timeout' argument:DeprecationWarning")
 
 PASSES = {"name": "Contains", "config": {"substring": "answer"}}
 MISSES = {"name": "Contains", "label": "Misses", "config": {"substring": "absent"}}
@@ -271,7 +276,8 @@ def test_a_gateway_down_until_the_deadline_times_out(db, cli):
 
 def test_the_apis_own_5xx_while_waiting_is_tried_again(db, cli):
     db.test_set("Smoke", [db.test(name="a")])
-    client = Flaky(db.client, _reading_an_execution, ApiError("GET …: 500 Locked", 500))
+    client = Flaky(db.client, _reading_an_execution, ApiError("GET …: 500 Locked", 500,
+                                                                         transient=True))
 
     assert cli("run", "test-set", "Smoke", client=client) == EXIT_PASSED
     assert "500 Locked; trying again" in cli.err.getvalue()
@@ -374,3 +380,72 @@ def test_the_markdown_summary_creates_its_folder_and_is_written_once(db, cli, tm
 
     assert code == EXIT_PASSED, cli.err.getvalue()
     assert summary.read_text().count("### ✅ Assay: test set `Smoke`") == 1
+
+
+class Limits(AssayClient):
+    """Records how long each request may wait."""
+
+    def __init__(self, http):
+        super().__init__(http)
+        self.limits = []
+
+    def _request(self, method, path, **kwargs):
+        self.limits.append((method, self._limit))
+        return super()._request(method, path, **kwargs)
+
+
+def test_no_check_waits_past_the_time_left(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    cli.worker_running = False
+    client = Limits(db.client)
+
+    code = cli("run", "test-set", "Smoke", "--timeout", "7", "--interval", "5", client=client)
+
+    assert code == EXIT_TIMED_OUT
+    reads = [limit for method, limit in client.limits if method == "GET"]
+    # at 0s, 7s left; at 5s, 2s left, but a check gets 5s; at 7s, the last one, 5s
+    assert reads[-3:] == [7, 5, 5]
+    assert ("POST", None) in client.limits  # starting it isn't limited
+
+
+class CancelOn(io.StringIO):
+    """The job cancelled while the line naming `text` is written."""
+
+    def __init__(self, text):
+        super().__init__()
+        self.text = text
+
+    def write(self, line):
+        if self.text and self.text in line:
+            self.text = None
+            raise KeyboardInterrupt
+        return super().write(line)
+
+
+def test_a_cancel_just_after_the_batch_starts_still_stops_it(db):
+    test = db.test(name="a")
+    err = CancelOn("Started batch")
+
+    code = main(["batch", "test", test["id"], "-s", "binomial_gate", "--stop-on-timeout"],
+                client=AssayClient(db.client), env={}, out=io.StringIO(), err=err,
+                sleep=lambda seconds: None, clock=lambda: 0.0)
+
+    assert code == EXIT_INTERRUPTED
+    assert "Stopped batch" in err.getvalue()
+    assert db.client.get("/statistics/batches").json()["items"][0]["stopped_at"] is not None
+
+
+def test_a_report_prints_on_a_pipe_that_isnt_utf8(db, cli, monkeypatch, tmp_path):
+    db.test_set("Smoke", [db.test(name="bad ✗ naïve", checks=[MISSES])])
+    stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
+    junit = tmp_path / "j.xml"
+
+    code = main(["run", "test-set", "Smoke", "--junit", str(junit)],
+                client=AssayClient(db.client), env={}, sleep=cli.sleep, clock=lambda: cli.now)
+
+    assert code == EXIT_FAILED
+    stdout.flush()
+    assert "✗ bad ✗ naïve: Red" in stdout.buffer.getvalue().decode("utf-8")
+    assert junit.exists()

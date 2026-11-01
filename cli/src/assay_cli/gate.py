@@ -109,7 +109,7 @@ def execution_outcome(scope: dict, details: dict, runs: list[dict],
         [_run_case(run.get("test_name", run["id"]), scope["name"], run["status"],
                    (run.get("checks") or {}).get("not_met", []), run.get("error"), fail_on)
          for run in runs],
-        [str(run.get("test_set_entry_id") or run["id"]) for run in runs])
+        [str((run.get("test_set_entry_id") or {}).get("id") or run["id"]) for run in runs])
     summary = (f"{'PASSED' if passed else 'FAILED'}: {SCOPE_NOUNS[scope['kind']]} "
                f"{scope['name']!r}, "
                f"{_runs(details.get('run_count', sum(counts.values())))}: {_counts_line(counts)}")
