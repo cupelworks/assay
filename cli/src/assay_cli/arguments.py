@@ -68,8 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Comma-separated run outcomes that fail a run "
                           f"(default {','.join(RUN_FAIL_ON)}, or the policy's).")
     tolerance = run.add_argument_group(
-        "tolerance", "By default any failing run fails the step. These tolerate some; each "
-                     "replaces the policy file's value for one run.")
+        "tolerance", "By default any failing run fails the step. These tolerate some, or "
+                     "block on a check. Over a policy file, a limit replaces the file's for "
+                     "one run; a blocking check is added to the file's.")
     tolerance.add_argument("--policy", type=Path, metavar="FILE",
                            help="A YAML gate policy, e.g. assay-gate.yml in your repository.")
     tolerance.add_argument("--max-failures", type=_limit(max_failures_of), action="append",
