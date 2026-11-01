@@ -75,10 +75,11 @@ The CLI only asks Assay to run things. For a run to finish, Assay itself has to 
 | **A judge configured**, if you use LLM checks | Correctness, Relevance and the other judge checks need one | `POST /settings/judge/checks`, or the Settings page |
 | **The test, test set or test plan exists in Assay** | The CLI runs what's in Assay; it doesn't create tests | The UI, or `GET /test-sets` |
 
-**About the network.** The [Azure deployment](../infra/azure/README.md) gives the API no
-address outside its private network, so runners hosted by GitHub, Microsoft or GitLab
-can't reach it. Use a self-hosted runner or agent inside that network, or in a network
-peered with it. Locally, the API is at `http://127.0.0.1:8000`.
+**About the network.** The runner must reach the API. Locally, the API is at
+`http://127.0.0.1:8000`. On the [Azure deployment](../infra/azure/README.md) it can't yet:
+the API's ingress is internal to its Container Apps environment, so only the other apps
+there (the web interface, the worker) reach it, and no pipeline runner does, wherever it
+runs. See [What it doesn't do (yet)](#what-it-doesnt-do-yet).
 
 ## Install
 
@@ -127,7 +128,7 @@ assay --url https://assay.internal.example.com health
 |---|---|---|---|
 | The API's URL | `--url URL` | `ASSAY_API_URL` | none: required |
 | Headers sent with every request | `--header 'Name: value'`, repeatable | `ASSAY_API_HEADERS`, a JSON object | none |
-| Timeout of each request | `--http-timeout SECONDS` | | `30` |
+| Timeout of each step of a request | `--http-timeout SECONDS` | | `30` |
 
 - **The URL includes the path the API is served under.** If a proxy serves it under `/api`
   (Assay's `ASSAY_ROOT_PATH`), give `https://host/api`. A trailing slash doesn't matter.
@@ -143,8 +144,8 @@ assay --url https://assay.internal.example.com health
   ```
 
   Headers from `--header` are added to those in `ASSAY_API_HEADERS`; when both give the
-  same name, in any case (`authorization` and `Authorization`), `--header` wins. Keep tokens in your CI system's secrets, never in the
-  pipeline file.
+  same name, in any case (`authorization` and `Authorization`), `--header` wins. Keep
+  tokens in your CI system's secrets, never in the pipeline file.
 
 ## Name what to run
 
@@ -166,7 +167,7 @@ assay run test-set "Smoke"
 - **A name must match exactly**, including upper and lower case. Quote it if it has
   spaces.
 - **No match** is an error (exit 2) that says so.
-- **Two tests with the same name** are an error that lists their ids: use an id. Test set
+- **Two tests with the same name** are an error that lists two of their ids: use an id. Test set
   and test plan names are unique in Assay, so they can't clash.
 - **Ids** are shown in the UI and returned by the API, e.g. `GET /test-sets?q=smoke`.
 - **A name shaped like an id** (a test created without a name is named with a random
@@ -187,7 +188,7 @@ Assay 2.4.3: ready (2 workers)
 | `no_worker` | No worker answered: runs would wait in the queue | 1 |
 | `outdated` | A worker runs older code: restart it | 1 |
 | `broker_unreachable` | Nothing can be sent to workers: runs stay `Pending` | 1 |
-| API unreachable | Wrong URL, network or proxy | 2 |
+| API unreachable | Wrong URL, network or proxy; tried for a minute first | 2 |
 
 Run it as a first step so a broken setup fails quickly and clearly, rather than as a
 timeout an hour later.
@@ -304,8 +305,8 @@ test can conclude at (`floor`).
 - **`--param KEY=VALUE`**, repeatable, sets one of the test's parameters. VALUE is read as
   JSON when it can be (`0.9` is a number, `true` a boolean); otherwise it's text.
   Parameters you leave out take their defaults. One without `=`, or a number JSON can't
-  send (`NaN`, `Infinity`), is refused before anything is sent (exit 2); a value out of range is refused by Assay (exit 2, with the API's
-  reason).
+  send (`NaN`, `Infinity`), is refused before anything is sent (exit 2); a value out of
+  range is refused by Assay (exit 2, with the API's reason).
 - **`--times N`** is how many times to run the scope. Left out, Assay uses the catalogue's
   suggestion for that test and its parameters. Fewer than the test's floor is refused:
   with that few runs it could never conclude anything.
@@ -489,7 +490,7 @@ Prints one JSON object instead of the text, for scripts:
 | `counts` | Runs by outcome; for a batch, checks by verdict (`pass`, `fail`, `inconclusive`, `none`) |
 | `fail_on` | The rule it was judged by |
 | `reason` | Why it failed whatever `fail_on` says: a batch stopped or undecided, a status the CLI doesn't know; `null` otherwise |
-| `failures` | What failed the step: `outcome` is `failed` or `error` (a run that couldn't run, or a batch that ended `Incomplete` or `NotRan`) |
+| `failures` | What failed the step: `outcome` is `failed` or `error` (a run that couldn't run, a batch that ended `Incomplete` or `NotRan`, a status the CLI doesn't know) |
 
 For example, `assay run test-set Smoke --json | jq -r '.failures[].name'`.
 
@@ -504,7 +505,7 @@ folders in the path are created.
 | `<testsuite>` | The test set or plan (or test) | Each entry: `test set / test` |
 | `<testcase>` | Each run, named after its test | Each check, named by its label |
 | `<failure>` | A run whose outcome fails the step (`Amber`, `Red`) | A verdict that fails the step |
-| `<error>` | A run that couldn't run (`NotRan`) | A batch that ended `Incomplete` or `NotRan`: one case named after the statistical test, with the reason |
+| `<error>` | A run that couldn't run (`NotRan`), or with a status the CLI doesn't know | A batch that ended `Incomplete` or `NotRan`, or with a status the CLI doesn't know: one case named after the statistical test, with the reason |
 | `<skipped>` | | A check with no verdict, or a verdict you don't fail on (e.g. `inconclusive` by default) |
 | `<system-out>` | The outcome of a run you tolerated | |
 
@@ -531,7 +532,7 @@ created, and a file given both ways gets the summary once.
 | Code | Meaning | Typical causes |
 |---|---|---|
 | `0` | Passed | Every run, or every verdict, met your rule. Also: `--no-wait` started it; `health` is ready |
-| `1` | Failed the gate | A run you fail on, a verdict you fail on, an `Incomplete` or `NotRan` batch; `health` not ready |
+| `1` | Failed the gate | A run you fail on, a verdict you fail on, an `Incomplete` or `NotRan` batch, a status the CLI doesn't know; `health` not ready |
 | `2` | Error: nothing was judged | No URL; bad arguments; the API unreachable; a name with no match; the API refused the request (the reason is shown); a report file that can't be written; anything unexpected |
 | `3` | Timed out | Not finished within `--timeout`, usually because no worker is running |
 | `130` | Interrupted | Ctrl-C |
@@ -758,15 +759,16 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 | Batch ends `NotRan` | Nothing could be decided: fix the cause above; more runs won't help |
 | The step passes but you expected it to fail | Check `--fail-on`: e.g. `inconclusive` doesn't fail a batch by default |
 
-`--http-timeout` raises the limit on each request if the API is slow to answer, e.g.
-behind a busy proxy.
+`--http-timeout` raises the limit on each step of a request (connecting, each read) if the
+API is slow to answer, e.g. behind a busy proxy.
 
 ## What it doesn't do (yet)
 
 - **Names with accented capitals on SQLite.** A name is found through the API's search,
   which on SQLite ignores case for ASCII letters only: `École smoke` may not be found.
   Give the id instead. PostgreSQL, as on Azure, finds it.
-
+- **Reaching the API on the Azure deployment.** Its ingress is internal to its Container
+  Apps environment, so a pipeline runner can't call it yet.
 - **A different application per run.** A run calls the application set in Assay's
   settings (the Settings page, or `ASSAY_TARGET_*`). Point that at the environment the
   pipeline deploys to, such as staging. Testing each pull request's own preview URL needs
@@ -804,7 +806,7 @@ assay batch {test,test-set,test-plan} ID_OR_NAME
 |---|---|---|---|
 | `--url URL` | all | `$ASSAY_API_URL` | Assay's API, including its path |
 | `--header 'NAME: VALUE'` | all | `$ASSAY_API_HEADERS` | A header for every request; repeatable |
-| `--http-timeout SECONDS` | all | `30` | Timeout of each request |
+| `--http-timeout SECONDS` | all | `30` | Timeout of each step of a request |
 | `--version` | | | Print the CLI's version |
 | `-h`, `--help` | all | | Help for the CLI or a command |
 | `--replay EXECUTION_ID` | `run` | | Replay a past execution of the set or plan |
