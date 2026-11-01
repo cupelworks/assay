@@ -2,14 +2,16 @@
 # Copyright (C) 2026 Francesco Campanile
 """One execution of a test set or plan, read whole (its runs counted and its
 checks gathered), and its runs listed with their names, checks and sorts.
-Sets and plans differ only in their tables, guards and id fields, which an
-`ExecutionKind` names, so every function here serves both."""
+Sets and plans differ only in their tables, guards and id fields, and in a
+plan's runs naming their test set, which an `ExecutionKind` names, so every
+function here serves both."""
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import Row, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from assay.models import (
     StandaloneRunModel,
@@ -17,6 +19,7 @@ from assay.models import (
     TestRunModel,
     TestSetEntryModel,
     TestSetExecutionModel,
+    TestSetModel,
 )
 from assay.schemas import (
     ExecutionRunSort,
@@ -66,6 +69,7 @@ class ExecutionKind:
     run_item: type
     page: type
     details: type
+    entry_set: Callable[[Row], dict]  # a run item's test set fields, when it names them
 
 
 TEST_SET = ExecutionKind(
@@ -76,7 +80,7 @@ TEST_SET = ExecutionKind(
     scope_field=lambda id_: {"test_set_id": TestSetID(id=id_)},
     replayed=lambda id_: TestSetReplayedExecutionID(id=id_),
     run_item=TestSetExecutionRunItem, page=PaginatedTestSetExecutionRunMetadata,
-    details=TestSetExecutionDetails,
+    details=TestSetExecutionDetails, entry_set=lambda row: {},
 )
 TEST_PLAN = ExecutionKind(
     model=TestPlanExecutionModel, run_column=TestRunModel.test_plan_execution_id,
@@ -87,11 +91,23 @@ TEST_PLAN = ExecutionKind(
     replayed=lambda id_: TestPlanReplayedExecutionID(id=id_),
     run_item=TestPlanExecutionRunItem, page=PaginatedTestPlanExecutionRunMetadata,
     details=TestPlanExecutionDetails,
+    entry_set=lambda row: {
+        "test_set_id": TestSetID(id=row.entry_set_id) if row.entry_set_id else None,
+        "test_set_name": row.entry_set_name},
 )
+
+_ENTRY_SET = aliased(TestSetModel, name="entry_test_set")
+"""The set a run's entry belongs to now: a plan's runs span several."""
+
+
+def _with_entry_set(statement):
+    return run_source(statement).outerjoin(
+        _ENTRY_SET, _ENTRY_SET.id == TestSetEntryModel.test_set_id)
+
 
 _RUNS = Listing(
     key=TestRunModel.id,
-    source=run_source,
+    source=_with_entry_set,
     sorts={ExecutionRunSort.newest: (TestRunModel.created_at.desc(),),
            ExecutionRunSort.worst_first: (STATUS_RANK, func.lower(TEST_NAME)),
            ExecutionRunSort.name: (func.lower(TEST_NAME),)},
@@ -113,14 +129,16 @@ async def list_execution_runs(kind: ExecutionKind, scope_id: uuid.UUID,
                               sort: ExecutionRunSort = ExecutionRunSort.newest,
                               offset: int = 0, limit: int = 100):
     """An execution's runs, sorted and paged, each with its test's name, its
-    checks counted, its error and where its answer came from."""
+    checks counted, its error and where its answer came from; a plan's, with the
+    test set its entry belongs to."""
     await _guard(kind, scope_id, execution_id, session)
     where = [kind.run_column == execution_id]
     found = (await session.execute(_RUNS.page(
         select(TestRunModel.id, TestRunModel.status, TestRunModel.created_at,
                TestRunModel.batch_id, TestRunModel.batch_index, TestRunModel.test_set_entry_id,
                TestRunModel.results, TestRunModel.error, TestRunModel.output_source,
-               TEST_NAME.label("test_name")),
+               TEST_NAME.label("test_name"), TestSetEntryModel.test_set_id.label("entry_set_id"),
+               _ENTRY_SET.name.label("entry_set_name")),
         where, sort, offset, limit))).all()
     return kind.page(
         total=await _RUNS.count(session, where), offset=offset, limit=limit,
@@ -128,7 +146,8 @@ async def list_execution_runs(kind: ExecutionKind, scope_id: uuid.UUID,
             id=row.id, status=row.status, created_at=row.created_at, batch_id=row.batch_id,
             batch_index=row.batch_index, test_set_entry_id=TestSetEntryID(id=row.test_set_entry_id),
             test_name=row.test_name, checks=count_checks(row.results), error=row.error,
-            output_source=row.output_source, **kind.execution_field(execution_id))
+            output_source=row.output_source, **kind.execution_field(execution_id),
+            **kind.entry_set(row))
             for row in found])
 
 

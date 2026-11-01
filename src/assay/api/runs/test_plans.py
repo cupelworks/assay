@@ -567,6 +567,8 @@ async def get_test_plan_execution(
                                 "test_plan_execution_id": {
                                     "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0"
                                 },
+                                "test_set_id": {"id": "e5f6a7b8-c9d0-1234-ef56-789abcdef012"},
+                                "test_set_name": "Support answers",
                             },
                             {
                                 "id": "f6a7b8c9-d0e1-2345-fa67-890abcdef123",
@@ -584,6 +586,8 @@ async def get_test_plan_execution(
                                 "test_plan_execution_id": {
                                     "id": "b3c4d5e6-f7a8-9012-bc34-56789abcdef0"
                                 },
+                                "test_set_id": {"id": "e5f6a7b8-c9d0-1234-ef56-789abcdef012"},
+                                "test_set_name": "Support answers",
                             },
                         ],
                     }
@@ -620,9 +624,11 @@ async def get_test_plan_execution_run_metadata(
       the runs of execution X of test plan A through test plan B's URL.
 
     Returns a paginated list of each run's `id`, `status`, `created_at`,
-    `test_set_entry_id` (which entry it ran), and `test_plan_execution_id`,
-    ordered by `created_at` descending (ties broken by `id` descending),
-    plus the usual `total`, `offset`, and `limit`.
+    `test_set_entry_id` (which entry it ran), `test_set_id` and `test_set_name`
+    (the test set that entry belongs to now; null once it has been unlinked
+    from its set), and `test_plan_execution_id`, ordered by `created_at`
+    descending (ties broken by `id` descending), plus the usual `total`,
+    `offset`, and `limit`.
     """
     return await get_test_plan_execution_run_metadata_all_runs(
         test_plan_id, test_plan_execution_id, session, offset, limit, sort

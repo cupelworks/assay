@@ -235,3 +235,44 @@ def test_worst_first_orders_by_status_even_against_the_names(db):
 
     assert [(r["status"], r["test_name"]) for r in worst] == [("Amber", "Zzz"), ("Green", "Aaa")]
     assert [r["test_name"] for r in by_name] == ["Aaa", "Zzz"]
+
+
+def _plan_runs(db, plan, execution) -> list[dict]:
+    path = f"/runs/test-plans/{plan['id']}/executions/{execution['id']}/test-runs"
+    return _ok(db.client.get(path, params={"sort": "name"}))["items"]
+
+
+def test_a_plans_runs_each_name_the_test_set_of_their_entry(db):
+    smoke = db.test_set("Smoke", [db.test(name="a")])
+    tone = db.test_set("Tone", [db.test(name="b")])
+    plan = db.test_plan("Release", [smoke, tone])
+    execution = _ok(db.client.post(f"/runs/test-plans/{plan['id']}"))
+
+    assert [(r["test_name"], r["test_set_id"], r["test_set_name"])
+            for r in _plan_runs(db, plan, execution)] == [
+        ("a", {"id": smoke["id"]}, "Smoke"), ("b", {"id": tone["id"]}, "Tone")]
+
+
+def test_a_plan_run_names_its_sets_name_as_it_is_now_and_none_once_unlinked(db):
+    smoke = db.test_set("Smoke", [db.test(name="a"), db.test(name="b")])
+    plan = db.test_plan("Release", [smoke])
+    execution = _ok(db.client.post(f"/runs/test-plans/{plan['id']}"))
+    a_run, b_run = _plan_runs(db, plan, execution)
+    _ok(db.client.patch(f"/test-sets/{smoke['id']}", json={"name": "Smoke tests"}))
+    _ok(db.client.patch(f"/test-sets/{smoke['id']}/entries",
+                        json=[{"id": a_run["test_set_entry_id"]["id"]}]))
+
+    a_run, b_run = _plan_runs(db, plan, execution)
+
+    assert (a_run["test_set_id"], a_run["test_set_name"]) == (None, None)
+    assert (b_run["test_set_id"], b_run["test_set_name"]) == ({"id": smoke["id"]}, "Smoke tests")
+
+
+def test_a_sets_runs_name_no_set_of_their_own(db):
+    smoke = db.test_set("Smoke", [db.test(name="a")])
+    execution = _ok(db.client.post(f"/runs/test-sets/{smoke['id']}"))
+    path = f"/runs/test-sets/{smoke['id']}/executions/{execution['id']}/test-runs"
+
+    (run,) = _ok(db.client.get(path))["items"]
+
+    assert "test_set_name" not in run  # the set is the execution's own

@@ -626,6 +626,11 @@ class TestPlanExecutionRunItem(TestPlanExecutionRunMetadata, RunSummary):
     output_source: OutputSource | None = Field(description="Where the answer it scored came "
                                                            "from: `recorded` or `application`; "
                                                            "null until it ran, and for NotRan.")
+    test_set_id: TestSetID | None = Field(description="The test set its entry belongs to; null "
+                                                      "once the entry has been unlinked from "
+                                                      "its set.")
+    test_set_name: str | None = Field(description="That test set's name, as it is now; null "
+                                                  "with `test_set_id`.")
 
 
 class PaginatedTestPlanExecutionRunMetadata(Pagination):
