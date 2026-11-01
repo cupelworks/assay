@@ -94,9 +94,13 @@ def execution_outcome(scope: dict, details: dict, runs: list[dict],
              for run in runs]
     noun = scope["kind"].replace("-", " ")
     summary = (f"{'PASSED' if passed else 'FAILED'}: {noun} {scope['name']!r}, "
-               f"{details.get('run_count', sum(counts.values()))} runs: {_counts_line(counts)}")
+               f"{_runs(details.get('run_count', sum(counts.values())))}: {_counts_line(counts)}")
     return Outcome("execution", str(details["id"]), scope, _execution_status(counts), passed,
                    summary, counts, cases, fail_on)
+
+
+def _runs(count: int) -> str:
+    return f"{count} run{'' if count == 1 else 's'}"
 
 
 def _execution_status(counts: dict) -> str:
