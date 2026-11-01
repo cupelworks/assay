@@ -111,10 +111,12 @@ def test_without_a_url_it_says_how_to_give_one():
 
 @pytest.mark.parametrize(("status", "verdicts", "fail_on", "passed"), [
     ("Failed", {"fail": 1, "inconclusive": 3}, ("inconclusive",), False),
-    ("Failed", {"fail": 1}, ("inconclusive",), True),
+    ("Failed", {"fail": 1}, ("inconclusive",), False),  # a proven failure always fails
     ("Inconclusive", {"pass": 1, "inconclusive": 2}, ("fail",), True),
     ("Inconclusive", {"pass": 1, "inconclusive": 2}, ("fail", "inconclusive"), False),
     ("Passed", {"pass": 2}, ("fail", "inconclusive"), True),
+    ("Inconclusive", {"pass": 2, "none": 1}, ("fail", "inconclusive"), False),
+    ("Inconclusive", {"pass": 2, "none": 1}, ("fail",), True),
 ])
 def test_a_batch_is_gated_on_every_checks_verdict(status, verdicts, fail_on, passed):
     assert batch_outcome(_batch(status, verdicts), fail_on).passed is passed
@@ -190,3 +192,45 @@ def test_anything_unforeseen_is_an_error_not_a_failed_gate():
     err = io.StringIO()
     assert main(["health"], client=Odd(), env={}, out=io.StringIO(), err=err) == EXIT_ERROR
     assert "unexpected error: KeyError: 'runs'" in err.getvalue()
+
+
+def test_a_check_with_no_verdict_fails_a_strict_gate_on_an_inconclusive_batch():
+    checks = [_check("A", "pass"), _check("B", None)]
+
+    strict = batch_outcome(_batch("Inconclusive", {"pass": 1, "none": 1}, checks),
+                           ("fail", "inconclusive"))
+    lenient = batch_outcome(_batch("Inconclusive", {"pass": 1, "none": 1}, checks))
+
+    assert [(c.name, c.outcome) for c in strict.cases] == [("A", "passed"), ("B", "failed")]
+    assert [(c.name, c.outcome) for c in lenient.cases] == [("A", "passed"), ("B", "skipped")]
+
+
+def test_fail_on_inconclusive_alone_still_fails_on_fail():
+    outcome = batch_outcome(_batch("Failed", {"fail": 1}, [_check("A", "fail")]),
+                            ("inconclusive",))
+    assert outcome.fail_on == ("fail", "inconclusive")
+    assert [(c.name, c.outcome) for c in outcome.failures] == [("A", "failed")]
+
+
+def test_characters_xml_cant_hold_are_left_out_of_junit():
+    scope = {"kind": "test-set", "id": "s", "name": "Smoke"}
+    details = {"id": "x", "run_count": 1, "runs": {"NotRan": 1}}
+    runs = [{"id": "r", "test_name": "a\x07", "status": "NotRan", "checks": None,
+             "error": "The application said \x1b[31mno\x00"}]
+
+    junit = report.junit(execution_outcome(scope, details, runs))
+
+    error = ET.fromstring(junit).find(".//testcase/error")
+    assert error.get("message") == "Not Ran: The application said [31mno"
+    assert ET.fromstring(junit).find(".//testcase").get("name") == "a"
+
+
+def test_a_redirect_is_named_never_followed():
+    reply = httpx.Response(301, headers={"location": "https://assay/api/health/worker"})
+    with pytest.raises(ApiError, match="301 redirected to https://assay/api/health/worker"):
+        _client(lambda request: reply).health()
+
+
+def test_an_empty_reply_is_an_error():
+    with pytest.raises(ApiError, match="an empty reply"):
+        _client(lambda request: httpx.Response(200)).health()

@@ -52,12 +52,18 @@ class AssayClient:
         except httpx.HTTPError as exc:
             raise ApiError(f"{method} {path}: couldn't reach Assay ({exc})",
                            transient=True) from exc
+        if response.is_redirect:
+            # never followed: a redirected POST could start nothing, or start it twice
+            where = response.headers.get("location", "elsewhere")
+            raise ApiError(f"{method} {path}: {response.status_code} redirected to {where}; "
+                           "give the API's final address with --url", response.status_code)
         if response.status_code >= 400:
             raise ApiError(f"{method} {path}: {response.status_code} {_detail(response)}",
                            response.status_code,
                            transient=response.status_code in _TRANSIENT_STATUSES)
         if not response.content:
-            return None
+            raise ApiError(f"{method} {path}: an empty reply — is the URL Assay's API?",
+                           response.status_code)
         try:
             return response.json()
         except ValueError as exc:

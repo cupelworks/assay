@@ -325,7 +325,7 @@ The batch ends with one status:
 | Status | Meaning | Fails the step? |
 |---|---|---|
 | `Passed` | Every applicable check proven to pass | No |
-| `Failed` | At least one check proven to fail | Yes, by default |
+| `Failed` | At least one check proven to fail | **Always** |
 | `Inconclusive` | Finished, but not every check could be decided | Only with `--fail-on fail,inconclusive` |
 | `Incomplete` | Stopped before every run ran | **Always** |
 | `NotRan` | Nothing could be decided: every run Not Ran, or every check errored in every run. Fix the cause; a bigger batch wouldn't help | **Always** |
@@ -341,26 +341,30 @@ assay batch test-set "Smoke" -s binomial_gate --fail-on fail,inconclusive
 - **`fail` (the default)** fails the step only when a check is *proven* to fail. A
   borderline check doesn't block you by chance.
 - **`fail,inconclusive`** also fails the step when there isn't enough evidence that every
-  check passes. This is stricter: use it for release gates.
-- **Every check's verdict counts,** not only the batch's status: with `--fail-on inconclusive`,
-  a `Failed` batch fails the step when any of its checks is inconclusive too.
-- A batch that was stopped or couldn't decide anything always fails, whatever you choose.
+  check passes: a check that's inconclusive, or that got no verdict in an `Inconclusive`
+  batch. This is stricter: use it for release gates. `inconclusive` alone means the same:
+  `fail` is always included.
+- The status and every check's verdict count: a `Failed` batch with inconclusive checks
+  fails a strict gate for both reasons.
+- A check proven to fail, and a batch that was stopped or couldn't decide anything, always
+  fail the step, whatever you choose.
 
 ### Stopping a batch that's taking too long: `--stop-on-timeout`
 
 If the step stops waiting before the batch's result, the batch normally carries on in Assay
 and you keep paying for its runs. With `--stop-on-timeout`, the CLI stops it first: runs not
-yet started are cancelled, and the batch ends `Incomplete`. It does so whenever the wait
+yet started are cancelled, and the batch ends `Incomplete`. It does so however the wait
 ends early:
 
 - `--timeout` is reached: the step still exits 3 (timed out);
 - the CI system cancels the job (it sends SIGTERM): exit 143;
-- Ctrl-C: exit 130.
+- Ctrl-C: exit 130;
+- an error, such as an expired token: exit 2.
 
 If Assay refuses the stop, the CLI says so and exits as it would have: stop the batch in
 Assay then.
 
-Cancelling the pipeline or pressing Ctrl-C doesn't stop a batch. Stop it in the UI or with
+Without `--stop-on-timeout`, nothing stops a batch but you: in the UI, or with
 `POST /statistics/batches/{id}/stop`.
 
 ### All options
@@ -391,8 +395,12 @@ Per-check targets and leaving checks out of a batch are possible through the API
 - **Set the CLI's `--timeout` below your CI job's own time limit,** so the CLI reports the
   timeout (and can stop a batch) before the CI system kills the step.
 - **A passing failure doesn't end the wait.** When a check on its progress can't reach the
-  API, or a gateway answers `429`, `502`, `503` or `504`, the CLI says so and tries again
-  after `--interval`, until `--timeout`. Any other refusal ends it with exit 2.
+  API, or gets a `429` or any `5xx` (a gateway, or the API's database busy for a moment),
+  the CLI says so and tries again after `--interval`, until `--timeout`. Any other refusal,
+  such as a `401`, ends it with exit 2. Once an execution has finished, reading its runs is
+  tried again for up to a minute, whatever `--timeout` is left.
+- **The last check comes on time.** The CLI never sleeps past `--timeout`, so it reports the
+  timeout (and stops a batch) when you said.
 - **Timing out stops waiting, not the work.** The runs carry on in Assay and their results
   are kept there. Only a batch with `--stop-on-timeout` is stopped.
 - **`--no-wait`** prints the new execution's, run's or batch's id on stdout (with `--json`:
@@ -475,6 +483,9 @@ folders in the path are created.
 When two cases would share a suite and a name, for example the same test in two sets of a
 plan, each name ends with its entry's id in brackets: CI systems merge cases with the same
 names.
+
+Characters XML can't hold, such as colour codes in an application's error, are left out, so
+CI systems can always read the report.
 
 Each suite has a property `assay.execution_id` (or `assay.run_id`, `assay.batch_id`), so
 you can find the run in Assay from the CI system.
@@ -703,6 +714,8 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 |---|---|
 | `give the API's URL with --url or $ASSAY_API_URL` | Set one of them |
 | `couldn't reach Assay (…)` | Wrong URL, or the runner can't reach the network the API is in: see [Before you start](#before-you-start). Check it with `curl $ASSAY_API_URL/health` from the runner |
+| `301 redirected to …` (or `302`, `307`, `308`) | Give the address it names with `--url`: the CLI never follows a redirect, so a run is never started twice or not at all |
+| `an empty reply — is the URL Assay's API?` | As below |
 | `the reply isn't JSON — is the URL Assay's API?` | The URL points at something else, e.g. the web interface, or a proxy's sign-in page. Point it at the API, including its path (`/api`) |
 | `404 …` on every command | The URL is missing the path the API is served under |
 | `No test set is named 'X'` | Names must match exactly, including case. Check spelling and quotes, or use the id |
@@ -720,6 +733,10 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 behind a busy proxy.
 
 ## What it doesn't do (yet)
+
+- **Names with accented capitals on SQLite.** A name is found through the API's search,
+  which on SQLite ignores case for ASCII letters only: `École smoke` may not be found.
+  Give the id instead. PostgreSQL, as on Azure, finds it.
 
 - **A different application per run.** A run calls the application set in Assay's
   settings (the Settings page, or `ASSAY_TARGET_*`). Point that at the environment the
@@ -767,8 +784,8 @@ assay batch {test,test-set,test-plan} ID_OR_NAME
 | `--times N`, `-n` | `batch` | the catalogue's suggestion | Times to run the scope (the most, for tests that run in waves) |
 | `--param KEY=VALUE`, `-p` | `batch` | the test's defaults | A parameter; repeatable |
 | `--note TEXT` | `batch` | | Kept with the batch |
-| `--fail-on VERDICTS` | `batch` | `fail` | `fail`, `inconclusive`, or both |
-| `--stop-on-timeout` | `batch` | off | Stop the batch when the wait ends early: `--timeout`, a cancelled job, Ctrl-C |
+| `--fail-on VERDICTS` | `batch` | `fail` | `fail` always counts; add `inconclusive` for a stricter gate |
+| `--stop-on-timeout` | `batch` | off | Stop the batch when the wait ends early: `--timeout`, a cancelled job, Ctrl-C, an error |
 | `--no-wait` | `run`, `batch` | off | Start, print the id, exit 0 |
 | `--timeout SECONDS` | `run`, `batch` | `3600` | Give up waiting; `0` waits forever |
 | `--interval SECONDS` | `run`, `batch` | `5` | Time between progress checks; more than 0 |

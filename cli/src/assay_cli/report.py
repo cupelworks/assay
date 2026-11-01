@@ -3,6 +3,7 @@
 """The outcome written for people (text, a GitHub job summary in Markdown) and
 for tools (JUnit XML, which GitLab, Azure Pipelines, Jenkins and most CI
 systems show as test results)."""
+import re
 from xml.etree import ElementTree as ET
 
 from assay_cli.client import SCOPE_NOUNS
@@ -11,6 +12,8 @@ from assay_cli.gate import Outcome
 _MARK = {"passed": "✓", "failed": "✗", "error": "!", "skipped": "–"}
 MAX_LISTED = 50
 """Failures listed in the text summary; the JUnit report has every one."""
+_NOT_IN_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+"""Characters XML 1.0 can't hold: a CI system would refuse the whole report."""
 
 
 def text(outcome: Outcome) -> str:
@@ -48,19 +51,21 @@ def junit(outcome: Outcome) -> bytes:
     for case in outcome.cases:
         by_group.setdefault(case.group, []).append(case)
     for group, cases in (by_group or {outcome.scope["name"]: []}).items():
-        suite = ET.SubElement(suites, "testsuite", name=group, tests=str(len(cases)),
+        suite = ET.SubElement(suites, "testsuite", name=_xml(group), tests=str(len(cases)),
                               failures=str(sum(c.outcome == "failed" for c in cases)),
                               errors=str(sum(c.outcome == "error" for c in cases)),
                               skipped=str(sum(c.outcome == "skipped" for c in cases)))
         ET.SubElement(ET.SubElement(suite, "properties"), "property",
                       name=f"assay.{outcome.kind}_id", value=outcome.id)
         for case in cases:
-            element = ET.SubElement(suite, "testcase", name=case.name, classname=group)
+            element = ET.SubElement(suite, "testcase", name=_xml(case.name),
+                                    classname=_xml(group))
             if case.outcome in ("failed", "error", "skipped"):
                 tag = {"failed": "failure", "error": "error", "skipped": "skipped"}[case.outcome]
-                ET.SubElement(element, tag, message=case.message).text = case.detail or None
+                ET.SubElement(element, tag, message=_xml(case.message)).text = (
+                    _xml(case.detail) or None)
             elif case.message:
-                ET.SubElement(element, "system-out").text = case.message
+                ET.SubElement(element, "system-out").text = _xml(case.message)
     ET.indent(suites)
     return ET.tostring(suites, encoding="utf-8", xml_declaration=True)
 
@@ -70,6 +75,10 @@ def _label(outcome: Outcome, case) -> str:
     if outcome.kind != "batch" or case.group in ("", case.name):
         return case.name
     return f"{case.group} › {case.name}"
+
+
+def _xml(value: str) -> str:
+    return _NOT_IN_XML.sub("", value)
 
 
 def _escape(value: str) -> str:

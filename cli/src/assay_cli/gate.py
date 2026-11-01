@@ -14,7 +14,7 @@ RUN_FAIL_ON = ("Amber", "Red", "NotRan")
 
 BATCH_FAIL_ON_CHOICES = ("fail", "inconclusive")
 BATCH_FAIL_ON = ("fail",)
-"""By default a check proven to fail fails the gate; `inconclusive` is opt-in."""
+"""A check proven to fail always fails the gate; `inconclusive` is opt-in, and adds to it."""
 _BATCH_ALWAYS_FAIL = {"Incomplete": "it was stopped before every run ran",
                       "NotRan": "nothing could be decided: every run Not Ran, "
                                 "or every check errored in every run"}
@@ -147,20 +147,19 @@ def run_outcome(scope: dict, details: dict, fail_on: tuple = RUN_FAIL_ON) -> Out
 # -- statistics batches --
 
 def batch_outcome(batch: dict, fail_on: tuple = BATCH_FAIL_ON) -> Outcome:
+    fail_on = tuple(dict.fromkeys(("fail", *fail_on)))
     status = batch["status"]
     scope = {"kind": batch["scope"]["kind"].replace("_", "-"), "id": str(batch["scope"]["id"]),
              "name": batch["scope"]["name"]}
     result = batch.get("result") or {}
     verdicts = result.get("verdicts") or batch.get("verdicts") or {}
     why = _BATCH_ALWAYS_FAIL.get(status, "")
-    if why:
-        passed = False
-    elif verdicts:
-        # every check's verdict, not the status alone: a Failed batch's
-        # inconclusive checks fail --fail-on inconclusive too
-        passed = not any(verdicts.get(verdict, 0) for verdict in fail_on)
-    else:
-        passed = _BATCH_VERDICT_OF_STATUS.get(status) not in fail_on
+    # the status and every check's verdict: an Inconclusive batch whose only
+    # undecided check has no verdict, and a Failed batch's inconclusive checks
+    passed = not why and _BATCH_VERDICT_OF_STATUS.get(status) not in fail_on and not any(
+        verdicts.get(verdict, 0) for verdict in fail_on)
+    # a check with no verdict is what keeps a batch Inconclusive
+    undecided_fails = status == "Inconclusive" and "inconclusive" in fail_on
     cases, ids = [], []
     if why:
         cases.append(Case(batch["statistical_test"], scope["name"], "error",
@@ -169,7 +168,7 @@ def batch_outcome(batch: dict, fail_on: tuple = BATCH_FAIL_ON) -> Outcome:
     for entry in result.get("entries", []):
         group = " / ".join(x for x in (entry.get("test_set_name"), entry["name"]) if x)
         for check in entry.get("checks", []):
-            cases.append(_check_case(group, check, fail_on))
+            cases.append(_check_case(group, check, fail_on, undecided_fails))
             ids.append(str(entry.get("entry_id") or check["label"]))
     sentence = result.get("summary") or batch.get("summary") or why or status
     summary = (f"{'PASSED' if passed else 'FAILED'}: batch of {SCOPE_NOUNS[scope['kind']]} "
@@ -178,7 +177,7 @@ def batch_outcome(batch: dict, fail_on: tuple = BATCH_FAIL_ON) -> Outcome:
                    _distinct(cases, ids), fail_on, why)
 
 
-def _check_case(group: str, check: dict, fail_on: tuple) -> Case:
+def _check_case(group: str, check: dict, fail_on: tuple, undecided_fails: bool) -> Case:
     label = check["label"]
     if not check.get("applies", True):
         return Case(label, group, "skipped", check.get("reason") or "no verdict for this check")
@@ -188,6 +187,6 @@ def _check_case(group: str, check: dict, fail_on: tuple) -> Case:
     message = f"{verdict or 'no verdict'}: {reason}".rstrip(": ")
     if verdict == "pass":
         return Case(label, group, "passed", message)
-    if verdict in fail_on:
+    if verdict in fail_on or (verdict is None and undecided_fails):
         return Case(label, group, "failed", message)
     return Case(label, group, "skipped", message)

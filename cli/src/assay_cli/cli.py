@@ -39,6 +39,9 @@ EXIT_INTERRUPTED = 130
 EXIT_CANCELLED = 143
 """SIGTERM: the CI system cancelled the job."""
 
+RUNS_READ_SECONDS = 60
+"""After an execution finishes, how long reading its runs is tried again."""
+
 URL_ENV = "ASSAY_API_URL"
 HEADERS_ENV = "ASSAY_API_HEADERS"
 
@@ -103,8 +106,9 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--fail-on", type=_choices(BATCH_FAIL_ON_CHOICES), default=BATCH_FAIL_ON,
                        metavar="VERDICTS",
                        help="Comma-separated verdicts that fail the step: fail, inconclusive "
-                            f"(default {','.join(BATCH_FAIL_ON)}). A batch that was stopped "
-                            "or couldn't decide anything always fails.")
+                            f"(default {','.join(BATCH_FAIL_ON)}). A check proven to fail, and "
+                            "a batch that was stopped or couldn't decide anything, always "
+                            "fail it.")
     batch.add_argument("--stop-on-timeout", action="store_true",
                        help="Stop the batch when the wait ends without its result "
                             "(--timeout reached, the job cancelled, Ctrl-C), so its "
@@ -224,7 +228,6 @@ class Runner:
                  sleep: Callable[[float], None], clock: Callable[[], float]):
         self.client, self.args, self.env = client, args, env
         self.out, self.err, self.sleep, self.clock = out, err, sleep, clock
-        self.deadline: float | None = None
 
     def say(self, message: str) -> None:
         print(message, file=self.err, flush=True)
@@ -263,8 +266,12 @@ class Runner:
                 lambda: self.client.execution(args.scope, target["id"], run_id),
                 lambda d: run_finished(d["runs"]),
                 lambda d: _progress(d["runs"], d.get("run_count")))
+            # finished: its own time to read the runs, and a failure is an error
             runs = self._read(
-                lambda: self.client.execution_runs(args.scope, target["id"], run_id))
+                lambda: self.client.execution_runs(args.scope, target["id"], run_id),
+                self.clock() + RUNS_READ_SECONDS,
+                lambda exc: ApiError(f"It finished, but its runs couldn't be read: {exc}",
+                                     exc.status_code))
             outcome = execution_outcome(scope, details, runs, args.fail_on)
         return self._report(outcome)
 
@@ -290,7 +297,8 @@ class Runner:
         try:
             batch = self._wait(lambda: self.client.batch(batch_id), batch_finished,
                                _batch_progress)
-        except (TimedOut, Cancelled, KeyboardInterrupt):
+        except (Exception, KeyboardInterrupt):
+            # however the wait ends without a result: timeout, cancel, any error
             if args.stop_on_timeout:
                 self._stop(batch_id)
             raise
@@ -309,37 +317,47 @@ class Runner:
     # -- waiting and reporting --
 
     def _wait(self, read, finished, describe):
-        self.deadline = self.clock() + self.args.timeout if self.args.timeout > 0 else None
+        deadline = self.clock() + self.args.timeout if self.args.timeout > 0 else None
+        timeout = f"Still not finished after {self.args.timeout:g}s"
         last = None
         while True:
-            current = self._read(read)
+            current = self._read(read, deadline,
+                                 lambda exc: TimedOut(f"{timeout}: the last check failed ({exc})"))
             line = describe(current)
             if line != last:
                 self.say(f"  {line}")
                 last = line
             if finished(current):
                 return current
-            if self._past_deadline():
-                raise TimedOut(f"Still not finished after {self.args.timeout:g}s: {line}")
-            self.sleep(self.args.interval)
+            if self._past(deadline):
+                raise TimedOut(f"{timeout}: {line}")
+            self._pause(deadline)
 
-    def _read(self, read):
-        """A read while waiting: a passing failure of the network or a gateway is
-        tried again until the deadline; any other error ends the wait."""
+    def _read(self, read, deadline: float | None,
+              out_of_time: Callable[[ApiError], Exception]):
+        """A read that changes nothing, so a failure that may pass is tried again
+        until the deadline: the network, a gateway, the API's own 5xx (a database
+        busy for a moment). Any other refusal ends it."""
         while True:
             try:
                 return read()
             except ApiError as exc:
-                if not exc.transient:
+                if not (exc.transient or (exc.status_code or 0) >= 500):
                     raise
-                if self._past_deadline():
-                    raise TimedOut(f"Still not finished after {self.args.timeout:g}s: "
-                                   f"the last check failed ({exc})") from exc
-                self.say(f"  {exc}; trying again in {self.args.interval:g}s")
-                self.sleep(self.args.interval)
+                if self._past(deadline):
+                    raise out_of_time(exc) from exc
+                self.say(f"  {exc}; trying again")
+                self._pause(deadline)
 
-    def _past_deadline(self) -> bool:
-        return self.deadline is not None and self.clock() >= self.deadline
+    def _past(self, deadline: float | None) -> bool:
+        return deadline is not None and self.clock() >= deadline
+
+    def _pause(self, deadline: float | None) -> None:
+        """The interval, but never past the deadline: the last check comes on time."""
+        wait = self.args.interval
+        if deadline is not None:
+            wait = min(wait, max(deadline - self.clock(), 0.0))
+        self.sleep(wait)
 
     def _started(self, kind: str, started_id: str, scope: dict) -> int:
         if self.args.json:

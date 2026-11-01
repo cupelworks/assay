@@ -256,7 +256,7 @@ def test_a_gateways_passing_failure_while_waiting_is_tried_again(db, cli):
     code = cli("run", "test-set", "Smoke", "--interval", "1", client=client)
 
     assert code == EXIT_PASSED, cli.err.getvalue()
-    assert cli.err.getvalue().count("502 Bad Gateway; trying again in 1s") == 2
+    assert cli.err.getvalue().count("502 Bad Gateway; trying again") == 2
 
 
 def test_a_gateway_down_until_the_deadline_times_out(db, cli):
@@ -269,12 +269,64 @@ def test_a_gateway_down_until_the_deadline_times_out(db, cli):
     assert "the last check failed (GET …: 502 Bad Gateway)" in cli.err.getvalue()
 
 
-def test_an_apis_own_error_while_waiting_is_not_tried_again(db, cli):
+def test_the_apis_own_5xx_while_waiting_is_tried_again(db, cli):
     db.test_set("Smoke", [db.test(name="a")])
-    client = Flaky(db.client, _reading_an_execution, ApiError("GET …: 500 Internal", 500))
+    client = Flaky(db.client, _reading_an_execution, ApiError("GET …: 500 Locked", 500))
+
+    assert cli("run", "test-set", "Smoke", client=client) == EXIT_PASSED
+    assert "500 Locked; trying again" in cli.err.getvalue()
+
+
+def test_a_refusal_while_waiting_is_not_tried_again(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = Flaky(db.client, _reading_an_execution, ApiError("GET …: 401 Expired", 401))
 
     assert cli("run", "test-set", "Smoke", client=client) == EXIT_ERROR
     assert "trying again" not in cli.err.getvalue()
+
+
+def test_the_wait_never_sleeps_past_the_timeout(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    cli.worker_running = False
+
+    assert cli("run", "test-set", "Smoke", "--timeout", "7", "--interval", "5") == EXIT_TIMED_OUT
+    assert cli.now == 7
+
+
+def _reading_the_runs(method, path):
+    return method == "GET" and path.endswith("/test-runs")
+
+
+def test_reading_a_finished_executions_runs_has_its_own_time(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = Flaky(db.client, _reading_the_runs, GATEWAY_DOWN)
+
+    # it finishes on the check that comes at the deadline
+    code = cli("run", "test-set", "Smoke", "--timeout", "1", "--interval", "5", client=client)
+
+    assert code == EXIT_PASSED, cli.err.getvalue()
+
+
+def test_runs_that_cant_be_read_after_it_finished_are_an_error(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = Flaky(db.client, _reading_the_runs, GATEWAY_DOWN, times=1000)
+
+    assert cli("run", "test-set", "Smoke", client=client) == EXIT_ERROR
+    assert "It finished, but its runs couldn't be read: GET …: 502" in cli.err.getvalue()
+
+
+def test_an_error_while_waiting_stops_the_batch(db, cli):
+    test = db.test(name="a")
+    cli.worker_running = False
+    client = Flaky(db.client, lambda method, path: method == "GET" and "/batches/" in path,
+                   ApiError("GET …: 401 Expired", 401))
+
+    code = cli("batch", "test", test["id"], "-s", "binomial_gate", "--stop-on-timeout",
+               client=client)
+
+    assert code == EXIT_ERROR
+    assert "Stopped batch" in cli.err.getvalue()
+    assert db.client.get("/statistics/batches").json()["items"][0]["stopped_at"] is not None
 
 
 def _cancel_the_job():
