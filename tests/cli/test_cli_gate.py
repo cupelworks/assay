@@ -5,11 +5,12 @@ the cases a real batch is slow or awkward to bring about."""
 import io
 from xml.etree import ElementTree as ET
 
+import httpx
 import pytest
 
 from assay_cli import report
 from assay_cli.cli import EXIT_ERROR, _headers, build_parser, main
-from assay_cli.client import ApiError
+from assay_cli.client import ApiError, AssayClient
 from assay_cli.gate import batch_finished, batch_outcome, execution_outcome
 
 
@@ -106,3 +107,86 @@ def test_without_a_url_it_says_how_to_give_one():
     err = io.StringIO()
     assert main(["health"], env={}, out=io.StringIO(), err=err) == EXIT_ERROR
     assert "--url or $ASSAY_API_URL" in err.getvalue()
+
+
+@pytest.mark.parametrize(("status", "verdicts", "fail_on", "passed"), [
+    ("Failed", {"fail": 1, "inconclusive": 3}, ("inconclusive",), False),
+    ("Failed", {"fail": 1}, ("inconclusive",), True),
+    ("Inconclusive", {"pass": 1, "inconclusive": 2}, ("fail",), True),
+    ("Inconclusive", {"pass": 1, "inconclusive": 2}, ("fail", "inconclusive"), False),
+    ("Passed", {"pass": 2}, ("fail", "inconclusive"), True),
+])
+def test_a_batch_is_gated_on_every_checks_verdict(status, verdicts, fail_on, passed):
+    assert batch_outcome(_batch(status, verdicts), fail_on).passed is passed
+
+
+@pytest.mark.parametrize("status", ["NotRan", "Incomplete"])
+def test_a_batch_that_always_fails_reports_why_as_an_error(status):
+    outcome = batch_outcome(_batch(status, checks=[_check("A", None)]))
+
+    assert not outcome.passed
+    assert [(c.name, c.outcome) for c in outcome.failures] == [("binomial_gate", "error")]
+    text = report.text(outcome)
+    assert f"! Smoke › binomial_gate: {status}: " in text
+    assert "fails on:" not in text
+    suite = ET.fromstring(report.junit(outcome)).find("testsuite[@name='Smoke']")
+    assert suite.get("errors") == "1"
+
+
+def test_same_named_tests_in_an_execution_get_distinct_junit_names():
+    scope = {"kind": "test-plan", "id": "p", "name": "Release"}
+    details = {"id": "x", "run_count": 3,
+               "runs": {"Green": 2, "Red": 1, "Amber": 0, "NotRan": 0}}
+    runs = [{"id": "r1", "test_set_entry_id": "e1", "test_name": "Reset a password",
+             "status": "Red", "checks": {"not_met": ["Contains"]}},
+            {"id": "r2", "test_set_entry_id": "e2", "test_name": "Reset a password",
+             "status": "Green", "checks": {"not_met": []}},
+            {"id": "r3", "test_set_entry_id": "e3", "test_name": "Log in",
+             "status": "Green", "checks": {"not_met": []}}]
+
+    outcome = execution_outcome(scope, details, runs)
+
+    names = [case.get("name") for case in ET.fromstring(report.junit(outcome)).iter("testcase")]
+    assert names == ["Reset a password [e1]", "Reset a password [e2]", "Log in"]
+    assert [c.name for c in outcome.failures] == ["Reset a password [e1]"]
+
+
+@pytest.mark.parametrize("option", ["--interval", "--timeout", "--http-timeout"])
+def test_waiting_options_refuse_impossible_values(option):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["run", "test", "x", option, "-1"])
+    if option != "--timeout":  # 0 waits forever
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["run", "test", "x", option, "0"])
+    assert build_parser().parse_args(["run", "test", "x", "--timeout", "0"]).timeout == 0
+
+
+def _client(reply):
+    return AssayClient(httpx.Client(base_url="http://assay", transport=httpx.MockTransport(reply)))
+
+
+@pytest.mark.parametrize(("status", "transient"), [(502, True), (503, True), (429, True),
+                                                   (500, False), (404, False)])
+def test_a_gateways_passing_failure_is_marked_transient(status, transient):
+    with pytest.raises(ApiError) as raised:
+        _client(lambda request: httpx.Response(status)).health()
+    assert raised.value.transient is transient
+
+
+def test_an_unreachable_api_is_transient():
+    def unreachable(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    with pytest.raises(ApiError) as raised:
+        _client(unreachable).health()
+    assert raised.value.transient
+
+
+def test_anything_unforeseen_is_an_error_not_a_failed_gate():
+    class Odd:
+        def health(self):
+            raise KeyError("runs")
+
+    err = io.StringIO()
+    assert main(["health"], client=Odd(), env={}, out=io.StringIO(), err=err) == EXIT_ERROR
+    assert "unexpected error: KeyError: 'runs'" in err.getvalue()

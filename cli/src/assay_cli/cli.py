@@ -5,13 +5,15 @@
 import argparse
 import json
 import os
+import signal
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
 
 from assay_cli import __version__, report
-from assay_cli.client import SCOPES, ApiError, AssayClient
+from assay_cli.client import SCOPE_NOUNS, SCOPES, ApiError, AssayClient
 from assay_cli.gate import (
     BATCH_FAIL_ON,
     BATCH_FAIL_ON_CHOICES,
@@ -32,6 +34,10 @@ EXIT_ERROR = 2
 """Nothing to judge: bad arguments, an unreachable API, a request refused."""
 EXIT_TIMED_OUT = 3
 """It didn't finish within --timeout; nothing was concluded."""
+EXIT_INTERRUPTED = 130
+"""Ctrl-C."""
+EXIT_CANCELLED = 143
+"""SIGTERM: the CI system cancelled the job."""
 
 URL_ENV = "ASSAY_API_URL"
 HEADERS_ENV = "ASSAY_API_HEADERS"
@@ -41,11 +47,20 @@ class TimedOut(Exception):
     pass
 
 
+class Cancelled(Exception):
+    """SIGTERM arrived, as a CI system sends when a job is cancelled."""
+
+
+def _cancel(signum, frame):
+    raise Cancelled("cancelled (SIGTERM)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="assay",
         description="Run Assay's tests from a pipeline and fail the step when they fail.",
-        epilog="Exit codes: 0 passed, 1 failed the gate, 2 error, 3 timed out.")
+        epilog="Exit codes: 0 passed, 1 failed the gate, 2 error, 3 timed out, "
+               "130 interrupted, 143 cancelled.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     _connection_arguments(parser, defaults=True)
     commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
@@ -91,8 +106,9 @@ def build_parser() -> argparse.ArgumentParser:
                             f"(default {','.join(BATCH_FAIL_ON)}). A batch that was stopped "
                             "or couldn't decide anything always fails.")
     batch.add_argument("--stop-on-timeout", action="store_true",
-                       help="Stop the batch when --timeout is reached, so its remaining "
-                            "runs aren't paid for.")
+                       help="Stop the batch when the wait ends without its result "
+                            "(--timeout reached, the job cancelled, Ctrl-C), so its "
+                            "remaining runs aren't paid for.")
     _wait_arguments(batch)
     _output_arguments(batch)
     return parser
@@ -108,7 +124,8 @@ def _connection_arguments(parser, defaults: bool) -> None:
                         dest="header" if defaults else "header_after", metavar="'NAME: VALUE'",
                         help="A header sent with every request, e.g. for a gateway in front "
                              f"of the API; repeatable. ${HEADERS_ENV} takes a JSON object.")
-    parser.add_argument("--http-timeout", type=float, default=default(30.0), metavar="SECONDS",
+    parser.add_argument("--http-timeout", type=_positive_float, default=default(30.0),
+                        metavar="SECONDS",
                         help="Timeout of each request to the API (default 30).")
 
 
@@ -120,9 +137,9 @@ def _scope_arguments(parser) -> None:
 def _wait_arguments(parser) -> None:
     parser.add_argument("--no-wait", action="store_true",
                         help="Start it, print its id and exit 0 without waiting.")
-    parser.add_argument("--timeout", type=float, default=3600, metavar="SECONDS",
+    parser.add_argument("--timeout", type=_non_negative_float, default=3600, metavar="SECONDS",
                         help="Give up waiting after this long (default 3600; 0 waits forever).")
-    parser.add_argument("--interval", type=float, default=5, metavar="SECONDS",
+    parser.add_argument("--interval", type=_positive_float, default=5, metavar="SECONDS",
                         help="Time between checks on its progress (default 5).")
 
 
@@ -152,6 +169,20 @@ def _positive_int(value: str) -> int:
     number = int(value)
     if number < 1:
         raise argparse.ArgumentTypeError("must be at least 1")
+    return number
+
+
+def _positive_float(value: str) -> float:
+    number = float(value)
+    if not number > 0:  # NaN too
+        raise argparse.ArgumentTypeError("must be more than 0")
+    return number
+
+
+def _non_negative_float(value: str) -> float:
+    number = float(value)
+    if not number >= 0:
+        raise argparse.ArgumentTypeError("must be 0 or more")
     return number
 
 
@@ -193,6 +224,7 @@ class Runner:
                  sleep: Callable[[float], None], clock: Callable[[], float]):
         self.client, self.args, self.env = client, args, env
         self.out, self.err, self.sleep, self.clock = out, err, sleep, clock
+        self.deadline: float | None = None
 
     def say(self, message: str) -> None:
         print(message, file=self.err, flush=True)
@@ -216,7 +248,7 @@ class Runner:
         if args.scope == "test":
             self.say(f"Started run {run_id} of test {target['name']!r}.")
         else:
-            self.say(f"Started execution {run_id} of {args.scope.replace('-', ' ')} "
+            self.say(f"Started execution {run_id} of {SCOPE_NOUNS[args.scope]} "
                      f"{target['name']!r}: {started.get('run_count', '?')} runs.")
         if args.no_wait:
             return self._started("run" if args.scope == "test" else "execution", run_id, scope)
@@ -231,7 +263,8 @@ class Runner:
                 lambda: self.client.execution(args.scope, target["id"], run_id),
                 lambda d: run_finished(d["runs"]),
                 lambda d: _progress(d["runs"], d.get("run_count")))
-            runs = self.client.execution_runs(args.scope, target["id"], run_id)
+            runs = self._read(
+                lambda: self.client.execution_runs(args.scope, target["id"], run_id))
             outcome = execution_outcome(scope, details, runs, args.fail_on)
         return self._report(outcome)
 
@@ -248,7 +281,7 @@ class Runner:
         started = self.client.start_batch(body)
         batch_id = str(started["id"])
         progress = started.get("progress") or {}
-        self.say(f"Started batch {batch_id} of {args.scope.replace('-', ' ')} "
+        self.say(f"Started batch {batch_id} of {SCOPE_NOUNS[args.scope]} "
                  f"{target['name']!r}: {args.statistical_test}, "
                  f"{progress.get('times_requested', '?')} times, "
                  f"{progress.get('runs_total', '?')} runs.")
@@ -257,29 +290,56 @@ class Runner:
         try:
             batch = self._wait(lambda: self.client.batch(batch_id), batch_finished,
                                _batch_progress)
-        except TimedOut:
+        except (TimedOut, Cancelled, KeyboardInterrupt):
             if args.stop_on_timeout:
-                self.client.stop_batch(batch_id)
-                self.say(f"Stopped batch {batch_id}: its remaining runs are cancelled.")
+                self._stop(batch_id)
             raise
         return self._report(batch_outcome(batch, args.fail_on))
+
+    def _stop(self, batch_id: str) -> None:
+        """Best effort: a failed stop is reported, and the wait's own ending kept."""
+        try:
+            self.client.stop_batch(batch_id)
+        except ApiError as exc:
+            self.say(f"Couldn't stop batch {batch_id} ({exc}): its remaining runs may "
+                     "still run; stop it in Assay.")
+        else:
+            self.say(f"Stopped batch {batch_id}: its remaining runs are cancelled.")
 
     # -- waiting and reporting --
 
     def _wait(self, read, finished, describe):
-        deadline = self.clock() + self.args.timeout if self.args.timeout > 0 else None
+        self.deadline = self.clock() + self.args.timeout if self.args.timeout > 0 else None
         last = None
         while True:
-            current = read()
+            current = self._read(read)
             line = describe(current)
             if line != last:
                 self.say(f"  {line}")
                 last = line
             if finished(current):
                 return current
-            if deadline is not None and self.clock() >= deadline:
+            if self._past_deadline():
                 raise TimedOut(f"Still not finished after {self.args.timeout:g}s: {line}")
             self.sleep(self.args.interval)
+
+    def _read(self, read):
+        """A read while waiting: a passing failure of the network or a gateway is
+        tried again until the deadline; any other error ends the wait."""
+        while True:
+            try:
+                return read()
+            except ApiError as exc:
+                if not exc.transient:
+                    raise
+                if self._past_deadline():
+                    raise TimedOut(f"Still not finished after {self.args.timeout:g}s: "
+                                   f"the last check failed ({exc})") from exc
+                self.say(f"  {exc}; trying again in {self.args.interval:g}s")
+                self.sleep(self.args.interval)
+
+    def _past_deadline(self) -> bool:
+        return self.deadline is not None and self.clock() >= self.deadline
 
     def _started(self, kind: str, started_id: str, scope: dict) -> int:
         if self.args.json:
@@ -297,8 +357,10 @@ class Runner:
             self.args.junit.parent.mkdir(parents=True, exist_ok=True)
             self.args.junit.write_bytes(report.junit(outcome))
             self.say(f"JUnit report: {self.args.junit}")
-        for path in {p for p in (self.args.markdown, self.env.get("GITHUB_STEP_SUMMARY")) if p}:
-            with open(path, "a", encoding="utf-8") as summary:
+        given = (self.args.markdown, self.env.get("GITHUB_STEP_SUMMARY"))
+        for path in dict.fromkeys(Path(p).resolve() for p in given if p):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as summary:
                 summary.write(report.markdown(outcome))
         return EXIT_PASSED if outcome.passed else EXIT_FAILED
 
@@ -330,6 +392,10 @@ def main(argv: list[str] | None = None, *, client: AssayClient | None = None,
     err = err or sys.stderr
     args = build_parser().parse_args(argv)
     owned = client is None
+    # a CI system cancels a job with SIGTERM: end the wait like Ctrl-C does, so a
+    # batch can still be stopped (signals are only handled on the main thread)
+    on_main_thread = threading.current_thread() is threading.main_thread()
+    previous = signal.signal(signal.SIGTERM, _cancel) if on_main_thread else None
     try:
         if owned:
             url = args.url or env.get(URL_ENV)
@@ -345,10 +411,20 @@ def main(argv: list[str] | None = None, *, client: AssayClient | None = None,
     except TimedOut as exc:
         print(f"assay: {exc}", file=err)
         return EXIT_TIMED_OUT
+    except Cancelled as exc:
+        print(f"assay: {exc}", file=err)
+        return EXIT_CANCELLED
     except KeyboardInterrupt:
         print("assay: interrupted", file=err)
-        return 130
+        return EXIT_INTERRUPTED
+    except Exception as exc:
+        # anything unforeseen is an error, never a failed gate (exit 1)
+        print(f"assay: unexpected error: {type(exc).__name__}: {exc}", file=err)
+        return EXIT_ERROR
     finally:
+        if on_main_thread:
+            # None: a handler not set from Python, which can't be put back
+            signal.signal(signal.SIGTERM, signal.SIG_DFL if previous is None else previous)
         if owned and client is not None:
             client.close()
 

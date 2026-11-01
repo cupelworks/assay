@@ -5,6 +5,7 @@ for tools (JUnit XML, which GitLab, Azure Pipelines, Jenkins and most CI
 systems show as test results)."""
 from xml.etree import ElementTree as ET
 
+from assay_cli.client import SCOPE_NOUNS
 from assay_cli.gate import Outcome
 
 _MARK = {"passed": "✓", "failed": "✗", "error": "!", "skipped": "–"}
@@ -19,15 +20,15 @@ def text(outcome: Outcome) -> str:
         lines.append(f"  {_MARK[case.outcome]} {_label(outcome, case)}: {case.message}")
     if len(failures) > MAX_LISTED:
         lines.append(f"  … and {len(failures) - MAX_LISTED} more (see the JUnit report)")
-    if not outcome.passed and outcome.fail_on:
+    if not outcome.passed and outcome.fail_on and not outcome.reason:
         lines.append(f"  fails on: {', '.join(outcome.fail_on)}")
     return "\n".join(lines)
 
 
 def markdown(outcome: Outcome) -> str:
     icon = "✅" if outcome.passed else "❌"
-    noun = outcome.scope["kind"].replace("-", " ")
-    lines = [f"### {icon} Assay: {noun} `{outcome.scope['name']}`", "",
+    lines = [f"### {icon} Assay: {SCOPE_NOUNS[outcome.scope['kind']]} "
+             f"`{outcome.scope['name']}`", "",
              _escape(outcome.summary), "",
              f"{outcome.kind.capitalize()} `{outcome.id}`"]
     failures = outcome.failures

@@ -5,12 +5,23 @@ httpx.Client, so the CLI talks to the same routes a pipeline would. Between
 two polls, the "sleep" executes the dispatched runs as a worker would."""
 import io
 import json
+import os
+import signal
 from xml.etree import ElementTree as ET
 
 import pytest
 
-from assay_cli.cli import EXIT_ERROR, EXIT_FAILED, EXIT_PASSED, EXIT_TIMED_OUT, main
-from assay_cli.client import AssayClient
+from assay_cli.cli import (
+    EXIT_CANCELLED,
+    EXIT_ERROR,
+    EXIT_FAILED,
+    EXIT_INTERRUPTED,
+    EXIT_PASSED,
+    EXIT_TIMED_OUT,
+    _cancel,
+    main,
+)
+from assay_cli.client import ApiError, AssayClient
 
 PASSES = {"name": "Contains", "config": {"substring": "answer"}}
 MISSES = {"name": "Contains", "label": "Misses", "config": {"substring": "absent"}}
@@ -23,6 +34,7 @@ class Cli:
         self.now = 0.0
         self.sleeps = 0
         self.worker_running = True
+        self.on_sleep = None
 
     def sleep(self, seconds):
         self.sleeps += 1
@@ -30,11 +42,34 @@ class Cli:
         if self.worker_running:
             pending, self.db.dispatched[:] = list(self.db.dispatched), []
             self.db.execute(pending)
+        if self.on_sleep:
+            self.on_sleep()
 
-    def __call__(self, *argv, env=None):
+    def __call__(self, *argv, env=None, client=None):
         self.out, self.err = io.StringIO(), io.StringIO()
-        return main(list(argv), client=AssayClient(self.db.client), env=env or {},
+        return main(list(argv), client=client or AssayClient(self.db.client), env=env or {},
                     out=self.out, err=self.err, sleep=self.sleep, clock=lambda: self.now)
+
+
+class Flaky(AssayClient):
+    """Fails the requests `fails(method, path)` picks with `error`, `times` times."""
+
+    def __init__(self, http, fails, error, times=1):
+        super().__init__(http)
+        self.fails, self.error, self.times = fails, error, times
+
+    def _request(self, method, path, **kwargs):
+        if self.times and self.fails(method, path):
+            self.times -= 1
+            raise self.error
+        return super()._request(method, path, **kwargs)
+
+
+def _reading_an_execution(method, path):
+    return method == "GET" and "/executions/" in path
+
+
+GATEWAY_DOWN = ApiError("GET …: 502 Bad Gateway", 502, transient=True)
 
 
 @pytest.fixture
@@ -212,3 +247,78 @@ def test_a_run_with_no_application_to_ask_is_not_ran(db, cli):
 
     assert cli("run", "test-set", "Live") == EXIT_FAILED
     assert "! asks: Not Ran:" in cli.out.getvalue()
+
+
+def test_a_gateways_passing_failure_while_waiting_is_tried_again(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = Flaky(db.client, _reading_an_execution, GATEWAY_DOWN, times=2)
+
+    code = cli("run", "test-set", "Smoke", "--interval", "1", client=client)
+
+    assert code == EXIT_PASSED, cli.err.getvalue()
+    assert cli.err.getvalue().count("502 Bad Gateway; trying again in 1s") == 2
+
+
+def test_a_gateway_down_until_the_deadline_times_out(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = Flaky(db.client, _reading_an_execution, GATEWAY_DOWN, times=1000)
+
+    code = cli("run", "test-set", "Smoke", "--timeout", "10", "--interval", "5", client=client)
+
+    assert code == EXIT_TIMED_OUT
+    assert "the last check failed (GET …: 502 Bad Gateway)" in cli.err.getvalue()
+
+
+def test_an_apis_own_error_while_waiting_is_not_tried_again(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = Flaky(db.client, _reading_an_execution, ApiError("GET …: 500 Internal", 500))
+
+    assert cli("run", "test-set", "Smoke", client=client) == EXIT_ERROR
+    assert "trying again" not in cli.err.getvalue()
+
+
+def _cancel_the_job():
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _press_ctrl_c():
+    raise KeyboardInterrupt
+
+
+@pytest.mark.parametrize(("interrupt", "exit_code"), [(_cancel_the_job, EXIT_CANCELLED),
+                                                      (_press_ctrl_c, EXIT_INTERRUPTED)])
+def test_a_cancelled_job_stops_its_batch(db, cli, interrupt, exit_code):
+    test = db.test(name="a")
+    cli.worker_running = False
+    cli.on_sleep = interrupt
+
+    code = cli("batch", "test", test["id"], "-s", "binomial_gate", "--stop-on-timeout")
+
+    assert code == exit_code
+    assert "Stopped batch" in cli.err.getvalue()
+    assert db.client.get("/statistics/batches").json()["items"][0]["stopped_at"] is not None
+    assert signal.getsignal(signal.SIGTERM) is not _cancel  # main put the old one back
+
+
+def test_a_failed_stop_keeps_the_timeout(db, cli):
+    test = db.test(name="a")
+    cli.worker_running = False
+    client = Flaky(db.client, lambda method, path: path.endswith("/stop"),
+                   ApiError("POST …/stop: 409 Already finished", 409))
+
+    code = cli("batch", "test", test["id"], "-s", "binomial_gate", "--timeout", "1",
+               "--stop-on-timeout", client=client)
+
+    assert code == EXIT_TIMED_OUT
+    assert "Couldn't stop batch" in cli.err.getvalue()
+
+
+def test_the_markdown_summary_creates_its_folder_and_is_written_once(db, cli, tmp_path):
+    db.test_set("Smoke", [db.test(name="a")])
+    summary = tmp_path / "reports" / "md" / "summary.md"
+
+    code = cli("run", "test-set", "Smoke", "--markdown", str(summary),
+               env={"GITHUB_STEP_SUMMARY": str(summary)})
+
+    assert code == EXIT_PASSED, cli.err.getvalue()
+    assert summary.read_text().count("### ✅ Assay: test set `Smoke`") == 1

@@ -14,15 +14,21 @@ SCOPES = ("test", "test-set", "test-plan")
 _LIST_PATHS = {"test": "/tests", "test-set": "/test-sets", "test-plan": "/test-plans"}
 _LIST_KEYS = {"test": "test_cases"}
 """Where a list's items are, when not under `items`."""
-_SCOPE_NOUNS = {"test": "test", "test-set": "test set", "test-plan": "test plan"}
+SCOPE_NOUNS = {"test": "test", "test-set": "test set", "test-plan": "test plan"}
+"""Each scope as a sentence spells it."""
+_TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
+"""Replies a gateway or a busy API gives in passing: worth asking again."""
 
 
 class ApiError(Exception):
-    """The API refused a request, or couldn't be reached."""
+    """The API refused a request, or couldn't be reached. `transient`: the network
+    or a gateway failed in passing, so the same request may succeed later."""
 
-    def __init__(self, message: str, status_code: int | None = None):
+    def __init__(self, message: str, status_code: int | None = None,
+                 transient: bool = False):
         super().__init__(message)
         self.status_code = status_code
+        self.transient = transient
 
 
 class AssayClient:
@@ -44,10 +50,12 @@ class AssayClient:
         try:
             response = self.http.request(method, path, **kwargs)
         except httpx.HTTPError as exc:
-            raise ApiError(f"{method} {path}: couldn't reach Assay ({exc})") from exc
+            raise ApiError(f"{method} {path}: couldn't reach Assay ({exc})",
+                           transient=True) from exc
         if response.status_code >= 400:
             raise ApiError(f"{method} {path}: {response.status_code} {_detail(response)}",
-                           response.status_code)
+                           response.status_code,
+                           transient=response.status_code in _TRANSIENT_STATUSES)
         if not response.content:
             return None
         try:
@@ -75,7 +83,7 @@ class AssayClient:
 
     def resolve(self, scope: str, ref: str) -> dict:
         """A test, test set or plan by id, or by its exact name: `{id, name}`."""
-        noun = _SCOPE_NOUNS[scope]
+        noun = SCOPE_NOUNS[scope]
         if _is_uuid(ref):
             item = self._request("GET", f"{_LIST_PATHS[scope]}/{ref}")
             return {"id": str(item.get("id", ref)), "name": item.get("name", ref)}

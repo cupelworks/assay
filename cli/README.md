@@ -342,13 +342,23 @@ assay batch test-set "Smoke" -s binomial_gate --fail-on fail,inconclusive
   borderline check doesn't block you by chance.
 - **`fail,inconclusive`** also fails the step when there isn't enough evidence that every
   check passes. This is stricter: use it for release gates.
+- **Every check's verdict counts,** not only the batch's status: with `--fail-on inconclusive`,
+  a `Failed` batch fails the step when any of its checks is inconclusive too.
 - A batch that was stopped or couldn't decide anything always fails, whatever you choose.
 
 ### Stopping a batch that's taking too long: `--stop-on-timeout`
 
-If the step gives up waiting (`--timeout`), the batch normally carries on in Assay and you
-keep paying for its runs. With `--stop-on-timeout`, the CLI stops it first: runs not yet
-started are cancelled, and the batch ends `Incomplete`. The step still exits 3 (timed out).
+If the step stops waiting before the batch's result, the batch normally carries on in Assay
+and you keep paying for its runs. With `--stop-on-timeout`, the CLI stops it first: runs not
+yet started are cancelled, and the batch ends `Incomplete`. It does so whenever the wait
+ends early:
+
+- `--timeout` is reached: the step still exits 3 (timed out);
+- the CI system cancels the job (it sends SIGTERM): exit 143;
+- Ctrl-C: exit 130.
+
+If Assay refuses the stop, the CLI says so and exits as it would have: stop the batch in
+Assay then.
 
 Cancelling the pipeline or pressing Ctrl-C doesn't stop a batch. Stop it in the UI or with
 `POST /statistics/batches/{id}/stop`.
@@ -373,13 +383,16 @@ Per-check targets and leaving checks out of a batch are possible through the API
 | Option | Default | What it does |
 |---|---|---|
 | `--timeout SECONDS` | `3600` (an hour) | Give up waiting after this long and exit 3. `0` waits forever |
-| `--interval SECONDS` | `5` | Time between two checks on its progress |
+| `--interval SECONDS` | `5` | Time between two checks on its progress; more than 0 |
 | `--no-wait` | | Start it, print its id, and exit 0 straight away |
 
 - **Progress** is printed to stderr each time it changes: runs finished by outcome for a
   run, runs and times done (and waves) for a batch.
 - **Set the CLI's `--timeout` below your CI job's own time limit,** so the CLI reports the
   timeout (and can stop a batch) before the CI system kills the step.
+- **A passing failure doesn't end the wait.** When a check on its progress can't reach the
+  API, or a gateway answers `429`, `502`, `503` or `504`, the CLI says so and tries again
+  after `--interval`, until `--timeout`. Any other refusal ends it with exit 2.
 - **Timing out stops waiting, not the work.** The runs carry on in Assay and their results
   are kept there. Only a batch with `--stop-on-timeout` is stopped.
 - **`--no-wait`** prints the new execution's, run's or batch's id on stdout (with `--json`:
@@ -440,7 +453,7 @@ Prints one JSON object instead of the text, for scripts:
 | `passed` | Whether the step passed: the same as exit code 0 |
 | `counts` | Runs by outcome; for a batch, checks by verdict (`pass`, `fail`, `inconclusive`, `none`) |
 | `fail_on` | The rule it was judged by |
-| `failures` | What failed the step: `outcome` is `failed` or `error` (a run that couldn't run) |
+| `failures` | What failed the step: `outcome` is `failed` or `error` (a run that couldn't run, or a batch that ended `Incomplete` or `NotRan`) |
 
 For example, `assay run test-set Smoke --json | jq -r '.failures[].name'`.
 
@@ -455,9 +468,13 @@ folders in the path are created.
 | `<testsuite>` | The test set or plan (or test) | Each entry: `test set / test` |
 | `<testcase>` | Each run, named after its test | Each check, named by its label |
 | `<failure>` | A run whose outcome fails the step (`Amber`, `Red`) | A verdict that fails the step |
-| `<error>` | A run that couldn't run (`NotRan`) | |
+| `<error>` | A run that couldn't run (`NotRan`) | A batch that ended `Incomplete` or `NotRan`: one case named after the statistical test, with the reason |
 | `<skipped>` | | A check with no verdict, or a verdict you don't fail on (e.g. `inconclusive` by default) |
 | `<system-out>` | The outcome of a run you tolerated | |
+
+When two cases would share a suite and a name, for example the same test in two sets of a
+plan, each name ends with its entry's id in brackets: CI systems merge cases with the same
+names.
 
 Each suite has a property `assay.execution_id` (or `assay.run_id`, `assay.batch_id`), so
 you can find the run in Assay from the CI system.
@@ -467,7 +484,8 @@ you can find the run in Assay from the CI system.
 The CLI appends a short Markdown summary to `FILE`: ✅ or ❌, the outcome, the id, and a
 table of what failed. On **GitHub Actions** it also appends it to `$GITHUB_STEP_SUMMARY` by
 itself, so the summary shows on the run's page without any option. Use `--markdown` on
-other systems, e.g. to post it as a pull request comment.
+other systems, e.g. to post it as a pull request comment. Missing folders in the path are
+created, and a file given both ways gets the summary once.
 
 ## Exit codes
 
@@ -475,9 +493,10 @@ other systems, e.g. to post it as a pull request comment.
 |---|---|---|
 | `0` | Passed | Every run, or every verdict, met your rule. Also: `--no-wait` started it; `health` is ready |
 | `1` | Failed the gate | A run you fail on, a verdict you fail on, an `Incomplete` or `NotRan` batch; `health` not ready |
-| `2` | Error: nothing was judged | No URL; bad arguments; the API unreachable; a name with no match; the API refused the request (the reason is shown) |
+| `2` | Error: nothing was judged | No URL; bad arguments; the API unreachable; a name with no match; the API refused the request (the reason is shown); a report file that can't be written; anything unexpected |
 | `3` | Timed out | Not finished within `--timeout`, usually because no worker is running |
 | `130` | Interrupted | Ctrl-C |
+| `143` | Cancelled | The CI system cancelled the job (SIGTERM) |
 
 A pipeline step fails on any code other than 0. To tell the reasons apart in a script:
 
@@ -749,10 +768,10 @@ assay batch {test,test-set,test-plan} ID_OR_NAME
 | `--param KEY=VALUE`, `-p` | `batch` | the test's defaults | A parameter; repeatable |
 | `--note TEXT` | `batch` | | Kept with the batch |
 | `--fail-on VERDICTS` | `batch` | `fail` | `fail`, `inconclusive`, or both |
-| `--stop-on-timeout` | `batch` | off | Stop the batch when `--timeout` is reached |
+| `--stop-on-timeout` | `batch` | off | Stop the batch when the wait ends early: `--timeout`, a cancelled job, Ctrl-C |
 | `--no-wait` | `run`, `batch` | off | Start, print the id, exit 0 |
 | `--timeout SECONDS` | `run`, `batch` | `3600` | Give up waiting; `0` waits forever |
-| `--interval SECONDS` | `run`, `batch` | `5` | Time between progress checks |
+| `--interval SECONDS` | `run`, `batch` | `5` | Time between progress checks; more than 0 |
 | `--json` | `run`, `batch` | off | The outcome as JSON |
 | `--junit FILE` | `run`, `batch` | | Write JUnit XML |
 | `--markdown FILE` | `run`, `batch` | | Append a Markdown summary |
