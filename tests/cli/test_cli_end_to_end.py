@@ -19,6 +19,7 @@ from assay_cli.cli import (
     EXIT_INTERRUPTED,
     EXIT_PASSED,
     EXIT_TIMED_OUT,
+    EXIT_UNJUDGED,
     READ_SECONDS,
     STOP_SECONDS,
     Cancelled,
@@ -266,7 +267,7 @@ def test_a_run_with_no_application_to_ask_is_not_ran(db, cli):
     code = cli("run", "test-set", "Live", "--fail-on", "Red")
     assert code == EXIT_PASSED  # NotRan tolerated on request
 
-    assert cli("run", "test-set", "Live") == EXIT_FAILED
+    assert cli("run", "test-set", "Live") == EXIT_UNJUDGED  # nothing about quality decided
     assert "! asks: Not Ran:" in cli.out.getvalue()
 
 
@@ -628,3 +629,109 @@ def test_anything_unforeseen_is_an_error_not_a_failed_gate():
     err = io.StringIO()
     assert main(["health"], client=Odd(), env={}, out=io.StringIO(), err=err) == EXIT_ERROR
     assert "unexpected error: KeyError: 'runs'" in err.getvalue()
+
+
+# --- tolerance: a policy file and the flags over it ---
+
+POLICY = """\
+test_plan: "Release"
+fail_on: [Red, NotRan]
+test_sets:
+  "Smoke": { max_failures: 0 }
+  "Tone": { min_pass_rate: 0.5 }
+"""
+
+
+@pytest.fixture
+def release(db):
+    """A plan of two sets: Smoke all Green; Tone with one Red run out of two."""
+    smoke = db.test_set("Smoke", [db.test(name="login")])
+    tone = db.test_set("Tone", [db.test(name="polite", checks=[MISSES]),
+                                db.test(name="warm")])
+    return db.test_plan("Release", [smoke, tone])
+
+
+def _policy(tmp_path, text=POLICY):
+    path = tmp_path / "assay-gate.yml"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def test_a_policy_tolerates_what_it_says_and_says_so(db, cli, release, tmp_path):
+    junit = tmp_path / "assay.xml"
+
+    code = cli("run", "test-plan", "Release", "--policy", _policy(tmp_path),
+               "--junit", str(junit))
+
+    assert code == EXIT_PASSED, cli.out.getvalue() + cli.err.getvalue()
+    assert "  gate: Tone: 1 of 2 passed (50%) ≥ min 50%" in cli.out.getvalue()
+    suites = [s.get("name") for s in ET.parse(junit).getroot().findall("testsuite")]
+    assert sorted(suites[:-1]) == ["Smoke", "Tone"] and suites[-1] == "Assay gate"
+
+
+def test_a_flag_tightens_one_test_set_for_one_run(db, cli, release, tmp_path):
+    code = cli("run", "test-plan", "Release", "--policy", _policy(tmp_path),
+               "--max-failures", "Tone=0", "--json")
+
+    assert code == EXIT_FAILED
+    outcome = json.loads(cli.out.getvalue())
+    assert [r["text"] for r in outcome["gate"] if r["broken"]] == ["Tone: 1 failure > max 0"]
+
+
+def test_limits_given_only_as_flags(db, cli, release):
+    assert cli("run", "test-plan", "Release", "--max-failures", "1") == EXIT_PASSED
+    assert cli("run", "test-plan", "Release", "--min-pass-rate", "0.9") == EXIT_FAILED
+    assert "2 of 3 passed (66.7%) < min 90%" in cli.out.getvalue()
+
+
+def test_a_blocking_check_fails_the_step_whatever_the_limits(db, cli, release):
+    code = cli("run", "test-plan", "Release", "--max-failures", "5",
+               "--blocking-check", "Misses")
+
+    assert code == EXIT_FAILED
+    assert "gate: blocking check 'Misses' failed in 1 run" in cli.out.getvalue()
+
+
+def test_a_policy_naming_a_set_the_plan_doesnt_link_is_refused_before_it_starts(
+        db, cli, release, tmp_path):
+    path = _policy(tmp_path, POLICY.replace('"Tone"', '"Tonne"'))
+
+    assert cli("run", "test-plan", "Release", "--policy", path) == EXIT_ERROR
+    assert "names test set 'Tonne', which this test plan doesn't run" in cli.err.getvalue()
+    assert db.dispatched == []  # nothing was started
+
+
+def test_a_policy_for_another_scope_is_refused_before_it_starts(db, cli, release, tmp_path):
+    db.test_plan("Nightly", [db.test_set("Smoke 2", [db.test(name="x")])])
+
+    assert cli("run", "test-plan", "Nightly", "--policy", _policy(tmp_path)) == EXIT_ERROR
+    assert "is for the test plan 'Release', not the test plan 'Nightly'" in cli.err.getvalue()
+    assert db.dispatched == []
+
+
+def test_a_policy_file_with_a_mistake_is_refused_before_any_request(tmp_path):
+    class Untouched:
+        def __getattr__(self, name):
+            raise AssertionError(f"the API was called: {name}")
+
+    err = io.StringIO()
+    code = main(["run", "test-plan", "Release", "--policy",
+                 _policy(tmp_path, "max_failure: 3\n")],
+                client=Untouched(), env={}, out=io.StringIO(), err=err)
+
+    assert code == EXIT_ERROR
+    assert "unknown key 'max_failure'" in err.getvalue()
+
+
+def test_per_set_limits_on_a_standalone_test_are_refused(db, cli):
+    db.test(name="lonely")
+
+    assert cli("run", "test", "lonely", "--max-failures", "Smoke=1") == EXIT_ERROR
+    assert "which this test doesn't run (it runs: none)" in cli.err.getvalue()
+
+
+def test_an_execution_that_failed_only_by_not_running_exits_4(db, cli):
+    db.test_set("Live", [db.test(name="asks", model_output=None), db.test(name="recorded")])
+
+    assert cli("run", "test-set", "Live") == EXIT_UNJUDGED
+    assert "couldn't be judged: it failed only on runs that Not Ran" in cli.out.getvalue()

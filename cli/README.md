@@ -6,9 +6,9 @@ Run Assay's tests from a CI/CD pipeline, and fail the step when they fail.
 for it to finish, prints what happened, and exits with a code the pipeline understands.
 It writes JUnit XML for your CI system's test results and a summary for GitHub's job page.
 
-It's a thin client of [Assay's API](../README.md#api). It needs only `httpx`, not the
-backend, its database, its worker or the NLP models, so it installs in seconds on any
-runner.
+It's a thin client of [Assay's API](../README.md#api). It needs only `httpx` and
+`PyYAML`, not the backend, its database, its worker or the NLP models, so it installs in
+seconds on any runner.
 
 ```console
 $ assay run test-plan "Release checks" --junit assay.xml
@@ -18,8 +18,8 @@ Started execution 3f1c… of test plan 'Release checks': 24 runs.
   24/24 runs finished (22 Green, 1 Amber, 1 Red)
 FAILED: test plan 'Release checks', 24 runs: 22 Green, 1 Amber, 1 Red, 0 NotRan
   execution id: 3f1c…
-  ✗ Refund policy: Red: not met: Correctness, Contains
-  ✗ Greeting: Amber: not met: BLEU
+  ✗ Support › Refund policy: Red: not met: Correctness, Contains
+  ✗ Smoke › Greeting: Amber: not met: BLEU
   fails on: Amber, Red, NotRan
 JUnit report: assay.xml
 $ echo $?
@@ -35,6 +35,7 @@ $ echo $?
 - [Name what to run](#name-what-to-run)
 - [`assay health`](#assay-health): is Assay ready?
 - [`assay run`](#assay-run): run once and gate on the outcomes
+  - [Tolerating some failures](#tolerating-some-failures): limits, blocking checks, a policy file
 - [`assay batch`](#assay-batch): run N times and gate on statistical verdicts
 - [Waiting](#waiting)
 - [Output](#output): text, JSON, JUnit XML, Markdown
@@ -56,7 +57,9 @@ $ echo $?
   unlucky run.
 - **Wait for the result** and show progress while it waits, with a time limit.
 - **Decide pass or fail for the step** with a rule you choose: which run outcomes, or
-  which verdicts, fail it.
+  which verdicts, fail it; how many failing runs an execution may have, over all of it or
+  per test set; which checks may never fail. The rules can live in a file in your
+  repository, so loosening the gate is reviewed like any change.
 - **Report it** as text for the log, JSON for scripts, JUnit XML for CI test-result views,
   and Markdown for GitHub's job summary (or any file).
 - **Check Assay is ready** before a pipeline depends on it.
@@ -196,7 +199,8 @@ timeout an hour later.
 ## `assay run`
 
 Runs a scope once, waits for every run to finish, and fails the step if any run's outcome
-is one you fail on.
+is one you fail on, or, with [limits](#tolerating-some-failures), if more runs fail than
+you allow.
 
 ```bash
 assay run test "Greeting"
@@ -218,10 +222,11 @@ Each run scores the test's checks and ends with one outcome:
 A test that carries a recorded answer is scored as it is. A test without one makes Assay
 call your application, with the settings in effect now, and score its reply.
 
-### Choosing what fails the step: `--fail-on`
+### Choosing what fails a run: `--fail-on`
 
-By default **anything short of Green fails the step**: `--fail-on Amber,Red,NotRan`.
-Give the outcomes you want to fail on, separated by commas, in any case:
+By default **anything short of Green fails a run, and any failing run fails the step**:
+`--fail-on Amber,Red,NotRan`. Give the outcomes you want to fail on, separated by commas,
+in any case:
 
 ```bash
 assay run test-set "Smoke" --fail-on Red,NotRan   # tolerate Amber
@@ -230,6 +235,113 @@ assay run test-set "Smoke" --fail-on red          # tolerate Amber and NotRan to
 
 Runs you tolerate still appear in the JUnit report, with their outcome in the test case's
 output.
+
+A run that couldn't run (`NotRan`) says nothing about quality: the application or the
+judge didn't answer. When the step fails only because of such runs, it exits **4**, not 1,
+so "the application is down" and "the application got worse" look different in the
+pipeline (see [Exit codes](#exit-codes)).
+
+### Tolerating some failures
+
+One execution is **one sample per entry**. A GenAI application that passes each of 40
+entries 95% of the time still fails at least one of them 87% of the time, so "any failure
+fails" blocks a healthy application most days. Allowing up to 4 failures lets that
+application through 95% of the time, but it also lets through one degraded to 85% about
+a quarter of the time. Tolerance is a heuristic: it trades missed regressions for fewer
+false alarms. For a decision you can put a confidence on, run a
+[statistics batch](#assay-batch).
+
+Tolerance is always your explicit choice; without it, the strict default holds.
+
+| Option | What it allows |
+|---|---|
+| `--max-failures N` | At most N failing runs in the whole execution |
+| `--max-failures "TEST_SET=N"` | At most N in that test set |
+| `--min-pass-rate RATE` | At least RATE (0 to 1) of the runs passing, over the whole execution |
+| `--min-pass-rate "TEST_SET=RATE"` | The same, in that test set |
+| `--blocking-check LABEL` | Nothing: any run in which that check fails fails the step, whatever the counts |
+| `--policy FILE` | The rules above, read from a file (below) |
+
+Each is repeatable: give a limit over the whole and others per set, or several blocking
+checks.
+
+```bash
+assay run test-plan "Release checks" --fail-on Red,NotRan --max-failures 3
+assay run test-plan "Release checks" --max-failures "Smoke=0" --min-pass-rate "Tone=0.8" \
+  --blocking-check Toxicity --blocking-check "Valid JSON"
+```
+
+**How the step is judged:**
+
+1. A run fails when its outcome is in `--fail-on`.
+2. A blocking check that failed in any run fails the step, whatever the counts. It counts
+   even in a run whose outcome you tolerate (an `Amber` run with `--fail-on Red`).
+3. A test set with limits of its own is judged by them: its failing runs against
+   `max_failures`, its passing share against `min_pass_rate`.
+4. Limits over the whole execution count every run, those sets' included.
+5. **Without limits over the whole,** every run outside the sets with their own limits
+   must pass. So `--min-pass-rate "Tone=0.8"` alone tolerates failures in Tone only.
+
+A test set is named as Assay names it, exactly. A plan's runs each carry the test set of
+their entry, so per-set limits work on a test plan; on a test set, its own name works too;
+a standalone test has no sets. A limit naming a set the scope doesn't run is refused
+before anything starts: it's a typo, or a set renamed since, and would never apply.
+
+#### A policy file: `--policy`
+
+Keep the rules in the application's repository, so loosening the gate is reviewed in a
+pull request:
+
+```yaml
+# assay-gate.yml
+test_plan: "Release checks"     # optional: the scope this file is for
+fail_on: [Red, NotRan]          # Amber tolerated
+max_failures: 3                 # over the whole plan
+test_sets:
+  "Smoke": { max_failures: 0 }
+  "Tone": { min_pass_rate: 0.80 }
+blocking_checks: ["Toxicity", "Valid JSON"]
+```
+
+```bash
+assay run test-plan "Release checks" --policy assay-gate.yml
+```
+
+| Key | Value |
+|---|---|
+| `test_plan`, `test_set` or `test` | Optional, one of them: the scope's name or id. The file then refuses any other scope, so it can't gate the wrong plan by mistake |
+| `fail_on` | A list (or comma-separated) of `Green`, `Amber`, `Red`, `NotRan`; default `[Amber, Red, NotRan]` |
+| `max_failures` | A whole number, 0 or more, over the whole execution |
+| `min_pass_rate` | A share from 0 to 1 (`0.8` for 80%), over the whole execution |
+| `test_sets` | Each set's name, then its `max_failures`, `min_pass_rate` or both |
+| `blocking_checks` | A list of check labels, exactly as Assay shows them |
+
+- **The file is read strictly.** An unknown key, a key given twice, a limit out of range,
+  or a name YAML reads as something else (an unquoted `No`, `On`, or a number) is an
+  error that names it, before anything is sent to Assay. Quote names to be safe.
+- **Flags change it for one run.** `--fail-on` and each limit given as a flag replace the
+  file's, for the whole or for that set. `--blocking-check` only adds: dropping a
+  blocking check is a change to the file, reviewed as one.
+- An empty file is the strict default.
+
+#### What the output says
+
+When you've set any limit or blocking check, every output names the rules that decided:
+the ones broken when the step fails, the ones that tolerated failures when it passes.
+
+```text
+FAILED: test plan 'Release checks', 40 runs: 35 Green, 3 Amber, 1 Red, 1 NotRan
+  execution id: 3f1c…
+  gate: Smoke: 1 failure > max 0; blocking check 'Toxicity' failed in 1 run
+  ✗ Smoke › Login: Red: not met: Contains
+  ✗ Tone › Refund policy: Amber: not met: Toxicity (blocking: Toxicity)
+  fails on: Red, NotRan
+```
+
+The same rules are in the JSON's `gate` (every rule, `broken` or not), the Markdown
+summary's **Gate:** line, and the JUnit report's `Assay gate` suite: one test case per
+rule, named after the rule alone (`Smoke: at most 0 failures`), so a CI system's history
+shows which rule broke and since when.
 
 ### Replaying a past execution: `--replay`
 
@@ -254,6 +366,8 @@ application again, so their answers can differ from the original run's.
 ```text
 assay run {test,test-set,test-plan} ID_OR_NAME
           [--replay EXECUTION_ID] [--fail-on STATUSES]
+          [--policy FILE] [--max-failures [TEST_SET=]N]... [--min-pass-rate [TEST_SET=]RATE]...
+          [--blocking-check LABEL]...
           [--no-wait] [--timeout SECONDS] [--interval SECONDS]
           [--json] [--junit FILE] [--markdown FILE]
 ```
@@ -333,7 +447,7 @@ The batch ends with one status:
 | `Failed` | At least one check proven to fail | **Always** |
 | `Inconclusive` | Finished, but not every check could be decided | Only with `--fail-on fail,inconclusive` |
 | `Incomplete` | Stopped before every run ran | **Always** |
-| `NotRan` | Nothing could be decided: every run Not Ran, or every check errored in every run. Fix the cause; a bigger batch wouldn't help | **Always** |
+| `NotRan` | Nothing could be decided: every run Not Ran, or every check errored in every run. Fix the cause; a bigger batch wouldn't help | **Always**, with exit 4 |
 | `Done` | A trial finished | No |
 
 A status this version of the CLI doesn't know fails the step, saying so: the gate never
@@ -451,7 +565,8 @@ FAILED: test set 'Smoke', 3 runs: 1 Green, 1 Amber, 0 Red, 1 NotRan
 
 The first line says `PASSED` or `FAILED`, then what ran and the outcomes. Each line after
 the id is something that failed the step: `✗` a check not met, or a verdict of `fail`;
-`!` a run that couldn't run. The first 50 are listed; the JUnit report has them all.
+`!` a run that couldn't run. A plan's runs are named within their test set
+(`Smoke › Greeting`). The first 50 are listed; the JUnit report has them all.
 
 For a batch, the first line carries Assay's one-sentence summary, and each failure names
 its check within its test (`Smoke / Refund policy › Correctness: fail: …`).
@@ -471,6 +586,11 @@ Prints one JSON object instead of the text, for scripts:
   "counts": {"Green": 1, "Amber": 1, "Red": 0, "NotRan": 1},
   "fail_on": ["Amber", "Red", "NotRan"],
   "reason": null,
+  "judged": true,
+  "gate": [
+    {"rule": "none_allowed", "test_set": null, "limit": 0, "actual": 2, "broken": true,
+     "text": "2 failures, none allowed"}
+  ],
   "failures": [
     {"name": "Refund policy", "group": "Smoke", "outcome": "failed",
      "message": "Amber: not met: Correctness"},
@@ -490,6 +610,8 @@ Prints one JSON object instead of the text, for scripts:
 | `counts` | Runs by outcome; for a batch, checks by verdict (`pass`, `fail`, `inconclusive`, `none`) |
 | `fail_on` | The rule it was judged by |
 | `reason` | Why it failed whatever `fail_on` says: a batch stopped or undecided, a status the CLI doesn't know; `null` otherwise |
+| `judged` | `false` when it failed only because runs Not Ran, or a batch couldn't decide anything: exit 4 |
+| `gate` | A run's or execution's rules as they held: `rule` (`max_failures`, `min_pass_rate`, `none_allowed`, `blocking_check`), `test_set` (or `null` for the whole), `limit`, `actual`, `broken`, `text`. Empty for a batch |
 | `failures` | What failed the step: `outcome` is `failed` or `error` (a run that couldn't run, a batch that ended `Incomplete` or `NotRan`, a status the CLI doesn't know) |
 
 For example, `assay run test-set Smoke --json | jq -r '.failures[].name'`.
@@ -502,7 +624,7 @@ folders in the path are created.
 
 | In the report | A run or execution | A batch |
 |---|---|---|
-| `<testsuite>` | The test set or plan (or test) | Each entry: `test set / test` |
+| `<testsuite>` | The test set (or test); for a plan, each of its test sets | Each entry: `test set / test` |
 | `<testcase>` | Each run, named after its test | Each check, named by its label |
 | `<failure>` | A run whose outcome fails the step (`Amber`, `Red`) | A verdict that fails the step |
 | `<error>` | A run that couldn't run (`NotRan`), or with a status the CLI doesn't know | A batch that ended `Incomplete` or `NotRan`, or with a status the CLI doesn't know: one case named after the statistical test, with the reason |
@@ -519,6 +641,9 @@ CI systems can always read the report.
 Each suite has a property `assay.execution_id` (or `assay.run_id`, `assay.batch_id`), so
 you can find the run in Assay from the CI system.
 
+With [limits or blocking checks](#tolerating-some-failures), a suite named `Assay gate`
+holds one test case per rule, failed when the rule broke.
+
 ### Markdown: `--markdown FILE`, and GitHub's job summary
 
 The CLI appends a short Markdown summary to `FILE`: ✅ or ❌, the outcome, the id, and a
@@ -532,9 +657,10 @@ created, and a file given both ways gets the summary once.
 | Code | Meaning | Typical causes |
 |---|---|---|
 | `0` | Passed | Every run, or every verdict, met your rule. Also: `--no-wait` started it; `health` is ready |
-| `1` | Failed the gate | A run you fail on, a verdict you fail on, an `Incomplete` or `NotRan` batch, a status the CLI doesn't know; `health` not ready |
-| `2` | Error: nothing was judged | No URL; bad arguments; the API unreachable; a name with no match; the API refused the request (the reason is shown); a report file that can't be written; anything unexpected |
+| `1` | Failed the gate | A run you fail on, a limit or blocking check broken, a verdict you fail on, an `Incomplete` batch, a status the CLI doesn't know; `health` not ready |
+| `2` | Error: nothing was judged | No URL; bad arguments or policy file; the API unreachable; a name with no match; the API refused the request (the reason is shown); a report file that can't be written; anything unexpected |
 | `3` | Timed out | Not finished within `--timeout`, usually because no worker is running |
+| `4` | Couldn't be judged | It failed only because runs Not Ran: the application under test or the judge didn't answer. With the runs that Not Ran left out, it would have passed. Also a `NotRan` batch |
 | `130` | Interrupted | Ctrl-C |
 | `143` | Cancelled | The CI system cancelled the job (SIGTERM) |
 
@@ -549,6 +675,7 @@ case $code in
   0) echo "passed" ;;
   1) echo "quality gate failed"; exit 1 ;;
   3) echo "Assay didn't finish: is a worker running?"; exit 1 ;;
+  4) echo "the application or the judge didn't answer"; exit 1 ;;
   *) echo "couldn't run Assay"; exit 1 ;;
 esac
 ```
@@ -703,6 +830,21 @@ assay batch test-set "Judge calibration" -s judge_stability --note "nightly $(da
 assay run test-plan "Release checks" --fail-on Red,NotRan
 ```
 
+### A few failures in the long tail, none in the smoke tests
+
+```yaml
+# assay-gate.yml, reviewed with the code
+test_plan: "Release checks"
+max_failures: 2
+test_sets:
+  "Smoke": { max_failures: 0 }
+blocking_checks: ["Toxicity"]
+```
+
+```bash
+assay run test-plan "Release checks" --policy assay-gate.yml --junit assay.xml
+```
+
 ### Compare against exactly what you tested last time
 
 ```bash
@@ -757,7 +899,11 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 | Every run `NotRan` | Usually the application under test: no target set, or it can't be reached from Assay's workers. Check it with `POST /settings/target/checks` |
 | Judge checks fail with a reason | No judge chosen, or its key is missing: `POST /settings/judge/checks` |
 | Batch ends `NotRan` | Nothing could be decided: fix the cause above; more runs won't help |
-| The step passes but you expected it to fail | Check `--fail-on`: e.g. `inconclusive` doesn't fail a batch by default |
+| The step passes but you expected it to fail | Check `--fail-on`: e.g. `inconclusive` doesn't fail a batch by default. With limits, the gate line says which rule tolerated the failures |
+| `assay-gate.yml: …` | The policy file has a mistake, named in the message: nothing was sent to Assay. Fix the file |
+| `the policy names test set 'X', which this test plan doesn't run` | A typo, or a set renamed or unlinked since: use the names listed |
+| `assay-gate.yml is for the test plan 'X', not …` | The file names the scope it's for (`test_plan:`): give it to that scope only |
+| Exit `4` | The application under test or the judge didn't answer: check them (`POST /settings/target/checks`, `POST /settings/judge/checks`) |
 
 `--http-timeout` raises the limit on each step of a request (connecting, each read) if the
 API is slow to answer, e.g. behind a busy proxy.
@@ -810,7 +956,11 @@ assay batch {test,test-set,test-plan} ID_OR_NAME
 | `--version` | | | Print the CLI's version |
 | `-h`, `--help` | all | | Help for the CLI or a command |
 | `--replay EXECUTION_ID` | `run` | | Replay a past execution of the set or plan |
-| `--fail-on STATUSES` | `run` | `Amber,Red,NotRan` | Run outcomes that fail the step |
+| `--fail-on STATUSES` | `run` | `Amber,Red,NotRan`, or the policy's | Run outcomes that fail a run |
+| `--policy FILE` | `run` | | A YAML gate policy |
+| `--max-failures [TEST_SET=]N` | `run` | none: no failure allowed | At most N failing runs, over the whole or in a set; repeatable |
+| `--min-pass-rate [TEST_SET=]RATE` | `run` | none | At least RATE (0 to 1) passing, over the whole or in a set; repeatable |
+| `--blocking-check LABEL` | `run` | none | A check whose failure always fails the step; repeatable |
 | `--statistical-test ID`, `-s` | `batch` | required | The statistical test to run |
 | `--times N`, `-n` | `batch` | the catalogue's suggestion | Times to run the scope (the most, for tests that run in waves) |
 | `--param KEY=VALUE`, `-p` | `batch` | the test's defaults | A parameter; repeatable |
@@ -848,7 +998,8 @@ ruff check cli/ tests/cli
 | `arguments.py` | The options, and every rule about them checked before a request is sent |
 | `client.py` | The API calls: finding by name, starting, reading; how each failure is classed |
 | `waiting.py` | Waiting and trying again: what's retried, how often, and the deadlines |
-| `gate.py` | Whether an outcome passes the step: pure functions of the API's replies |
+| `gate.py` | Whether an outcome passes the step, by which rules: pure functions of the API's replies |
+| `policy.py` | A gate policy read from a YAML file, and the flags over it |
 | `report.py` | The text, Markdown and JUnit outputs |
 
 ## License

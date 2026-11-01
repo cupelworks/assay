@@ -1,10 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2026 Francesco Campanile
-"""Whether a finished run, execution or batch passes the gate, and what to say
-about it. Pure functions over the API's replies: no I/O here. A status this CLI
-doesn't know never passes: the gate fails closed."""
+"""Whether a finished run, execution or batch passes the gate, by which rules, and
+what to say about it. Pure functions over the API's replies: no I/O here. A status
+this CLI doesn't know never passes: the gate fails closed.
+
+A run or an execution is judged by a policy: which outcomes fail a run, how many
+failing runs the execution may have (over the whole of it, or per test set), and
+which checks may never fail. With none given, any failing run fails the gate."""
 from collections import Counter
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from assay_cli.client import SCOPE_NOUNS
 
@@ -26,9 +32,189 @@ _BATCH_VERDICT_OF_STATUS = {"Passed": "pass", "Done": "pass",
 """The verdict a status stands for, when a batch has no verdicts counted."""
 
 
+def spelled(allowed: tuple[str, ...], values: Iterable[str]) -> tuple[str, ...]:
+    """`values` in any case, each once, spelled as `allowed` spells them; ValueError
+    naming the choices when one isn't among them, or none is given."""
+    lowered = {a.lower(): a for a in allowed}
+    chosen = [str(v).strip() for v in values if str(v).strip()]
+    if not chosen or any(v.lower() not in lowered for v in chosen):
+        raise ValueError(f"choose from {', '.join(allowed)} (got {', '.join(chosen) or 'none'})")
+    return tuple(dict.fromkeys(lowered[v.lower()] for v in chosen))
+
+
+class PolicyError(Exception):
+    """A policy that can't be applied: a file or a flag that's wrong, or one naming
+    a test set the execution didn't run."""
+
+
 def _unknown(statuses: str) -> str:
     return f"Assay reported a status this CLI doesn't know ({statuses}): update the CLI"
 
+
+# -- the policy --
+
+@dataclass(frozen=True)
+class Limits:
+    """How many failing runs a group of runs may have: at most `max_failures`, and a
+    share of passing runs of at least `min_pass_rate` (0 to 1). None: no such limit."""
+    max_failures: int | None = None
+    min_pass_rate: float | None = None
+
+    @property
+    def given(self) -> bool:
+        return self.max_failures is not None or self.min_pass_rate is not None
+
+    def updated(self, other: "Limits") -> "Limits":
+        """These limits, with each one `other` gives instead."""
+        return Limits(self.max_failures if other.max_failures is None else other.max_failures,
+                      self.min_pass_rate if other.min_pass_rate is None else other.min_pass_rate)
+
+
+@dataclass(frozen=True)
+class Policy:
+    """What a run or an execution is judged by."""
+    fail_on: tuple[str, ...] = RUN_FAIL_ON
+    limits: Limits = Limits()
+    """Over every run of the execution."""
+    test_sets: Mapping[str, Limits] = field(default_factory=lambda: MappingProxyType({}))
+    """Over each named test set's runs, by the set's name."""
+    blocking_checks: tuple[str, ...] = ()
+    """Check labels that fail the gate whenever one fails, whatever the counts."""
+    scope: tuple[str, str] | None = None
+    """The scope a file is for, as (kind, name or id), when it names one."""
+    source: str | None = None
+    """The file it was read from."""
+
+    @property
+    def tolerant(self) -> bool:
+        """It says more than "any failing run fails the gate"."""
+        return self.limits.given or bool(self.test_sets) or bool(self.blocking_checks)
+
+
+STRICT = Policy()
+"""The default: any run short of Green fails the gate."""
+
+
+@dataclass(frozen=True)
+class Rule:
+    """One rule of a policy, as it held on these runs."""
+    rule: str  # max_failures | min_pass_rate | none_allowed | blocking_check
+    test_set: str | None
+    limit: object
+    actual: object
+    broken: bool
+    name: str
+    """The rule alone, the same from one build to the next: a JUnit case's name."""
+    text: str
+    """The rule and how it held, in a few words."""
+
+    @property
+    def tolerated(self) -> bool:
+        """It held although runs failed."""
+        if self.broken or self.rule == "blocking_check":
+            return False
+        return self.actual < 1 if self.rule == "min_pass_rate" else self.actual > 0
+
+    def to_json(self) -> dict:
+        return {"rule": self.rule, "test_set": self.test_set, "limit": self.limit,
+                "actual": self.actual, "broken": self.broken, "text": self.text}
+
+
+@dataclass(frozen=True)
+class Judged:
+    """A finished run as the gate sees it."""
+    test_set: str | None
+    status: str
+    not_met: tuple[str, ...] = ()
+
+
+def check_test_sets(policy: Policy, runs: Iterable[str], noun: str) -> None:
+    """Every test set the policy names must be one the scope runs: a name that isn't
+    is a typo, or a set since renamed, and its limit would never apply."""
+    runs = sorted(set(runs))
+    missing = [name for name in policy.test_sets if name not in runs]
+    if missing:
+        raise PolicyError(f"the policy names test set{'s' if len(missing) > 1 else ''} "
+                          f"{', '.join(map(repr, missing))}, which this {noun} doesn't run "
+                          f"(it runs: {', '.join(map(repr, runs)) or 'none'})")
+
+
+def judge(runs: list[Judged], policy: Policy) -> list[Rule]:
+    """Every rule of `policy` on `runs`; the gate passes when none is broken. A run
+    fails when its status is in the policy's `fail_on`."""
+    rules = [_blocking(label, runs) for label in policy.blocking_checks]
+    for name, limits in policy.test_sets.items():
+        rules += _limited([run for run in runs if run.test_set == name], limits, policy, name)
+    if policy.limits.given:
+        rules += _limited(runs, policy.limits, policy, None)
+    else:
+        # strict unless said otherwise: every run no limit covers must pass
+        others = [run for run in runs if run.test_set not in policy.test_sets]
+        if others:
+            rules.append(_none_allowed(others, policy))
+    return rules
+
+
+def judged_without_not_ran(runs: list[Judged], policy: Policy) -> bool:
+    """Whether the gate would pass with the runs that Not Ran left out: then it
+    failed only because the application or the judge didn't answer."""
+    if "NotRan" not in policy.fail_on:
+        return False
+    return not any(rule.broken for rule in judge(
+        [run for run in runs if run.status != "NotRan"], policy))
+
+
+def _failures(count: int) -> str:
+    return f"{count} failure{'' if count == 1 else 's'}"
+
+
+def _percent(rate: float) -> str:
+    return f"{rate * 100:.1f}".rstrip("0").rstrip(".") + "%"
+
+
+def _blocking(label: str, runs: list[Judged]) -> Rule:
+    failed = sum(label in run.not_met for run in runs)
+    text = (f"blocking check {label!r} failed in {_runs(failed)}" if failed
+            else f"blocking check {label!r} held")
+    return Rule("blocking_check", None, label, failed, failed > 0,
+                f"blocking check {label!r}", text)
+
+
+def _limited(runs: list[Judged], limits: Limits, policy: Policy,
+             test_set: str | None) -> list[Rule]:
+    if not runs:
+        return []
+    where = f"{test_set}: " if test_set else ""
+    failed = sum(run.status in policy.fail_on for run in runs)
+    rules = []
+    if limits.max_failures is not None:
+        broken = failed > limits.max_failures
+        rules.append(Rule(
+            "max_failures", test_set, limits.max_failures, failed, broken,
+            f"{where}at most {_failures(limits.max_failures)}",
+            f"{where}{_failures(failed)} {'>' if broken else '≤'} max {limits.max_failures}"))
+    if limits.min_pass_rate is not None:
+        passed = len(runs) - failed
+        rate = passed / len(runs)
+        broken = rate < limits.min_pass_rate
+        rules.append(Rule(
+            "min_pass_rate", test_set, limits.min_pass_rate, round(rate, 4), broken,
+            f"{where}a pass rate of at least {_percent(limits.min_pass_rate)}",
+            f"{where}{passed} of {len(runs)} passed ({_percent(rate)}) "
+            f"{'<' if broken else '≥'} min {_percent(limits.min_pass_rate)}"))
+    return rules
+
+
+def _none_allowed(runs: list[Judged], policy: Policy) -> Rule:
+    failed = sum(run.status in policy.fail_on for run in runs)
+    where = ""
+    if policy.test_sets:
+        where = f" outside {', '.join(policy.test_sets)}"
+    return Rule("none_allowed", None, 0, failed, failed > 0, f"no failure{where}",
+                f"{_failures(failed)}{where}, none allowed")
+
+
+# -- outcomes --
 
 @dataclass
 class Case:
@@ -53,15 +239,30 @@ class Outcome:
     reason: str = ""
     """Why it failed whatever --fail-on says: a stopped or undecided batch, a status
     the CLI doesn't know."""
+    rules: list[Rule] = field(default_factory=list)
+    """The policy's rules as they held: a run's or an execution's."""
+    tolerant: bool = False
+    """The policy said more than "any failing run fails": its rules are worth showing."""
+    judged: bool = True
+    """False when it failed only because runs Not Ran: nothing about quality was decided."""
 
     @property
     def failures(self) -> list[Case]:
         return [case for case in self.cases if case.outcome in ("failed", "error")]
 
+    @property
+    def deciding(self) -> list[Rule]:
+        """The rules worth saying: those broken when it failed, else those that
+        tolerated a failure."""
+        if not self.passed:
+            return [rule for rule in self.rules if rule.broken]
+        return [rule for rule in self.rules if rule.tolerated]
+
     def to_json(self) -> dict:
         return {"kind": self.kind, "id": self.id, "scope": self.scope, "status": self.status,
-                "passed": self.passed, "summary": self.summary, "counts": self.counts,
-                "fail_on": list(self.fail_on), "reason": self.reason or None,
+                "passed": self.passed, "judged": self.judged, "summary": self.summary,
+                "counts": self.counts, "fail_on": list(self.fail_on),
+                "reason": self.reason or None, "gate": [rule.to_json() for rule in self.rules],
                 "failures": [{"name": c.name, "group": c.group, "outcome": c.outcome,
                               "message": c.message} for c in self.failures]}
 
@@ -81,17 +282,20 @@ def _verdict(passed: bool) -> str:
 
 # -- runs and executions --
 
-def _run_case(name: str, group: str, status: str, not_met: list, error: str | None,
-              fail_on: tuple) -> Case:
+def _run_case(name: str, group: str, status: str, not_met: Iterable[str], error: str | None,
+              policy: Policy) -> Case:
     if status not in RUN_STATUSES:
         return Case(name, group, "error", _unknown(status))
+    blocking = [label for label in not_met if label in policy.blocking_checks]
     if status == "NotRan":
         message = f"Not Ran: {error or 'no reason recorded'}"
     elif status in ("Amber", "Red"):
         message = f"{status}: not met: {', '.join(not_met) or '—'}"
+        if blocking:
+            message += f" (blocking: {', '.join(blocking)})"
     else:
         message = status
-    if status not in fail_on:
+    if status not in policy.fail_on and not blocking:
         return Case(name, group, "passed", "" if status == "Green" else message)
     return Case(name, group, "error" if status == "NotRan" else "failed", message)
 
@@ -114,23 +318,39 @@ def _runs(count: int) -> str:
     return f"{count} run{'' if count == 1 else 's'}"
 
 
+def _gated(judged: list[Judged], policy: Policy, reason: str) -> tuple[list[Rule], bool, bool]:
+    """The rules, whether it passed, and whether it was judged at all."""
+    rules = judge(judged, policy)
+    passed = not reason and not any(rule.broken for rule in rules)
+    return rules, passed, passed or bool(reason) or not judged_without_not_ran(judged, policy)
+
+
 def execution_outcome(scope: dict, details: dict, runs: list[dict],
-                      fail_on: tuple = RUN_FAIL_ON) -> Outcome:
+                      policy: Policy = STRICT) -> Outcome:
+    """A set's runs are its own; a plan's each carry the test set of their entry."""
     counts = {s: details["runs"].get(s, 0) for s in RUN_STATUSES}
     reported = {s for s, n in details["runs"].items() if n} | {run["status"] for run in runs}
     unknown = sorted(reported - {*RUN_STATUSES, *IN_PROGRESS})
     reason = _unknown(", ".join(unknown)) if unknown else ""
-    passed = not reason and not any(counts[status] for status in fail_on)
+
+    def test_set(run: dict) -> str | None:
+        return run.get("test_set_name") if scope["kind"] == "test-plan" else scope["name"]
+
+    def not_met(run: dict) -> tuple[str, ...]:
+        return tuple((run.get("checks") or {}).get("not_met", []))
+
+    rules, passed, judged = _gated(
+        [Judged(test_set(run), run["status"], not_met(run)) for run in runs], policy, reason)
     cases = _distinct(
-        [_run_case(run.get("test_name", run["id"]), scope["name"], run["status"],
-                   (run.get("checks") or {}).get("not_met", []), run.get("error"), fail_on)
-         for run in runs],
+        [_run_case(run.get("test_name", run["id"]), test_set(run) or scope["name"],
+                   run["status"], not_met(run), run.get("error"), policy) for run in runs],
         [str((run.get("test_set_entry_id") or {}).get("id") or run["id"]) for run in runs])
     summary = (f"{_verdict(passed)}: {SCOPE_NOUNS[scope['kind']]} {scope['name']!r}, "
                f"{_runs(details.get('run_count', sum(counts.values())))}: "
                f"{_counts_line(counts)}" + (f". {reason}" if reason else ""))
     return Outcome("execution", str(details["id"]), scope, _execution_status(counts), passed,
-                   summary, counts, cases, fail_on, reason)
+                   summary, counts, cases, policy.fail_on, reason, rules, policy.tolerant,
+                   judged)
 
 
 def _execution_status(counts: dict) -> str:
@@ -141,20 +361,21 @@ def _execution_status(counts: dict) -> str:
     return "Green"
 
 
-def run_outcome(scope: dict, details: dict, fail_on: tuple = RUN_FAIL_ON) -> Outcome:
+def run_outcome(scope: dict, details: dict, policy: Policy = STRICT) -> Outcome:
     status = details["status"]
     results = details.get("results") or {}
-    not_met = sorted(label for label, r in results.items() if not r.get("passed"))
+    not_met = tuple(sorted(label for label, r in results.items() if not r.get("passed")))
+    reason = "" if status in RUN_STATUSES else _unknown(status)
+    rules, passed, judged = _gated([Judged(None, status, not_met)], policy, reason)
     case = _run_case(scope["name"], scope["name"], status, not_met, details.get("error"),
-                     fail_on)
+                     policy)
     met = len(results) - len(not_met)
-    passed = case.outcome == "passed"
-    reason = "" if status in RUN_STATUSES else case.message
     summary = (f"{_verdict(passed)}: test {scope['name']!r}: {status}"
                + (f", {met}/{len(results)} checks met" if results else "")
                + (f" ({details['error']})" if details.get("error") else ""))
     return Outcome("run", str(details["id"]), scope, status, passed, summary,
-                   {s: int(s == status) for s in RUN_STATUSES}, [case], fail_on, reason)
+                   {s: int(s == status) for s in RUN_STATUSES}, [case], policy.fail_on,
+                   reason, rules, policy.tolerant, judged)
 
 
 # -- statistics batches --
@@ -190,7 +411,7 @@ def batch_outcome(batch: dict, fail_on: tuple = BATCH_FAIL_ON) -> Outcome:
     summary = (f"{_verdict(passed)}: batch of {SCOPE_NOUNS[scope['kind']]} "
                f"{scope['name']!r} ({batch['statistical_test']}): {status}. {sentence}")
     return Outcome("batch", str(batch["id"]), scope, status, passed, summary, verdicts,
-                   _distinct(cases, ids), fail_on, why)
+                   _distinct(cases, ids), fail_on, why, judged=status != "NotRan")
 
 
 def _check_case(group: str, check: dict, fail_on: tuple, undecided_fails: bool) -> Case:

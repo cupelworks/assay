@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Francesco Campanile
 """`assay`: start a run or a statistics batch, wait for it, report it, and exit with
 a code a pipeline step acts on: 0 passed, 1 failed the gate, 2 error, 3 timed out,
-130 interrupted, 143 cancelled."""
+4 couldn't be judged, 130 interrupted, 143 cancelled."""
 import argparse
 import json
 import os
@@ -20,13 +20,18 @@ from assay_cli.client import SCOPE_NOUNS, ApiError, AssayClient
 from assay_cli.gate import (
     IN_PROGRESS,
     RUN_STATUSES,
+    STRICT,
     Outcome,
+    Policy,
+    PolicyError,
     batch_finished,
     batch_outcome,
+    check_test_sets,
     execution_outcome,
     run_finished,
     run_outcome,
 )
+from assay_cli.policy import check_scope, load, with_flags
 from assay_cli.waiting import TimedOut, Waiter
 
 EXIT_PASSED = 0
@@ -36,6 +41,9 @@ EXIT_ERROR = 2
 """Nothing to judge: bad arguments, an unreachable API, a request refused."""
 EXIT_TIMED_OUT = 3
 """It didn't finish within --timeout; nothing was concluded."""
+EXIT_UNJUDGED = 4
+"""It failed only because runs Not Ran: the application or the judge didn't answer,
+so nothing about quality was decided."""
 EXIT_INTERRUPTED = 130
 """Ctrl-C."""
 EXIT_CANCELLED = 143
@@ -110,7 +118,10 @@ class Runner:
 
     def run(self) -> int:
         args = self.args
+        policy = self._policy()  # read before any request: a mistake in it costs nothing
         target = self._resolve()
+        check_scope(policy, args.scope, target)
+        self._check_test_sets(policy, target)
         scope = {"kind": args.scope, **target}
         kind = "run" if args.scope == "test" else "execution"
         started = self._start(
@@ -128,7 +139,7 @@ class Runner:
             details = self.waiter.until(
                 lambda left: self.client.standalone_run(target["id"], run_id, left),
                 lambda d: d["status"] not in IN_PROGRESS, lambda d: d["status"], args.timeout)
-            return self._report(run_outcome(scope, details, args.fail_on))
+            return self._report(run_outcome(scope, details, policy))
         details = self.waiter.until(
             lambda left: self.client.execution(args.scope, target["id"], run_id, left),
             lambda d: run_finished(d["runs"]),
@@ -136,7 +147,7 @@ class Runner:
         runs = self._fetch(
             lambda left: self.client.execution_runs(args.scope, target["id"], run_id, left),
             "It finished, but its runs couldn't be read")
-        return self._report(execution_outcome(scope, details, runs, args.fail_on))
+        return self._report(execution_outcome(scope, details, runs, policy))
 
     def batch(self) -> int:
         args = self.args
@@ -175,6 +186,23 @@ class Runner:
         """A read outside a wait, tried again for READ_SECONDS: then `failed`, an error."""
         return self.waiter.read(read, self.clock() + READ_SECONDS,
                                 lambda exc: ApiError(f"{failed}: {exc}", exc.status_code))
+
+    def _policy(self) -> Policy:
+        args = self.args
+        return with_flags(load(args.policy) if args.policy else STRICT, args.fail_on,
+                          args.max_failures, args.min_pass_rate, args.blocking_check)
+
+    def _check_test_sets(self, policy: Policy, target: dict) -> None:
+        """Before it starts: a limit on a test set it doesn't run would never apply."""
+        if not policy.test_sets:
+            return
+        scope = self.args.scope
+        if scope == "test-plan":
+            names = self._fetch(lambda left: self.client.plan_test_sets(target["id"], left),
+                                "Couldn't read the test plan's test sets")
+        else:
+            names = [target["name"]] if scope == "test-set" else []
+        check_test_sets(policy, names, SCOPE_NOUNS[scope])
 
     def _resolve(self) -> dict:
         args = self.args
@@ -236,7 +264,9 @@ class Runner:
             self.say(f"assay: couldn't write {path}: {reason}")
         if unwritten:
             return EXIT_ERROR
-        return EXIT_PASSED if outcome.passed else EXIT_FAILED
+        if outcome.passed:
+            return EXIT_PASSED
+        return EXIT_FAILED if outcome.judged else EXIT_UNJUDGED
 
 
 def _write(path: Path, write: Callable[[Path], object]) -> str:
@@ -318,7 +348,7 @@ def _run(args: argparse.Namespace, client: AssayClient | None, env: Mapping[str,
             client = AssayClient.connect(url, arguments.headers(args, env), args.http_timeout)
         runner = Runner(client, args, env, out, err, sleep, clock)
         return getattr(runner, args.command)()
-    except (ApiError, arguments.ArgumentError) as exc:
+    except (ApiError, arguments.ArgumentError, PolicyError) as exc:
         print(f"assay: {exc}", file=err)
         return EXIT_ERROR
     except TimedOut as exc:

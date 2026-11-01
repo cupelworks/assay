@@ -154,6 +154,11 @@ class AssayClient:
         (item_id, item), = found.items()
         return {"id": item_id, "name": item["name"]}
 
+    def plan_test_sets(self, plan_id: str, time_left: TimeLeft | None = None) -> list[str]:
+        """The names of the test sets a plan links now."""
+        return [entry["test_set"]["name"] for entry in self._pages(
+            f"/test-plans/{plan_id}/entries", limit=500, time_left=time_left)]
+
     # -- runs --
 
     def start_run(self, scope: str, scope_id: str, replay: str | None = None) -> dict:

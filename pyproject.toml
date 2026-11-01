@@ -46,6 +46,7 @@ dev = [
     "sacrebleu>=2.4",   # Same reason: the worker's BLEU engine (see the nlp extra)
     "nltk>=3.9",        # Same reason: the worker's METEOR engine (see the nlp extra); its
                         # scoring tests skip unless WordNet is downloaded
+    "pyyaml>=6.0",      # The CLI's gate policy files (cli/): tests/cli import it in place
 ]
 nlp = [
     "rouge-score>=0.1.2",  # ROUGE (worker/evaluators/engines/rouge.py): Google's reference

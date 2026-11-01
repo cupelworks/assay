@@ -2,12 +2,25 @@
 # Copyright (C) 2026 Francesco Campanile
 """The gate's decisions on the API's replies, and the reports written from them:
 the cases a real batch is slow or awkward to bring about."""
+from collections import Counter
 from xml.etree import ElementTree as ET
 
 import pytest
 
 from assay_cli import report
-from assay_cli.gate import batch_finished, batch_outcome, execution_outcome, run_outcome
+from assay_cli.gate import (
+    STRICT,
+    Judged,
+    Limits,
+    Policy,
+    PolicyError,
+    batch_finished,
+    batch_outcome,
+    check_test_sets,
+    execution_outcome,
+    judge,
+    run_outcome,
+)
 
 
 def _batch(status, verdicts=None, checks=()):
@@ -168,7 +181,7 @@ def test_a_run_status_the_cli_doesnt_know_never_passes():
     runs = [{"id": "r1", "test_name": "a", "status": "Green", "checks": {"not_met": []}},
             {"id": "r2", "test_name": "b", "status": "Paused", "checks": None}]
 
-    outcome = execution_outcome(SCOPE, details, runs, ("Red",))
+    outcome = execution_outcome(SCOPE, details, runs, Policy(fail_on=("Red",)))
 
     assert not outcome.passed
     assert "a status this CLI doesn't know (Paused)" in outcome.reason
@@ -180,7 +193,7 @@ def test_a_run_status_the_cli_doesnt_know_never_passes():
 def test_a_standalone_run_with_a_status_the_cli_doesnt_know_never_passes():
     scope = {"kind": "test", "id": "t", "name": "lonely"}
 
-    outcome = run_outcome(scope, {"id": "r", "status": "Paused"}, ())
+    outcome = run_outcome(scope, {"id": "r", "status": "Paused"}, Policy(fail_on=("Red",)))
 
     assert not outcome.passed and "(Paused)" in outcome.reason
 
@@ -198,3 +211,162 @@ def test_a_batch_status_the_cli_doesnt_know_never_passes():
 def test_a_batch_is_in_progress_only_while_pending_or_running():
     for status in ("Pending", "Running"):
         assert not batch_finished(_batch(status))
+
+
+# --- tolerance: judging a run or an execution by a policy ---
+
+def _runs(*statuses, test_set="Smoke", not_met=()):
+    return [Judged(test_set, status, tuple(not_met)) for status in statuses]
+
+
+def _broken(rules):
+    return [rule.text for rule in rules if rule.broken]
+
+
+def test_by_default_any_failing_run_fails_the_gate():
+    rules = judge(_runs("Green", "Amber"), STRICT)
+
+    assert _broken(rules) == ["1 failure, none allowed"]
+
+
+def test_max_failures_tolerates_up_to_that_many():
+    policy = Policy(limits=Limits(max_failures=3))
+
+    assert _broken(judge(_runs("Green", "Red", "Amber", "NotRan"), policy)) == []
+    assert _broken(judge(_runs("Red", "Red", "Amber", "NotRan"), policy)) == [
+        "4 failures > max 3"]
+
+
+def test_min_pass_rate_counts_passing_runs_against_all_of_them():
+    policy = Policy(limits=Limits(min_pass_rate=0.8))
+
+    assert _broken(judge(_runs(*["Green"] * 8, "Red", "Red"), policy)) == []
+    assert _broken(judge(_runs(*["Green"] * 7, "Red", "Red", "Red"), policy)) == [
+        "7 of 10 passed (70%) < min 80%"]
+
+
+def test_a_test_sets_own_limits_govern_it_and_every_other_run_must_pass():
+    policy = Policy(test_sets={"Smoke": Limits(max_failures=0),
+                               "Tone": Limits(min_pass_rate=0.5)})
+    runs = (_runs("Green", test_set="Smoke") + _runs("Amber", "Green", test_set="Tone")
+            + _runs("Red", test_set="Other"))
+
+    assert _broken(judge(runs, policy)) == ["1 failure outside Smoke, Tone, none allowed"]
+    assert [rule.name for rule in judge(runs, policy)] == [
+        "Smoke: at most 0 failures", "Tone: a pass rate of at least 50%",
+        "no failure outside Smoke, Tone"]
+
+
+def test_with_a_limit_over_the_whole_a_set_without_its_own_isnt_limited_alone():
+    policy = Policy(limits=Limits(max_failures=2), test_sets={"Smoke": Limits(max_failures=0)})
+    runs = _runs("Red", "Red", test_set="Tone") + _runs("Green", test_set="Smoke")
+
+    assert _broken(judge(runs, policy)) == []
+    assert _broken(judge(runs + _runs("Amber", test_set="Smoke"), policy)) == [
+        "Smoke: 1 failure > max 0", "3 failures > max 2"]
+
+
+def test_a_blocking_check_fails_the_gate_even_in_a_run_otherwise_tolerated():
+    policy = Policy(fail_on=("Red", "NotRan"), blocking_checks=("Toxicity",))
+    details = {"id": "x", "run_count": 2, "runs": {"Green": 1, "Amber": 1}}
+    runs = [{"id": "r1", "test_name": "a", "status": "Green", "checks": {"not_met": []}},
+            {"id": "r2", "test_name": "b", "status": "Amber",
+             "checks": {"not_met": ["Tone", "Toxicity"]}}]
+
+    outcome = execution_outcome(SCOPE, details, runs, policy)
+
+    assert not outcome.passed and outcome.judged
+    assert [rule.text for rule in outcome.deciding] == ["blocking check 'Toxicity' failed in 1 run"]
+    assert [(c.name, c.outcome, c.message) for c in outcome.failures] == [
+        ("b", "failed", "Amber: not met: Tone, Toxicity (blocking: Toxicity)")]
+
+
+@pytest.mark.parametrize(("statuses", "judged"), [
+    (("NotRan", "NotRan"), False),  # the application didn't answer: nothing judged
+    (("Green", "NotRan"), False),
+    (("Amber", "NotRan"), True),  # a quality failure besides
+])
+def test_a_gate_failed_only_by_runs_that_not_ran_is_unjudged(statuses, judged):
+    details = {"id": "x", "run_count": len(statuses), "runs": dict(Counter(statuses))}
+    runs = [{"id": f"r{i}", "test_name": f"t{i}", "status": s, "checks": None}
+            for i, s in enumerate(statuses)]
+
+    outcome = execution_outcome(SCOPE, details, runs)
+
+    assert not outcome.passed and outcome.judged is judged
+    assert ("couldn't be judged" in report.text(outcome)) is not judged
+
+
+def test_tolerated_failures_dont_hide_that_not_ran_alone_broke_the_limit():
+    policy = Policy(limits=Limits(max_failures=2))
+    details = {"id": "x", "run_count": 5, "runs": {"Amber": 2, "NotRan": 3}}
+    runs = [{"id": f"r{i}", "test_name": f"t{i}", "status": s, "checks": None}
+            for i, s in enumerate(["Amber", "Amber", "NotRan", "NotRan", "NotRan"])]
+
+    outcome = execution_outcome(SCOPE, details, runs, policy)
+
+    assert not outcome.passed and not outcome.judged  # 2 Ambers are within the limit
+
+
+def test_a_batch_that_couldnt_decide_anything_is_unjudged():
+    assert not batch_outcome(_batch("NotRan")).judged
+    assert batch_outcome(_batch("Incomplete")).judged  # stopped: a choice, not a failure
+
+
+def test_a_policy_naming_a_test_set_the_scope_doesnt_run_is_refused():
+    policy = Policy(test_sets={"Smok": Limits(max_failures=0)})
+
+    with pytest.raises(PolicyError, match="names test set 'Smok', which this test plan "
+                                          "doesn't run \\(it runs: 'Smoke', 'Tone'\\)"):
+        check_test_sets(policy, ["Tone", "Smoke"], "test plan")
+
+
+PLAN = {"kind": "test-plan", "id": "p", "name": "Release"}
+
+
+def _plan_outcome(policy):
+    details = {"id": "x", "run_count": 3, "runs": {"Green": 2, "Red": 1}}
+    runs = [{"id": "r1", "test_name": "Login", "status": "Green", "test_set_name": "Smoke",
+             "test_set_entry_id": {"id": "e1"}, "checks": {"not_met": []}},
+            {"id": "r2", "test_name": "Login", "status": "Red", "test_set_name": "Tone",
+             "test_set_entry_id": {"id": "e2"}, "checks": {"not_met": ["Polite"]}},
+            {"id": "r3", "test_name": "Refund", "status": "Green", "test_set_name": "Tone",
+             "test_set_entry_id": {"id": "e3"}, "checks": {"not_met": []}}]
+    return execution_outcome(PLAN, details, runs, policy)
+
+
+def test_a_plans_runs_are_grouped_and_judged_by_their_test_set():
+    outcome = _plan_outcome(Policy(test_sets={"Smoke": Limits(max_failures=0),
+                                              "Tone": Limits(min_pass_rate=0.5)}))
+
+    assert outcome.passed
+    assert report.text(outcome).splitlines()[2] == "  gate: Tone: 1 of 2 passed (50%) ≥ min 50%"
+    suites = ET.fromstring(report.junit(outcome)).findall("testsuite")
+    assert [(s.get("name"), s.get("tests"), s.get("failures")) for s in suites] == [
+        ("Smoke", "1", "0"), ("Tone", "2", "1"), ("Assay gate", "2", "0")]
+    # the same test in two sets: told apart by its set, no id needed
+    assert [c.get("name") for c in suites[0].iter("testcase")] == ["Login"]
+
+
+def test_a_broken_rule_is_named_in_every_output():
+    outcome = _plan_outcome(Policy(test_sets={"Tone": Limits(max_failures=0)}))
+
+    assert not outcome.passed
+    assert "  gate: Tone: 1 failure > max 0" in report.text(outcome)
+    assert "  ✗ Tone › Login: Red: not met: Polite" in report.text(outcome)
+    assert "**Gate:** Tone: 1 failure > max 0" in report.markdown(outcome)
+    gate = ET.fromstring(report.junit(outcome)).find("testsuite[@name='Assay gate']")
+    failure = gate.find("testcase[@name='Tone: at most 0 failures']/failure")
+    assert failure.get("message") == "Tone: 1 failure > max 0"
+    (rule,) = [r for r in outcome.to_json()["gate"] if r["broken"]]
+    assert rule == {"rule": "max_failures", "test_set": "Tone", "limit": 0, "actual": 1,
+                    "broken": True, "text": "Tone: 1 failure > max 0"}
+
+
+def test_the_default_policy_adds_no_gate_line_or_suite():
+    outcome = _plan_outcome(STRICT)
+
+    assert "gate:" not in report.text(outcome)
+    assert "fails on: Amber, Red, NotRan" in report.text(outcome)
+    names = [s.get("name") for s in ET.fromstring(report.junit(outcome)).findall("testsuite")]
+    assert "Assay gate" not in names

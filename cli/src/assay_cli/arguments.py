@@ -10,7 +10,15 @@ from pathlib import Path
 
 from assay_cli import __version__
 from assay_cli.client import SCOPES
-from assay_cli.gate import BATCH_FAIL_ON, BATCH_FAIL_ON_CHOICES, RUN_FAIL_ON, RUN_STATUSES
+from assay_cli.gate import (
+    BATCH_FAIL_ON,
+    BATCH_FAIL_ON_CHOICES,
+    RUN_FAIL_ON,
+    RUN_STATUSES,
+    PolicyError,
+    spelled,
+)
+from assay_cli.policy import max_failures_of, pass_rate_of
 
 URL_ENV = "ASSAY_API_URL"
 HEADERS_ENV = "ASSAY_API_HEADERS"
@@ -35,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="assay",
         description="Run Assay's tests from a pipeline and fail the step when they fail.",
         epilog="Exit codes: 0 passed, 1 failed the gate, 2 error, 3 timed out, "
+               "4 couldn't be judged (it failed only on runs that Not Ran), "
                "130 interrupted, 143 cancelled.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     _connection_arguments(parser, defaults=True)
@@ -50,14 +59,30 @@ def build_parser() -> argparse.ArgumentParser:
         "run", parents=[connection],
         help="Run a test, test set or plan once and gate on its runs' outcomes.",
         description="Start a run (a live execution, or a replay of a past one), wait for "
-                    "every run to finish, and fail when any run's outcome is in --fail-on.")
+                    "every run to finish, and fail when a run's outcome is in --fail-on, or, "
+                    "with limits, when more runs fail than they allow.")
     _scope_arguments(run)
     run.add_argument("--replay", metavar="EXECUTION_ID",
                      help="Replay this past execution of the set or plan: exactly its entries.")
-    run.add_argument("--fail-on", type=_choices(RUN_STATUSES), default=RUN_FAIL_ON,
-                     metavar="STATUSES",
-                     help="Comma-separated run outcomes that fail the step "
-                          f"(default {','.join(RUN_FAIL_ON)}).")
+    run.add_argument("--fail-on", type=_choices(RUN_STATUSES), metavar="STATUSES",
+                     help="Comma-separated run outcomes that fail a run "
+                          f"(default {','.join(RUN_FAIL_ON)}, or the policy's).")
+    tolerance = run.add_argument_group(
+        "tolerance", "By default any failing run fails the step. These tolerate some; each "
+                     "replaces the policy file's value for one run.")
+    tolerance.add_argument("--policy", type=Path, metavar="FILE",
+                           help="A YAML gate policy, e.g. assay-gate.yml in your repository.")
+    tolerance.add_argument("--max-failures", type=_limit(max_failures_of), action="append",
+                           default=[], metavar="[TEST_SET=]N",
+                           help="At most N failing runs: over the whole execution, or in "
+                                "that test set; repeatable.")
+    tolerance.add_argument("--min-pass-rate", type=_limit(pass_rate_of), action="append",
+                           default=[], metavar="[TEST_SET=]RATE",
+                           help="At least RATE (0 to 1) of the runs passing: over the whole "
+                                "execution, or in that test set; repeatable.")
+    tolerance.add_argument("--blocking-check", action="append", default=[], metavar="LABEL",
+                           help="A check label that fails the step whenever it fails, "
+                                "whatever the counts; repeatable, added to the policy's.")
     _wait_arguments(run)
     _output_arguments(run)
 
@@ -133,14 +158,24 @@ def _output_arguments(parser: argparse.ArgumentParser) -> None:
 def _choices(allowed: tuple[str, ...]) -> Callable[[str], tuple[str, ...]]:
     """Comma-separated, in any case, each once: spelled as `allowed` spells them."""
     def parse(value: str) -> tuple[str, ...]:
-        lowered = {a.lower(): a for a in allowed}
-        chosen = [v.strip() for v in value.split(",") if v.strip()]
-        unknown = [v for v in chosen if v.lower() not in lowered]
-        if unknown or not chosen:
-            raise argparse.ArgumentTypeError(
-                f"choose from {', '.join(allowed)} (got {value!r})")
-        return tuple(dict.fromkeys(lowered[v.lower()] for v in chosen))
+        try:
+            return spelled(allowed, value.split(","))
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from None
     return parse
+
+
+def _limit(parse: Callable[[object, str], object]) -> Callable[[str], tuple]:
+    """`[TEST_SET=]VALUE`: the test set is everything before the last `=`."""
+    def limit(text: str) -> tuple:
+        test_set, sep, value = text.rpartition("=")
+        if sep and not test_set.strip():
+            raise argparse.ArgumentTypeError(f"expected [TEST_SET=]VALUE (got {text!r})")
+        try:
+            return (test_set.strip() or None), parse(value.strip(), "value")
+        except PolicyError as exc:
+            raise argparse.ArgumentTypeError(str(exc).removeprefix("value: ")) from None
+    return limit
 
 
 def _positive_int(value: str) -> int:
