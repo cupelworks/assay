@@ -9,7 +9,7 @@ HEADER = "# SPDX-License-Identifier: AGPL-3.0-only\n# Copyright (C) 2026 Frances
 
 
 def _sources() -> list[Path]:
-    files = [path for folder in ("src", "tests", "alembic")
+    files = [path for folder in ("src", "tests", "alembic", "cli")
              for path in (ROOT / folder).rglob("*.py")]
     return [*files, ROOT / "alembic" / "script.py.mako"]
 

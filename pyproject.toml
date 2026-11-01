@@ -80,6 +80,7 @@ packages = ["src/assay"]
 
 [tool.ruff]
 line-length = 100
+src = [".", "src", "cli/src"]
 target-version = "py311"
 
 [tool.ruff.lint]
@@ -89,7 +90,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "G", "LOG"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "cli/src"]
 markers = [
     "slow: scores with the real embedding models (the nlp extra, and a download the first time); run with pytest -m slow",
 ]

@@ -38,7 +38,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ cli/
 
       - name: Tests
         run: pytest -q -rs

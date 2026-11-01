@@ -49,6 +49,7 @@ Issues are welcome: open one to report a bug or suggest an idea. See
 - [Testing your application](#testing-your-application)
 - [Judging with an LLM](#judging-with-an-llm)
 - [Running with statistics](#running-with-statistics)
+- [Running in a pipeline](#running-in-a-pipeline)
 - [API](#api)
 - [Worker](#worker)
 - [Observability](#observability)
@@ -264,6 +265,21 @@ enough runs yet.
 
 Every batch run is a full, paid run, so statistics are always a deliberate choice.
 
+## Running in a pipeline
+
+The [`assay` command line](cli/README.md) puts Assay in a CI/CD pipeline: it starts a run
+of a test, set or plan (or a statistics batch), waits for it, and fails the step when a
+run isn't Green or a check's verdict is `fail`. It writes JUnit XML for the CI system's
+test results and a GitHub job summary, and needs only `httpx`:
+
+```bash
+pip install "assay-cli @ git+https://github.com/cupelworks/assay@main#subdirectory=cli"
+ASSAY_API_URL=https://assay.internal/api assay run test-plan "Release checks" --junit assay.xml
+```
+
+The runner has to reach the API, which a deployment in a private network allows only from
+inside it; the application it tests is the one in the settings.
+
 ## API
 
 The interactive reference, with an example for every response, is at `/docs`; the
@@ -364,7 +380,7 @@ alembic downgrade -1                                  # undo the last one
 
 ```bash
 pytest                    # the suite
-ruff check src/ tests/    # lint
+ruff check src/ tests/ cli/   # lint
 pytest --cov=assay --cov-report=term-missing
 ```
 
@@ -379,4 +395,5 @@ Some tests step aside by design when an optional dependency is missing:
 **Layout:** `src/assay/` holds the API (`api/` routes, `schemas/`, `services/`
 business logic, `models/` tables), the worker (`worker/`: tasks, evaluators, the
 application and judge clients) and the code both share (settings, timestamps, the
-statistics). `alembic/` holds the migrations, `tests/` the suite.
+statistics). `alembic/` holds the migrations, `cli/` the command line (a package of its own),
+`tests/` the suite.
