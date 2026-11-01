@@ -21,11 +21,16 @@ _NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 """Failures before the request left: Assay never saw it."""
 
 
+UNTIL_DEADLINE = math.inf
+"""Retries of a failure that passes: the network, a gateway, a busy API."""
 _GATEWAY_STATUSES = frozenset({429, 502, 503, 504})
 """Replies a gateway or a busy API gives in passing: worth asking again until the
-deadline. To a write, they leave open whether the API carried it out."""
+deadline."""
 SERVER_ERROR_RETRIES = 3
 """A 500 is the API's own failure: a database busy for a moment passes, a bug doesn't."""
+_UNSURE_STATUSES = frozenset({500, 502, 503, 504})
+"""Replies to a write that leave open whether it was carried out: a gateway that gave
+up waiting, or the API failing after it committed."""
 _MAYBE_DONE = "; it may have been carried out, so look in Assay before trying again"
 TimeLeft = Callable[[], float]
 """Seconds a request may still wait, asked just before it's sent."""
@@ -33,21 +38,23 @@ TimeLeft = Callable[[], float]
 
 def _retries(status: int) -> float:
     if status in _GATEWAY_STATUSES:
-        return math.inf
+        return UNTIL_DEADLINE
     return SERVER_ERROR_RETRIES if status == 500 else 0
 
 
 class ApiError(Exception):
     """The API refused a request, or couldn't be reached. `retries`: how many times
-    in a row the same read is worth trying again (`transient`: at all), until the
-    deadline; `inf` for the network or a gateway failing in passing."""
+    in a row the same read is worth trying again, until the deadline."""
 
-    def __init__(self, message: str, status_code: int | None = None,
-                 transient: bool = False, retries: float | None = None):
+    def __init__(self, message: str, status_code: int | None = None, retries: float = 0):
         super().__init__(message)
         self.status_code = status_code
-        self.retries = (math.inf if transient else 0) if retries is None else retries
-        self.transient = self.retries > 0
+        self.retries = retries
+
+    @property
+    def transient(self) -> bool:
+        """Worth trying again at all."""
+        return self.retries > 0
 
 
 class AssayClient:
@@ -72,7 +79,7 @@ class AssayClient:
         if time_left is not None:
             left = time_left()
             if left <= 0:
-                raise ApiError(f"{method} {path}: out of time, not sent", transient=True)
+                raise ApiError(f"{method} {path}: out of time, not sent", retries=UNTIL_DEADLINE)
             kwargs["timeout"] = httpx.Timeout(**{
                 step: left if limit is None else min(limit, left)
                 for step, limit in self.http.timeout.as_dict().items()})
@@ -80,11 +87,11 @@ class AssayClient:
             response = self.http.request(method, path, **kwargs)
         except _NOT_SENT as exc:
             raise ApiError(f"{method} {path}: couldn't reach Assay ({exc})",
-                           transient=True) from exc
+                           retries=UNTIL_DEADLINE) from exc
         except httpx.HTTPError as exc:
             if method == "GET":
                 raise ApiError(f"{method} {path}: no reply from Assay ({exc})",
-                               transient=True) from exc
+                               retries=UNTIL_DEADLINE) from exc
             # sent, so Assay may have acted on it: never assume it didn't
             raise ApiError(f"{method} {path}: no reply from Assay ({exc}){_MAYBE_DONE}") from exc
         if response.is_redirect:
@@ -95,8 +102,7 @@ class AssayClient:
         status = response.status_code
         if status >= 400:
             message = f"{method} {path}: {status} {_detail(response)}"
-            if method != "GET" and status in _GATEWAY_STATUSES - {429}:
-                # a gateway gave up waiting: the API behind it may have carried it out
+            if method != "GET" and status in _UNSURE_STATUSES:
                 raise ApiError(message + _MAYBE_DONE, status)
             raise ApiError(message, status, retries=_retries(status))
         if not response.content:
@@ -127,16 +133,24 @@ class AssayClient:
         return self._request("GET", "/health/worker")
 
     def resolve(self, scope: str, ref: str) -> dict:
-        """A test, test set or plan by id, or by its exact name: `{id, name}`."""
+        """A test, test set or plan by id, or by its exact name: `{id, name}`. A ref
+        shaped like an id that no item has is looked for as a name: a test created
+        without a name is named with a random UUID."""
         noun = SCOPE_NOUNS[scope]
         if _is_uuid(ref):
-            item = self._request("GET", f"{_LIST_PATHS[scope]}/{ref}")
-            return {"id": str(item.get("id", ref)), "name": item.get("name", ref)}
+            try:
+                item = self._request("GET", f"{_LIST_PATHS[scope]}/{ref}")
+            except ApiError as exc:
+                if exc.status_code != 404:
+                    raise
+            else:
+                return {"id": str(item.get("id", ref)), "name": item.get("name", ref)}
         listed = self._pages(_LIST_PATHS[scope], {"q": ref}, limit=500,
                              key=_LIST_KEYS.get(scope, "items"))
         found = [item for item in listed if item.get("name") == ref]
         if not found:
-            raise ApiError(f"No {noun} is named {ref!r}. Give its exact name or its id.")
+            has = "has the id or the name" if _is_uuid(ref) else "is named"
+            raise ApiError(f"No {noun} {has} {ref!r}. Give its exact name or its id.")
         if len(found) > 1:
             ids = ", ".join(str(item["id"]) for item in found)
             raise ApiError(f"{len(found)} {noun}s are named {ref!r} ({ids}); give the id.")
@@ -166,7 +180,8 @@ class AssayClient:
     def execution_runs(self, scope: str, scope_id: str, execution_id: str,
                        time_left: TimeLeft | None = None) -> list[dict]:
         path = f"/runs/{scope}s/{scope_id}/executions/{execution_id}/test-runs"
-        return list(self._pages(path, {"sort": "worst_first"}, time_left=time_left))
+        return list(self._pages(path, {"sort": "worst_first"}, limit=500,
+                                time_left=time_left))
 
     # -- statistics batches --
 

@@ -169,6 +169,8 @@ assay run test-set "Smoke"
 - **Two tests with the same name** are an error that lists their ids: use an id. Test set
   and test plan names are unique in Assay, so they can't clash.
 - **Ids** are shown in the UI and returned by the API, e.g. `GET /test-sets?q=smoke`.
+- **A name shaped like an id** (a test created without a name is named with a random
+  one) is looked up as an id first, then as a name.
 
 ## `assay health`
 
@@ -363,9 +365,11 @@ ends early, from the moment the batch is started:
 - Ctrl-C: exit 130;
 - an error, such as an expired token: exit 2.
 
-Stopping gets 10 seconds, since the CI system may kill the step soon after it cancels
-it. If Assay refuses the stop, it takes longer, or it's interrupted (a second Ctrl-C), the
-CLI says so and exits as it would have: stop the batch in Assay then.
+Stopping gets 5 seconds, since the CI system kills the step soon after it cancels it
+(GitHub Actions sends SIGINT, then SIGTERM 7.5 seconds later, then kills it). A SIGTERM
+while the stop is being sent is ignored, so it isn't cut short. If Assay refuses the stop,
+it takes longer, or it's interrupted (a second Ctrl-C), the CLI says so and exits as it
+would have: stop the batch in Assay then.
 
 Without `--stop-on-timeout`, nothing stops a batch but you: in the UI, or with
 `POST /statistics/batches/{id}/stop`.
@@ -401,13 +405,17 @@ Per-check targets and leaving checks out of a batch are possible through the API
   API, gets no reply, or gets a `429`, `502`, `503` or `504` (a gateway, or a busy API), the
   CLI says so and tries again after `--interval`, until `--timeout`. A `500` (the API's own
   failure: its database busy for a moment, or a bug) is tried again 3 times in a row, then
-  ends it with exit 2. Any other refusal, such as a `401`, ends it with exit 2 at once. Once an execution has finished, reading its runs is
-  tried again for up to a minute, whatever `--timeout` is left.
-- **The last check comes on time.** The CLI never sleeps past `--timeout`, and no check,
-  all its pages included, is sent after the time left (or 5 seconds, for the check at the
-  deadline); each one's wait to connect and to read is capped by it too, whatever
-  `--http-timeout` is. So the step reports the timeout, and stops a batch in at most 10
-  seconds more, shortly after `--timeout`.
+  ends it with exit 2; a gateway's failures before or between them don't count against
+  those 3. Any other refusal, such as a `401`, ends it with exit 2 at once. Once an
+  execution has finished, reading its runs is tried again for up to a minute, whatever
+  `--timeout` is left.
+- **The last check comes on time.** The CLI never sleeps past `--timeout`, and no request,
+  each page of a list included, is sent after the time left (or 5 seconds, for the check at
+  the deadline). Each step of a request (connecting, sending, each read of the reply) waits
+  no longer than the time left either, whatever `--http-timeout` is. So the step reports
+  the timeout, and stops a batch, a few seconds after `--timeout`. A reply that arrives
+  very slowly, a little at a time, can take longer: each step is capped, not the request
+  as a whole.
 - **Timing out stops waiting, not the work.** The runs carry on in Assay and their results
   are kept there. Only a batch with `--stop-on-timeout` is stopped.
 - **`--no-wait`** prints the new execution's, run's or batch's id on stdout (with `--json`:
@@ -723,7 +731,7 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 | You see | What it means, and what to do |
 |---|---|
 | `give the API's URL with --url or $ASSAY_API_URL` | Set one of them |
-| `POST …: no reply from Assay (…); it may have been carried out …`, or `POST …: 504 …; it may have been carried out …` (or `502`, `503`) | Assay, or a gateway in front of it, got the request but gave no answer in time: the run or batch may have started, and the CLI has no id for it. Look in Assay's lists before running it again (and stop a batch there if needed). Raise `--http-timeout` if the API is slow |
+| `POST …: no reply from Assay (…); it may have been carried out …`, or `POST …: 504 …; it may have been carried out …` (or `500`, `502`, `503`) | Assay, or a gateway in front of it, got the request but gave no answer in time, or Assay failed after saving it: the run or batch may have started, and the CLI has no id for it. Look in Assay's lists before running it again (and stop a batch there if needed). Raise `--http-timeout` if the API is slow |
 | `couldn't reach Assay (…)` | Wrong URL, or the runner can't reach the network the API is in: see [Before you start](#before-you-start). Check it with `curl $ASSAY_API_URL/health` from the runner |
 | `301 redirected to …` (or `302`, `307`, `308`) | Give the address it names with `--url`: the CLI never follows a redirect, so a run is never started twice or not at all |
 | `an empty reply — is the URL Assay's API?` | As below |

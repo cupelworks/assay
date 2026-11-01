@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 
 from assay_cli import __version__, report
@@ -44,8 +45,9 @@ RUNS_READ_SECONDS = 60
 """After an execution finishes, how long reading its runs is tried again."""
 LAST_CHECK_SECONDS = 5
 """A check made at the deadline still gets this long to be answered."""
-STOP_SECONDS = 10
-"""How long stopping a batch may take: the CI system may kill the step soon after."""
+STOP_SECONDS = 5
+"""How long stopping a batch may take: within the gap a CI system leaves between its
+first signal and its SIGTERM (GitHub Actions: SIGINT, SIGTERM 7.5s later)."""
 
 URL_ENV = "ASSAY_API_URL"
 HEADERS_ENV = "ASSAY_API_HEADERS"
@@ -61,6 +63,21 @@ class Cancelled(Exception):
 
 def _cancel(signum, frame):
     raise Cancelled("cancelled (SIGTERM)")
+
+
+def _on_main_thread() -> bool:
+    """Signals are only handled there."""
+    return threading.current_thread() is threading.main_thread()
+
+
+@contextmanager
+def _sigterm_ignored():
+    previous = signal.signal(signal.SIGTERM, signal.SIG_IGN) if _on_main_thread() else None
+    try:
+        yield
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -326,9 +343,12 @@ class Runner:
 
     def _stop(self, batch_id: str) -> None:
         """Best effort, and quick: a failed or interrupted stop is reported, and the
-        step's own ending kept."""
+        step's own ending kept. A SIGTERM meanwhile is ignored: the stop is what a
+        cancel needs, and the CI system kills the step soon after anyway."""
         try:
-            self.client.stop_batch(batch_id, self._time_left(self.clock() + STOP_SECONDS))
+            with _sigterm_ignored():
+                self.client.stop_batch(batch_id,
+                                       self._time_left(self.clock() + STOP_SECONDS))
         except (ApiError, Cancelled, KeyboardInterrupt) as exc:
             reason = exc if isinstance(exc, ApiError) else "interrupted"
             self.say(f"Couldn't stop batch {batch_id} ({reason}): its remaining runs may "
@@ -361,14 +381,15 @@ class Runner:
         many times in a row as it says, until the deadline; any other refusal ends it.
         Each try, all its pages included, ends by the deadline (a try at the deadline
         gets LAST_CHECK_SECONDS)."""
-        failures = 0
+        failures, kind = 0, None  # in a row, of the same kind: each kind has its own count
         while True:
             ends = None if deadline is None else max(deadline,
                                                      self.clock() + LAST_CHECK_SECONDS)
             try:
                 return read(self._time_left(ends))
             except ApiError as exc:
-                failures += 1
+                failures = failures + 1 if exc.retries == kind else 1
+                kind = exc.retries
                 if failures > exc.retries:
                     raise
                 if self._past(deadline):
@@ -475,11 +496,24 @@ def main(argv: list[str] | None = None, *, client: AssayClient | None = None,
     args = parser.parse_args(argv)
     if getattr(args, "replay", None) and args.scope == "test":
         parser.error("--replay: a standalone test has no executions to replay")
-    owned = client is None
     # a CI system cancels a job with SIGTERM: end the wait like Ctrl-C does, so a
-    # batch can still be stopped (signals are only handled on the main thread)
-    on_main_thread = threading.current_thread() is threading.main_thread()
+    # batch can still be stopped
+    on_main_thread = _on_main_thread()
     previous = signal.signal(signal.SIGTERM, _cancel) if on_main_thread else None
+    try:
+        return _run(args, client, env, out, err, sleep, clock)
+    except Cancelled as exc:
+        # one landing as the step was already ending: in a handler, or cleaning up
+        print(f"assay: {exc}", file=err)
+        return EXIT_CANCELLED
+    finally:
+        if on_main_thread:
+            # None: a handler not set from Python, which can't be put back
+            signal.signal(signal.SIGTERM, signal.SIG_DFL if previous is None else previous)
+
+
+def _run(args, client: AssayClient | None, env, out, err, sleep, clock) -> int:
+    owned = client is None
     try:
         if owned:
             url = args.url or env.get(URL_ENV)
@@ -506,9 +540,6 @@ def main(argv: list[str] | None = None, *, client: AssayClient | None = None,
         print(f"assay: unexpected error: {type(exc).__name__}: {exc}", file=err)
         return EXIT_ERROR
     finally:
-        if on_main_thread:
-            # None: a handler not set from Python, which can't be put back
-            signal.signal(signal.SIGTERM, signal.SIG_DFL if previous is None else previous)
         if owned and client is not None:
             client.close()
 

@@ -182,8 +182,8 @@ def test_how_often_a_failed_read_is_worth_trying_again(status, retries):
     assert raised.value.transient is (retries > 0)
 
 
-@pytest.mark.parametrize("status", [502, 503, 504])
-def test_a_gateways_failure_to_start_may_have_started(status):
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_a_failure_to_start_may_have_started(status):
     with pytest.raises(ApiError, match="it may have been carried out") as raised:
         _client(lambda request: httpx.Response(status)).start_batch({})
     assert not raised.value.transient
@@ -336,3 +336,19 @@ def test_the_version_is_written_once():
     project = tomllib.loads((Path(__file__).parents[2] / "cli" / "pyproject.toml").read_text())
     assert "version" not in project["project"] and "version" in project["project"]["dynamic"]
     assert project["tool"]["hatch"]["version"]["path"] == "src/assay_cli/__init__.py"
+
+
+def test_a_finished_executions_runs_are_read_500_at_a_time():
+    limits = []
+
+    def page(request):
+        limits.append(request.url.params["limit"])
+        return httpx.Response(200, json={"items": [], "total": 0})
+
+    _client(page).execution_runs("test-set", "s", "e")
+    assert limits == ["500"]
+
+
+def test_an_errors_retries_say_whether_its_transient():
+    assert ApiError("x", 502, retries=math.inf).transient
+    assert not ApiError("x", 404).transient

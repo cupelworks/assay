@@ -24,7 +24,7 @@ from assay_cli.cli import (
     _cancel,
     main,
 )
-from assay_cli.client import ApiError, AssayClient
+from assay_cli.client import UNTIL_DEADLINE, ApiError, AssayClient
 
 # the in-process client ignores each request's own timeout, which the waits pass
 pytestmark = pytest.mark.filterwarnings(
@@ -72,11 +72,24 @@ class Flaky(AssayClient):
         return super()._request(method, path, **kwargs)
 
 
+class Failures(AssayClient):
+    """Fails the requests `fails(method, path)` picks with each of `errors`, in turn."""
+
+    def __init__(self, http, fails, errors):
+        super().__init__(http)
+        self.fails, self.errors = fails, list(errors)
+
+    def _request(self, method, path, **kwargs):
+        if self.errors and self.fails(method, path):
+            raise self.errors.pop(0)
+        return super()._request(method, path, **kwargs)
+
+
 def _reading_an_execution(method, path):
     return method == "GET" and "/executions/" in path
 
 
-GATEWAY_DOWN = ApiError("GET …: 502 Bad Gateway", 502, transient=True)
+GATEWAY_DOWN = ApiError("GET …: 502 Bad Gateway", 502, retries=UNTIL_DEADLINE)
 
 
 @pytest.fixture
@@ -279,7 +292,7 @@ def test_a_gateway_down_until_the_deadline_times_out(db, cli):
 def test_the_apis_own_5xx_while_waiting_is_tried_again(db, cli):
     db.test_set("Smoke", [db.test(name="a")])
     client = Flaky(db.client, _reading_an_execution, ApiError("GET …: 500 Locked", 500,
-                                                                         transient=True))
+                                                                         retries=3))
 
     assert cli("run", "test-set", "Smoke", client=client) == EXIT_PASSED
     assert "500 Locked; trying again" in cli.err.getvalue()
@@ -502,3 +515,73 @@ def test_a_report_prints_on_a_pipe_that_isnt_utf8(db, cli, monkeypatch, tmp_path
     stdout.flush()
     assert "✗ bad ✗ naïve: Red" in stdout.buffer.getvalue().decode("utf-8")
     assert junit.exists()
+
+
+def _server_error():
+    return ApiError("GET …: 500 Warming up", 500, retries=3)
+
+
+def test_each_kind_of_failure_is_counted_in_a_row_on_its_own(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    # the API restarting: a gateway's 502s, then its own 500s while it warms up
+    errors = [GATEWAY_DOWN] * 4 + [_server_error() for _ in range(3)]
+    client = Failures(db.client, _reading_an_execution, errors)
+
+    code = cli("run", "test-set", "Smoke", "--interval", "1", client=client)
+
+    assert code == EXIT_PASSED, cli.err.getvalue()
+    assert cli.err.getvalue().count("500 Warming up; trying again") == 3
+
+
+def test_four_500s_in_a_row_end_the_wait_whatever_came_before(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    errors = [_server_error(), GATEWAY_DOWN] + [_server_error() for _ in range(4)]
+    client = Failures(db.client, _reading_an_execution, errors)
+
+    assert cli("run", "test-set", "Smoke", "--interval", "1", client=client) == EXIT_ERROR
+    assert cli.err.getvalue().count("500 Warming up; trying again") == 4  # 1, then 3
+
+
+def test_a_test_named_like_an_id_is_found_by_its_name(db, cli):
+    name = "3f0c2b1e-7d4a-4c1b-9e2f-0a1b2c3d4e5f"
+    db.test(name=name)
+
+    assert cli("run", "test", name) == EXIT_PASSED, cli.err.getvalue()
+    assert cli("run", "test", "00000000-0000-4000-8000-000000000000") == EXIT_ERROR
+    assert "No test has the id or the name '00000000-" in cli.err.getvalue()
+
+
+def test_a_sigterm_while_stopping_is_ignored(db, cli):
+    test = db.test(name="a")
+    cli.worker_running = False
+
+    class Stubborn(AssayClient):
+        def _request(self, method, path, **kwargs):
+            if path.endswith("/stop"):
+                os.kill(os.getpid(), signal.SIGTERM)  # the CI system, impatient
+            return super()._request(method, path, **kwargs)
+
+    code = cli("batch", "test", test["id"], "-s", "binomial_gate", "--timeout", "1",
+               "--stop-on-timeout", client=Stubborn(db.client))
+
+    assert code == EXIT_TIMED_OUT
+    assert "Stopped batch" in cli.err.getvalue()
+    assert signal.getsignal(signal.SIGTERM) is not _cancel
+
+
+def test_a_sigterm_while_cleaning_up_is_a_cancel_not_a_failed_gate(db, cli, monkeypatch):
+    db.test_set("Smoke", [db.test(name="a")])
+    client = AssayClient(db.client)
+
+    def close():
+        raise Cancelled("cancelled (SIGTERM)")
+
+    monkeypatch.setattr(client, "close", close)
+    monkeypatch.setattr(AssayClient, "connect", classmethod(lambda cls, *a, **k: client))
+    err = io.StringIO()
+
+    code = main(["--url", "http://assay", "run", "test-set", "Smoke"], env={},
+                out=io.StringIO(), err=err, sleep=cli.sleep, clock=lambda: cli.now)
+
+    assert code == EXIT_CANCELLED
+    assert "assay: cancelled (SIGTERM)" in err.getvalue()
