@@ -40,7 +40,8 @@ EXIT_PASSED = 0
 EXIT_FAILED = 1
 """The gate failed: a run or a verdict the step fails on."""
 EXIT_ERROR = 2
-"""Nothing to judge: bad arguments, an unreachable API, a request refused."""
+"""Nothing to judge: bad arguments, an unreachable API, a request refused, a reply
+the CLI can't read whole (a status it doesn't know)."""
 EXIT_TIMED_OUT = 3
 """It didn't finish within --timeout; nothing was concluded."""
 EXIT_UNJUDGED = 4
@@ -175,10 +176,14 @@ class Runner:
             batch = self.waiter.until(
                 lambda left: self.client.batch(batch_id, time_left=left), batch_finished,
                 _batch_progress, args.timeout)
-        except (Exception, KeyboardInterrupt):
+        except (Exception, KeyboardInterrupt) as exc:
             # however it ends without a result once started: timeout, cancel, any error
             if args.stop_on_timeout and batch_id:
                 self._stop(batch_id)
+            elif args.stop_on_timeout and _may_have_started(exc):
+                # the start's reply, with the batch's id, never came: nothing to stop by
+                self.say("--stop-on-timeout can't stop it: the batch may have started, but "
+                         "its id never came back. Stop it in Assay, from its batches list.")
             raise
         return self._report(batch_outcome(batch, args.fail_on))
 
@@ -191,12 +196,14 @@ class Runner:
         is never judged. Still in progress then is a timeout; still differing
         otherwise, an error: neither says anything about quality."""
         args = self.args
-        deadline = self.clock() + READ_SECONDS
+        deadline = self.clock() + READ_SECONDS  # one minute for every read, retries included
         while True:
-            runs = self._fetch(
+            runs = self.waiter.read(
                 lambda left: self.client.execution_runs(args.scope, target["id"],
                                                         str(details["id"]), left),
-                "It finished, but its runs couldn't be read")
+                deadline,
+                lambda exc: ApiError(f"It finished, but its runs couldn't be read: {exc}",
+                                     exc.status_code))
             unfinished = sum(run["status"] in IN_PROGRESS for run in runs)
             differs = runs_disagree(details, runs)
             if not unfinished and not differs:
@@ -263,12 +270,16 @@ class Runner:
         for set_id in sets:
             by_entry.update(read(lambda left, set_id=set_id: client.entry_labels(set_id, left)))
         if entry_ids is None:
-            entry_ids = by_entry.keys()
-        missing = len(set(entry_ids) - by_entry.keys())
-        if missing:
-            # never judged without: a blocking check none of them has would always hold
-            raise ApiError(f"Couldn't read the checks of {missing} of the entries execution "
-                           f"{args.replay} ran: no test set holds them now")
+            return list(sets.values()), [label for labels in by_entry.values()
+                                         for label in labels]
+        # an entry unlinked from its set since is replayed all the same: its checks
+        # are read from its run, which keeps them; one read for each such entry
+        for run in runs:
+            entry_id = str(run["test_set_entry_id"]["id"])
+            if entry_id not in by_entry:
+                by_entry[entry_id] = read(
+                    lambda left, run_id=str(run["id"]): client.run_labels(
+                        args.scope, target["id"], args.replay, run_id, left))
         return list(sets.values()), [label for entry_id in entry_ids
                                      for label in by_entry[entry_id]]
 
@@ -348,7 +359,16 @@ class Runner:
             return EXIT_ERROR
         if outcome.passed:
             return EXIT_PASSED
+        if outcome.unreadable:
+            return EXIT_ERROR  # nothing about quality was decided
         return EXIT_FAILED if outcome.judged else EXIT_UNJUDGED
+
+
+def _may_have_started(exc: BaseException) -> bool:
+    """A start that ended this way may have been carried out: no reply came."""
+    if isinstance(exc, ApiError):
+        return exc.maybe_done
+    return isinstance(exc, KeyboardInterrupt | Cancelled)
 
 
 def _write(path: Path, write: Callable[[Path], object]) -> str:

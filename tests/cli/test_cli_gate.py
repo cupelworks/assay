@@ -177,6 +177,18 @@ def test_characters_xml_cant_hold_are_left_out_of_junit():
 SCOPE = {"kind": "test-set", "id": "s", "name": "Smoke"}
 
 
+def test_what_the_cli_cant_read_is_unreadable_not_a_quality_failure():
+    details = {"id": "x", "run_count": 1, "runs": {"Cancelled": 1}}
+    runs = [{"id": "r1", "test_name": "a", "status": "Cancelled", "checks": None}]
+
+    assert execution_outcome(SCOPE, details, runs).unreadable
+    assert run_outcome({"kind": "test", "id": "t", "name": "x"},
+                       {"id": "r", "status": "Cancelled"}).unreadable
+    assert batch_outcome(_batch("Archived")).unreadable
+    assert not batch_outcome(_batch("Incomplete")).unreadable  # stopped: read, and failed
+    assert not batch_outcome(_batch("NotRan")).unreadable
+
+
 def test_a_run_status_the_cli_doesnt_know_never_passes():
     details = {"id": "x", "run_count": 2, "runs": {"Green": 1, "Paused": 1}}
     runs = [{"id": "r1", "test_name": "a", "status": "Green", "checks": {"not_met": []}},
@@ -450,6 +462,19 @@ def test_a_run_counted_by_a_broken_limit_over_the_whole_is_never_tolerated():
     assert _junit_outcomes(outcome) == {"t0": ["failure"], "t1": ["failure"], "t2": []}
 
 
+def test_a_run_a_limit_tolerated_is_still_named_in_every_summary():
+    outcome = _set_outcome(["Green", "Red"], Policy(limits=Limits(max_failures=1)))
+
+    assert outcome.passed and outcome.failures == []
+    assert "  ~ Tone › t1: Red: not met: A (tolerated by the gate)" in report.text(outcome)
+    assert "| ~ | Tone › t1 | Red: not met: A (tolerated by the gate) |" in (
+        report.markdown(outcome))
+    assert outcome.to_json()["tolerated"] == [
+        {"name": "t1", "group": "Tone", "outcome": "tolerated",
+         "message": "Red: not met: A (tolerated by the gate)"}]
+    assert outcome.to_json()["failures"] == []
+
+
 def test_a_blocking_check_failing_is_never_tolerated():
     outcome = _set_outcome(["Green", "Red"], Policy(limits=Limits(max_failures=5),
                                                     blocking_checks=("Toxicity",)),
@@ -474,7 +499,17 @@ def test_a_standalone_run_a_limit_tolerated_is_reported_passed():
     assert _junit_outcomes(outcome) == {"lonely": ["system-out"]}
 
 
+def test_a_pass_rate_short_of_100_percent_is_never_shown_as_100():
+    runs = [Judged(None, "Green")] * 24999 + [Judged(None, "Red")]
+
+    (rule,) = judge(runs, Policy(limits=Limits(min_pass_rate=0.99)))
+
+    assert rule.text == "24999 of 25000 passed (99.996%) ≥ min 99%"
+    assert rule.actual == 24999 / 25000 and rule.tolerated  # so the gate line names it
+
+
 @pytest.mark.parametrize(("passed", "total", "limit", "text"), [
+    (1, 25000, 0.5, "1 of 25000 passed (0.004%) < min 50%"),
     (1899, 2000, 0.95, "1899 of 2000 passed (94.95%) < min 95%"),
     (19, 20, 0.95, "19 of 20 passed (95%) ≥ min 95%"),
     (2, 3, 0.9, "2 of 3 passed (66.7%) < min 90%"),

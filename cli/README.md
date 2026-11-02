@@ -348,8 +348,13 @@ FAILED: test plan 'Release checks', 40 runs: 35 Green, 3 Amber, 1 Red, 1 NotRan
   gate: Smoke: 1 failure > max 0; blocking check 'Toxicity' failed in 1 run
   ✗ Smoke › Login: Red: not met: Contains
   ✗ Tone › Refund policy: Amber: not met: Toxicity (blocking: Toxicity)
+  ~ Tone › Greeting: Red: not met: Polite (tolerated by the gate)
   fails on: Red, NotRan
 ```
+
+Runs a limit tolerated are listed after those that failed, marked `~`: a passing step still
+says which tests failed, and why. They fail nothing: in the JUnit report each is a passing
+case, its outcome in `<system-out>`.
 
 The same rules are in the JSON's `gate` (every rule, `broken` or not), the Markdown
 summary's **Gate:** line, and the JUnit report's `Assay gate` suite: one test case per
@@ -464,9 +469,9 @@ The batch ends with one status:
 | `NotRan` | Nothing could be decided: every run Not Ran, or every check errored in every run. Fix the cause; a bigger batch wouldn't help | **Always**, with exit 4 |
 | `Done` | A trial finished | No |
 
-A status this version of the CLI doesn't know fails the step, saying so: the gate never
-passes on something it can't read. The same goes for a run's status (update the CLI
-then), and for a run still `Pending` or `Running` when an execution's runs are read.
+A status this version of the CLI doesn't know fails the step with exit 2 (an error, not a
+failed gate), saying so: the gate never passes on something it can't read, nor blames
+the application for it. The same goes for a run's status: update the CLI then.
 
 ### Choosing what fails the step: `--fail-on`
 
@@ -504,8 +509,10 @@ while the stop is being sent waits for it, so it isn't cut short, and the step t
 143 (cancelled). If Assay refuses the stop, it takes longer, or it's interrupted (a second
 Ctrl-C), the CLI says so and exits as it would have: stop the batch in Assay then.
 
-If the job is cancelled while the request starting a run or batch is on its way, the CLI
-can't know whether it started: it says so. Look in Assay before running it again.
+If the job is cancelled while the request starting a run or batch is on its way, or that
+request gets no reply, the CLI can't know whether it started: it says so. Look in Assay
+before running it again. `--stop-on-timeout` can't stop such a batch either, as its id
+never came back: the CLI says that too, and you stop it from Assay's batches list.
 
 Without `--stop-on-timeout`, nothing stops a batch but you: in the UI, or with
 `POST /statistics/batches/{id}/stop`.
@@ -627,10 +634,12 @@ Prints one JSON object instead of the text, for scripts:
 | `passed` | Whether the gate passed. The exit code is 0 when it did and every report file was written; 2 when one couldn't be |
 | `counts` | Runs by outcome; for a batch, checks by verdict (`pass`, `fail`, `inconclusive`, `none`) |
 | `fail_on` | The rule it was judged by |
-| `reason` | Why it failed whatever `fail_on` says: a batch stopped or undecided, a status the CLI doesn't know; `null` otherwise |
+| `reason` | Why it failed whatever `fail_on` says: a batch stopped or undecided, a status the CLI doesn't know, runs listed that don't match their counts; `null` otherwise |
 | `judged` | `false` when it failed only because runs Not Ran, or a batch couldn't decide anything: exit 4 |
+| `unreadable` | `true` when the CLI couldn't read it whole (a status it doesn't know, runs listed that don't match their counts): exit 2 |
 | `gate` | A run's or execution's rules as they held: `rule` (`max_failures`, `min_pass_rate`, `none_allowed`, `blocking_check`), `test_set` (or `null` for the whole), `limit`, `actual`, `broken`, `text`. Empty for a batch |
 | `failures` | What failed the step: `outcome` is `failed` or `error` (a run that couldn't run, a batch that ended `Incomplete` or `NotRan`, a status the CLI doesn't know) |
+| `tolerated` | Runs that failed but that a limit allowed, as `failures` lists them, `outcome` `tolerated` |
 
 For example, `assay run test-set Smoke --json | jq -r '.failures[].name'`.
 
@@ -678,8 +687,8 @@ created, and a file given both ways gets the summary once.
 | Code | Meaning | Typical causes |
 |---|---|---|
 | `0` | Passed | Every run, or every verdict, met your rule. Also: `--no-wait` started it; `health` is ready |
-| `1` | Failed the gate | A run you fail on, a limit or blocking check broken, a verdict you fail on, an `Incomplete` batch, a status the CLI doesn't know; `health` not ready |
-| `2` | Error: nothing was judged | No URL; bad arguments or policy file; the API unreachable; a name with no match; the API refused the request (the reason is shown); a runs list that doesn't match the execution's counts; a report file that can't be written; anything unexpected |
+| `1` | Failed the gate | A run you fail on, a limit or blocking check broken, a verdict you fail on, an `Incomplete` batch; `health` not ready |
+| `2` | Error: nothing was judged | No URL; bad arguments or policy file; the API unreachable; a name with no match; the API refused the request (the reason is shown); a runs list that doesn't match the execution's counts; a run or batch status the CLI doesn't know; a report file that can't be written; anything unexpected |
 | `3` | Timed out | Not finished within `--timeout`, usually because no worker is running; or its runs still listed in progress a minute after it finished |
 | `4` | Couldn't be judged | It failed only because runs Not Ran: the application under test or the judge didn't answer. With the runs that Not Ran left out, it would have passed. Also a `NotRan` batch |
 | `130` | Interrupted | Ctrl-C |
@@ -927,6 +936,7 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 | `the API's URL must start with http:// or https://` | Give the full address, e.g. `https://assay.internal/api` |
 | `--junit FILE: the Markdown summary is appended to that file too` | Give the JUnit report a file of its own |
 | `assay-gate.yml is for the test plan 'X', not …` | The file names the scope it's for (`test_plan:`): give it to that scope only |
+| `a status this CLI doesn't know (X): update the CLI`, exit 2 | Assay is newer than this CLI: install the CLI from the same version |
 | Exit `4` | The application under test or the judge didn't answer: check them (`POST /settings/target/checks`, `POST /settings/judge/checks`) |
 
 `--http-timeout` raises the limit on a request, in all, if the API is slow to answer, e.g.

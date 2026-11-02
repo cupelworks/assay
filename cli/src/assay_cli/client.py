@@ -53,12 +53,15 @@ def _retries(status: int) -> float:
 
 class ApiError(Exception):
     """The API refused a request, or couldn't be reached. `retries`: how many times
-    in a row the same read is worth trying again, until the deadline."""
+    in a row the same read is worth trying again, until the deadline. `maybe_done`:
+    a write that may have been carried out, though no reply said so."""
 
-    def __init__(self, message: str, status_code: int | None = None, retries: float = 0):
+    def __init__(self, message: str, status_code: int | None = None, retries: float = 0,
+                 maybe_done: bool = False):
         super().__init__(message)
         self.status_code = status_code
         self.retries = retries
+        self.maybe_done = maybe_done
 
 
 class AssayClient:
@@ -108,7 +111,8 @@ class AssayClient:
                 raise ApiError(f"{method} {path}: no reply from Assay ({exc})",
                                retries=UNTIL_DEADLINE) from exc
             # sent, so Assay may have acted on it: never assume it didn't
-            raise ApiError(f"{method} {path}: no reply from Assay ({exc}){_MAYBE_DONE}") from exc
+            raise ApiError(f"{method} {path}: no reply from Assay ({exc}){_MAYBE_DONE}",
+                           maybe_done=True) from exc
         if response.is_redirect:
             # never followed: a redirected POST could start nothing, or start it twice
             where = response.headers.get("location", "elsewhere")
@@ -118,7 +122,7 @@ class AssayClient:
         if status >= 400:
             message = f"{method} {path}: {status} {_detail(response)}"
             if method != "GET" and status in _UNSURE_STATUSES:
-                raise ApiError(message + _MAYBE_DONE, status)
+                raise ApiError(message + _MAYBE_DONE, status, maybe_done=True)
             raise ApiError(message, status, retries=_retries(status))
         if not response.content:
             raise ApiError(f"{method} {path}: an empty reply — is the URL Assay's API?",
@@ -227,6 +231,15 @@ class AssayClient:
         """The labels of the checks of each entry of a test set, by the entry's id."""
         return {str(entry["id"]): _labels(entry) for entry in self._pages(
             f"/test-sets/{test_set_id}/entries", limit=500, time_left=time_left)}
+
+    def run_labels(self, scope: str, scope_id: str, execution_id: str, run_id: str,
+                   time_left: TimeLeft | None = None) -> list[str]:
+        """The labels of the checks a run of an execution asked: its entry's, as
+        frozen when it first ran, kept with the run even once the entry has left
+        its set."""
+        return _labels(self._request(
+            "GET", f"/runs/{scope}s/{scope_id}/executions/{execution_id}/test-runs/{run_id}",
+            time_left=time_left))
 
     # -- runs --
 

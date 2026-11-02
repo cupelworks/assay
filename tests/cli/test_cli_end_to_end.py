@@ -832,20 +832,31 @@ def test_a_read_before_it_starts_is_tried_again_alone(db, cli, release):
     assert client.sent[f"/test-sets/{tone['id']}/entries"] == 2
 
 
-def test_an_entry_replayed_that_no_set_holds_is_never_judged_without(db, cli, release):
-    execution = _executed(db, release)
+def test_an_entry_unlinked_since_is_replayed_and_its_checks_found(db, cli):
+    test_set = db.test_set("Smoke", [db.test(name="good"),
+                                     db.test(name="bad", checks=[MISSES])])
+    first = _executed_set(db, test_set)
+    entries = db.client.get(f"/test-sets/{test_set['id']}/entries").json()["items"]
+    bad = next(entry for entry in entries if entry["name"] == "bad")
+    unlinked = db.client.patch(f"/test-sets/{test_set['id']}/entries", json=[{"id": bad["id"]}])
+    assert unlinked.status_code == 200, unlinked.text
 
-    class Lost(AssayClient):
-        def entry_labels(self, test_set_id, time_left=None):
-            return {}  # as if its set held none of them now
+    # its check, Misses, is no longer in the set's entries, but the replay runs it
+    code = cli("run", "test-set", "Smoke", "--replay", first, "--max-failures", "5",
+               "--blocking-check", "Misses")
 
-    code = cli("run", "test-plan", "Release", "--replay", execution,
-               "--blocking-check", "Misses", client=Lost(db.client))
+    assert code == EXIT_FAILED, cli.err.getvalue()
+    assert "gate: blocking check 'Misses' failed in 1 run" in cli.out.getvalue()
+    assert cli("run", "test-set", "Smoke", "--replay", first,
+               "--blocking-check", "Missess") == EXIT_ERROR  # a typo is still caught
 
-    assert code == EXIT_ERROR
-    assert (f"Couldn't read the checks of 3 of the entries execution {execution} ran: no "
-            "test set holds them now") in cli.err.getvalue()
-    assert db.dispatched == []
+
+def _executed_set(db, test_set):
+    """A finished execution of `test_set`, as a worker would have run it."""
+    execution = db.client.post(f"/runs/test-sets/{test_set['id']}").json()
+    pending, db.dispatched[:] = list(db.dispatched), []
+    db.execute(pending)
+    return execution["id"]
 
 
 def test_a_replay_given_in_another_form_replays_that_execution(db, cli):
@@ -949,3 +960,84 @@ def test_a_run_a_limit_tolerated_passes_in_the_junit_report_too(db, cli, tmp_pat
     suites = ET.parse(junit).getroot().findall("testsuite")
     assert [(s.get("name"), s.get("failures")) for s in suites] == [
         ("Smoke", "0"), ("Assay gate", "0")]
+
+
+class Renamed(AssayClient):
+    """Reports every run's status as `status`: one this CLI doesn't know."""
+
+    def __init__(self, http, status):
+        super().__init__(http)
+        self.status = status
+
+    def execution(self, *args, **kwargs):
+        details = super().execution(*args, **kwargs)
+        return {**details, "runs": {self.status: sum(details["runs"].values())}}
+
+    def execution_runs(self, *args, **kwargs):
+        return [{**run, "status": self.status} for run in super().execution_runs(*args, **kwargs)]
+
+
+def test_a_status_the_cli_doesnt_know_is_an_error_not_a_failed_gate(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+
+    code = cli("run", "test-set", "Smoke", client=Renamed(db.client, "Cancelled"))
+
+    assert code == EXIT_ERROR
+    assert "a status this CLI doesn't know (Cancelled): update the CLI" in cli.out.getvalue()
+
+
+def test_a_batch_status_the_cli_doesnt_know_is_an_error(db, cli, monkeypatch):
+    db.test_set("Smoke", [db.test(name="a")])
+    read = AssayClient.batch
+    monkeypatch.setattr(AssayClient, "batch", lambda self, *a, **k: {
+        **read(self, *a, **k), "status": "Archived", "result": None})
+
+    assert cli("batch", "test-set", "Smoke", "-s", "binomial_gate") == EXIT_ERROR
+    assert "(Archived)" in cli.out.getvalue()
+
+
+
+
+def test_reading_the_runs_again_takes_one_minute_in_all_not_one_per_try(db, cli):
+    db.test_set("Smoke", [db.test(name="good"), db.test(name="bad", checks=[MISSES])])
+
+    class Unlucky(Short):
+        """Short of the counts twice, then a gateway down for good."""
+        first = None
+
+        def execution_runs(self, *args, **kwargs):
+            if self.first is None:
+                self.first = cli.now
+            if self.times:
+                return super().execution_runs(*args, **kwargs)
+            raise GATEWAY_DOWN
+
+    client = Unlucky(db.client, times=2)
+    code = cli("run", "test-set", "Smoke", client=client)
+
+    assert code == EXIT_ERROR
+    assert "It finished, but its runs couldn't be read: GET …: 502" in cli.err.getvalue()
+    assert cli.now - client.first <= READ_SECONDS
+
+
+def test_a_batch_start_with_no_reply_says_stop_on_timeout_cant_stop_it(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+    no_reply = ApiError("POST /statistics/batches: no reply from Assay (gave up after 30.0s); "
+                        "it may have been carried out, so look in Assay before trying again",
+                        maybe_done=True)
+    client = Flaky(db.client, lambda method, path: method == "POST", no_reply)
+
+    code = cli("batch", "test-set", "Smoke", "-s", "binomial_gate", "--stop-on-timeout",
+               client=client)
+
+    assert code == EXIT_ERROR
+    assert ("--stop-on-timeout can't stop it: the batch may have started, but its id never "
+            "came back") in cli.err.getvalue()
+
+
+def test_a_batch_start_refused_says_nothing_about_stopping(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+
+    code = cli("batch", "test-set", "Smoke", "-s", "nope", "--stop-on-timeout")
+
+    assert code == EXIT_ERROR and "can't stop it" not in cli.err.getvalue()

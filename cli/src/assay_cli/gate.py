@@ -201,12 +201,15 @@ def _percent(rate: float, digits: int = 1) -> str:
 
 def _percents(rate: float, limit: float) -> tuple[str, str]:
     """The limit as given (99.995%, never rounded to 100%), and the rate to as many
-    digits as tell it from the limit: never "95% < min 95%"."""
+    digits as tell it from the limit, and never 100% or 0% unless it's exactly that:
+    never "95% < min 95%", nor "100% passed" with a run failed."""
     least = _percent(limit, 6)
     fewest = max(len(least.rstrip("%").partition(".")[2]), 1)
     shown = _percent(rate, fewest)
-    for digits in range(fewest + 1, 7):
-        if rate == limit or shown != least:
+    for digits in range(fewest + 1, 10):
+        rounded_away = (shown == least and rate != limit) or (
+            shown == "100%" and rate < 1) or (shown == "0%" and rate > 0)
+        if not rounded_away:
             break
         shown = _percent(rate, digits)
     return shown, least
@@ -239,7 +242,7 @@ def _limited(runs: list[Judged], limits: Limits, policy: Policy,
         broken = rate < limits.min_pass_rate
         shown, least = _percents(rate, limits.min_pass_rate)
         rules.append(Rule(
-            "min_pass_rate", test_set, limits.min_pass_rate, round(rate, 4), broken,
+            "min_pass_rate", test_set, limits.min_pass_rate, rate, broken,
             f"{where}a pass rate of at least {_percent(limits.min_pass_rate)}",
             f"{where}{passed} of {len(runs)} passed ({shown}) "
             f"{'<' if broken else '≥'} min {least}"))
@@ -262,7 +265,7 @@ class Case:
     """One line of the report, and one JUnit test case: a run, or a batch's check."""
     name: str
     group: str
-    outcome: str  # passed | failed | error | skipped
+    outcome: str  # passed | failed | error | skipped | tolerated (failing, a limit allowed it)
     message: str = ""
 
 
@@ -286,10 +289,18 @@ class Outcome:
     """The policy said more than "any failing run fails": its rules are worth showing."""
     judged: bool = True
     """False when it failed only because runs Not Ran: nothing about quality was decided."""
+    unreadable: bool = False
+    """The CLI couldn't read it whole: a status it doesn't know, runs listed that
+    don't match their counts. Nothing about quality was decided: an error."""
 
     @property
     def failures(self) -> list[Case]:
         return [case for case in self.cases if case.outcome in ("failed", "error")]
+
+    @property
+    def tolerated(self) -> list[Case]:
+        """Runs that failed, but within a limit: they fail nothing, and are named."""
+        return [case for case in self.cases if case.outcome == "tolerated"]
 
     @property
     def deciding(self) -> list[Rule]:
@@ -301,11 +312,17 @@ class Outcome:
 
     def to_json(self) -> dict:
         return {"kind": self.kind, "id": self.id, "scope": self.scope, "status": self.status,
-                "passed": self.passed, "judged": self.judged, "summary": self.summary,
+                "passed": self.passed, "judged": self.judged, "unreadable": self.unreadable,
+                "summary": self.summary,
                 "counts": self.counts, "fail_on": list(self.fail_on),
                 "reason": self.reason or None, "gate": [rule.to_json() for rule in self.rules],
-                "failures": [{"name": c.name, "group": c.group, "outcome": c.outcome,
-                              "message": c.message} for c in self.failures]}
+                "failures": [_case_json(case) for case in self.failures],
+                "tolerated": [_case_json(case) for case in self.tolerated]}
+
+
+def _case_json(case: Case) -> dict:
+    return {"name": case.name, "group": case.group, "outcome": case.outcome,
+            "message": case.message}
 
 
 def run_finished(counts: dict) -> bool:
@@ -323,7 +340,7 @@ def _verdict(passed: bool) -> str:
 
 # -- runs and executions --
 
-def tolerated(run: Judged, rules: list[Rule], policy: Policy) -> bool:
+def within_limits(run: Judged, rules: list[Rule], policy: Policy) -> bool:
     """A failing run that every rule counting it allowed: its test set's own limits
     when it has them, the limits over the whole when there are some, else "no
     failure" outside the limited sets. Reported as passed, so a CI system reading
@@ -361,7 +378,7 @@ def _run_case(name: str, group: str, status: str, not_met: Iterable[str], error:
     if status not in policy.fail_on and not blocking:
         return Case(name, group, "passed", "" if status == "Green" else message)
     if allowed and not blocking:
-        return Case(name, group, "passed", f"{message} (tolerated by the gate)")
+        return Case(name, group, "tolerated", f"{message} (tolerated by the gate)")
     return Case(name, group, "error" if status == "NotRan" else "failed", message)
 
 
@@ -414,14 +431,14 @@ def execution_outcome(scope: dict, details: dict, runs: list[dict],
     cases = _distinct(
         [_run_case(run.get("test_name", run["id"]), test_set(run) or scope["name"],
                    run["status"], not_met(run), run.get("error"), policy,
-                   tolerated(one, rules, policy)) for run, one in zip(runs, seen, strict=True)],
+                   within_limits(one, rules, policy)) for run, one in zip(runs, seen, strict=True)],
         [str((run.get("test_set_entry_id") or {}).get("id") or run["id"]) for run in runs])
     summary = (f"{_verdict(passed)}: {SCOPE_NOUNS[scope['kind']]} {scope['name']!r}, "
                f"{_runs(details.get('run_count', sum(counts.values())))}: "
                f"{_counts_line(counts)}" + (f". {reason}" if reason else ""))
     return Outcome("execution", str(details["id"]), scope, _execution_status(counts), passed,
                    summary, counts, cases, policy.fail_on, reason, rules, policy.tolerant,
-                   judged)
+                   judged, unreadable=bool(reason))
 
 
 def runs_disagree(details: dict, runs: list[dict]) -> str:
@@ -459,14 +476,14 @@ def run_outcome(scope: dict, details: dict, policy: Policy = STRICT) -> Outcome:
     seen = Judged(None, status, not_met)
     rules, passed, judged = _gated([seen], policy, reason)
     case = _run_case(scope["name"], scope["name"], status, not_met, details.get("error"),
-                     policy, tolerated(seen, rules, policy))
+                     policy, within_limits(seen, rules, policy))
     met = len(results) - len(not_met)
     summary = (f"{_verdict(passed)}: test {scope['name']!r}: {status}"
                + (f", {met}/{len(results)} checks met" if results else "")
                + (f" ({details['error']})" if details.get("error") else ""))
     return Outcome("run", str(details["id"]), scope, status, passed, summary,
                    {s: int(s == status) for s in RUN_STATUSES}, [case], policy.fail_on,
-                   reason, rules, policy.tolerant, judged)
+                   reason, rules, policy.tolerant, judged, unreadable=bool(reason))
 
 
 # -- statistics batches --
@@ -482,6 +499,7 @@ def batch_outcome(batch: dict, fail_on: tuple = BATCH_FAIL_ON) -> Outcome:
         why = ""
     else:
         why = _BATCH_ALWAYS_FAIL.get(status) or _unknown(status)
+    unreadable = status not in _BATCH_VERDICT_OF_STATUS and status not in _BATCH_ALWAYS_FAIL
     # the status and every check's verdict: an Inconclusive batch whose only
     # undecided check has no verdict, and a Failed batch's inconclusive checks
     passed = not why and _BATCH_VERDICT_OF_STATUS[status] not in fail_on and not any(
@@ -502,7 +520,8 @@ def batch_outcome(batch: dict, fail_on: tuple = BATCH_FAIL_ON) -> Outcome:
     summary = (f"{_verdict(passed)}: batch of {SCOPE_NOUNS[scope['kind']]} "
                f"{scope['name']!r} ({batch['statistical_test']}): {status}. {sentence}")
     return Outcome("batch", str(batch["id"]), scope, status, passed, summary, verdicts,
-                   _distinct(cases, ids), fail_on, why, judged=status != "NotRan")
+                   _distinct(cases, ids), fail_on, why, judged=status != "NotRan",
+                   unreadable=unreadable)
 
 
 def _check_case(group: str, check: dict, fail_on: tuple, undecided_fails: bool) -> Case:

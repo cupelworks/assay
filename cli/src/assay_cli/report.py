@@ -9,9 +9,10 @@ from xml.etree import ElementTree as ET
 from assay_cli.client import SCOPE_NOUNS
 from assay_cli.gate import Case, Outcome
 
-_MARK = {"passed": "✓", "failed": "✗", "error": "!", "skipped": "–"}
+_MARK = {"passed": "✓", "failed": "✗", "error": "!", "skipped": "–", "tolerated": "~"}
 MAX_LISTED = 50
-"""Failures listed in the text summary; the JUnit report has every one."""
+"""Runs listed in the text and Markdown summaries, failed then tolerated; the JUnit
+report has every one."""
 _NOT_IN_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
 """Characters XML 1.0 can't hold: a CI system would refuse the whole report."""
 GATE_SUITE = "Assay gate"
@@ -33,12 +34,12 @@ def text(outcome: Outcome) -> str:
         lines.append(f"  gate: {_gate_line(outcome)}")
     if not outcome.passed and not outcome.judged:
         lines.append(f"  couldn't be judged: {_UNJUDGED}")
-    failures = outcome.failures
-    for case in failures[:MAX_LISTED]:
+    listed = _listed(outcome)
+    for case in listed[:MAX_LISTED]:
         lines.append(f"  {_MARK[case.outcome]} {_one_line(_label(outcome, case))}: "
                      f"{_one_line(case.message)}")
-    if len(failures) > MAX_LISTED:
-        lines.append(f"  … and {len(failures) - MAX_LISTED} more (see the JUnit report)")
+    if len(listed) > MAX_LISTED:
+        lines.append(f"  … and {len(listed) - MAX_LISTED} more (see the JUnit report)")
     if not outcome.passed and outcome.fail_on and not outcome.reason:
         lines.append(f"  fails on: {', '.join(outcome.fail_on)}")
     return "\n".join(lines)
@@ -54,15 +55,21 @@ def markdown(outcome: Outcome) -> str:
         lines += ["", f"**Gate:** {_escape(_gate_line(outcome))}"]
     if not outcome.passed and not outcome.judged:
         lines += ["", f"**Couldn't be judged:** {_UNJUDGED}"]
-    failures = outcome.failures
-    if failures:
+    listed = _listed(outcome)
+    if listed:
         lines += ["", "| | Where | What |", "|---|---|---|"]
-        for case in failures[:MAX_LISTED]:
+        for case in listed[:MAX_LISTED]:
             lines.append(f"| {_MARK[case.outcome]} | {_escape(_label(outcome, case))} | "
                          f"{_escape(case.message)} |")
-        if len(failures) > MAX_LISTED:
-            lines.append(f"| | … and {len(failures) - MAX_LISTED} more | |")
+        if len(listed) > MAX_LISTED:
+            lines.append(f"| | … and {len(listed) - MAX_LISTED} more | |")
     return "\n".join(lines) + "\n"
+
+
+def _listed(outcome: Outcome) -> list[Case]:
+    """What a summary names: the runs that failed, then those a limit tolerated,
+    so a passing step still says which tests failed, and why."""
+    return outcome.failures + outcome.tolerated
 
 
 def junit(outcome: Outcome) -> bytes:
