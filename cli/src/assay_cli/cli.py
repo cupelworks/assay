@@ -31,6 +31,7 @@ from assay_cli.gate import (
     execution_outcome,
     run_finished,
     run_outcome,
+    runs_disagree,
 )
 from assay_cli.policy import check_scope, load, with_flags
 from assay_cli.waiting import TimedOut, Waiter
@@ -146,9 +147,7 @@ class Runner:
             lambda left: self.client.execution(args.scope, target["id"], run_id, left),
             lambda d: run_finished(d["runs"]),
             lambda d: _progress(d["runs"], d.get("run_count")), args.timeout)
-        runs = self._fetch(
-            lambda left: self.client.execution_runs(args.scope, target["id"], run_id, left),
-            "It finished, but its runs couldn't be read")
+        runs = self._finished_runs(target, details)
         return self._report(execution_outcome(scope, details, runs, policy))
 
     def batch(self) -> int:
@@ -184,6 +183,30 @@ class Runner:
         return self._report(batch_outcome(batch, args.fail_on))
 
     # -- the steps they share --
+
+    def _finished_runs(self, target: dict, details: dict) -> list[dict]:
+        """An execution's runs, once its counts (`details`) say every one has
+        finished, read until the list agrees with those counts, for READ_SECONDS:
+        a list read a moment behind them (a run still in progress, one missing)
+        is never judged. Still in progress then is a timeout; still differing
+        otherwise, an error: neither says anything about quality."""
+        args = self.args
+        deadline = self.clock() + READ_SECONDS
+        while True:
+            runs = self._fetch(
+                lambda left: self.client.execution_runs(args.scope, target["id"],
+                                                        str(details["id"]), left),
+                "It finished, but its runs couldn't be read")
+            unfinished = sum(run["status"] in IN_PROGRESS for run in runs)
+            differs = runs_disagree(details, runs)
+            if not unfinished and not differs:
+                return runs
+            if self.waiter.past(deadline):
+                if unfinished:
+                    raise TimedOut(f"It finished, but its runs still listed {unfinished} in "
+                                   f"progress after {READ_SECONDS}s")
+                raise ApiError(f"It finished, but after {READ_SECONDS}s {differs}")
+            self.waiter.pause(deadline)
 
     def _fetch(self, read: Callable, failed: str) -> Any:
         """A read outside a wait, tried again for READ_SECONDS: then `failed`, an error."""
@@ -221,7 +244,8 @@ class Runner:
                 return [], []
             return [], read(lambda left: client.test_labels(target["id"], left))
         entry_ids = None  # a live run runs every entry
-        if args.replay:
+        # a replay's own runs say which entries it runs, and, for a plan, their sets
+        if args.replay and (with_labels or args.scope == "test-plan"):
             runs = read(lambda left: client.execution_runs(args.scope, target["id"],
                                                            args.replay, left))
             entry_ids = {str(run["test_set_entry_id"]["id"]) for run in runs}
@@ -399,7 +423,7 @@ def _run(args: argparse.Namespace, client: AssayClient | None, env: Mapping[str,
     owned = client is None
     try:
         if owned:
-            url = args.url or env.get(arguments.URL_ENV)
+            url = (args.url or env.get(arguments.URL_ENV) or "").strip()
             if not url:
                 print(f"assay: give the API's URL with --url or ${arguments.URL_ENV}", file=err)
                 return EXIT_ERROR

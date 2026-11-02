@@ -91,8 +91,9 @@ def test_each_mistake_in_a_file_is_named(tmp_path, text, says):
 
 
 def test_a_key_left_blank_is_left_out(tmp_path):
-    policy = load(_file(tmp_path, "test_sets:\nblocking_checks:\nmax_failures: 1\n"))
+    policy = load(_file(tmp_path, "fail_on:\ntest_sets:\nblocking_checks:\nmax_failures: 1\n"))
     assert not policy.test_sets and not policy.blocking_checks
+    assert policy.fail_on == RUN_FAIL_ON
 
 
 def test_a_file_that_cant_be_read_is_named(tmp_path):

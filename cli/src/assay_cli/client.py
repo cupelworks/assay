@@ -39,6 +39,10 @@ up waiting, or the API failing after it committed."""
 _MAYBE_DONE = "; it may have been carried out, so look in Assay before trying again"
 TimeLeft = Callable[[], float]
 """Seconds a request may still wait, asked just before it's sent."""
+GIVEN_UP_READS = 3
+"""Reads given up on, yet still being answered, past which no other read is sent
+until one ends: each holds a connection, and a reply trickling in, a little at a
+time, keeps it held. A write is sent whatever: stopping a batch mustn't wait."""
 
 
 def _retries(status: int) -> float:
@@ -60,6 +64,12 @@ class ApiError(Exception):
 class AssayClient:
     def __init__(self, http: httpx.Client):
         self.http = http
+        # httpx's timeout bounds each step of a request; the longest of them is
+        # this client's bound on a request in all
+        self.request_seconds = max(
+            (limit for limit in http.timeout.as_dict().values() if limit is not None),
+            default=None)
+        self._given_up: list[threading.Thread] = []
 
     @classmethod
     def connect(cls, base_url: str, headers: dict[str, str] | None = None,
@@ -74,9 +84,9 @@ class AssayClient:
 
     def _request(self, method: str, path: str, time_left: TimeLeft | None = None,
                  **kwargs) -> Any:
-        """`time_left`: how long the request may take in all, however long
-        --http-timeout is; past it, the request is given up on, unanswered."""
-        send = self.http.request
+        """A request, taking --http-timeout at most in all, and no longer than
+        `time_left` says when given; past it, it's given up on, unanswered."""
+        seconds = self.request_seconds
         if time_left is not None:
             left = time_left()
             if left <= 0:
@@ -85,9 +95,9 @@ class AssayClient:
             kwargs["timeout"] = httpx.Timeout(**{
                 step: left if limit is None else min(limit, left)
                 for step, limit in self.http.timeout.as_dict().items()})
-            send = _within(left, self.http.request)
+            seconds = left if seconds is None else min(seconds, left)
         try:
-            response = send(method, path, **kwargs)
+            response = self._send(method, path, seconds, **kwargs)
         except _NOT_SENT as exc:
             raise ApiError(f"{method} {path}: couldn't reach Assay ({exc})",
                            retries=UNTIL_DEADLINE) from exc
@@ -119,17 +129,52 @@ class AssayClient:
             raise ApiError(f"{method} {path}: the reply isn't JSON — is the URL Assay's API?",
                            response.status_code) from exc
 
+    def _send(self, method: str, path: str, seconds: float | None,
+              **kwargs) -> httpx.Response:
+        """The request, waited for no longer than `seconds` in all (None: as long as
+        httpx's timeouts allow). Those bound each step, and a reply read in chunks
+        waits that long for each: so it's sent from a thread of its own, and one
+        given up on is left to end by them."""
+        if seconds is None:
+            return self.http.request(method, path, **kwargs)
+        self._given_up = [thread for thread in self._given_up if thread.is_alive()]
+        if method == "GET" and len(self._given_up) >= GIVEN_UP_READS:
+            raise ApiError(f"{method} {path}: not sent: {len(self._given_up)} requests given "
+                           "up on are still being answered, so Assay, or the network to "
+                           "it, is answering very slowly", retries=UNTIL_DEADLINE)
+        # an httpx.Client is safe to share between threads: a request given up on
+        # may still be in flight while the next one is sent
+        reply: Future = Future()
+
+        def send() -> None:
+            try:
+                reply.set_result(self.http.request(method, path, **kwargs))
+            except BaseException as exc:  # handed to the caller, whatever it is
+                reply.set_exception(exc)
+
+        thread = threading.Thread(target=send, daemon=True)
+        thread.start()
+        if not wait([reply], timeout=seconds).done:
+            self._given_up.append(thread)
+            raise httpx.TimeoutException(f"gave up after {seconds:.1f}s")
+        return reply.result()
+
     def _pages(self, path: str, params: dict | None = None, limit: int = 100,
                key: str = "items", time_left: TimeLeft | None = None) -> Iterator[dict]:
-        """Every page, each asking `time_left` afresh."""
+        """Every page, each asking `time_left` afresh. A reply without the items or
+        their `total` isn't a page: an error, never taken as the end of the list."""
         offset = 0
         while True:
             page = self._request("GET", path, time_left=time_left,
                                  params={**(params or {}), "offset": offset, "limit": limit})
-            items = page.get(key, [])
+            if not (isinstance(page, dict) and isinstance(page.get(key), list)
+                    and isinstance(page.get("total"), int)):
+                raise ApiError(f"GET {path}: the reply isn't a page of a list, with {key!r} "
+                               "and 'total' — is the URL Assay's API?")
+            items = page[key]
             yield from items
             offset += len(items)
-            if not items or offset >= page.get("total", 0):
+            if not items or offset >= page["total"]:
                 return
 
     # -- reading --
@@ -222,27 +267,6 @@ class AssayClient:
 
     def stop_batch(self, batch_id: str, time_left: TimeLeft | None = None) -> dict:
         return self._request("POST", f"/statistics/batches/{batch_id}/stop", time_left=time_left)
-
-
-def _within(seconds: float, send: Callable[..., httpx.Response]) -> Callable[..., httpx.Response]:
-    """`send`, waited for no longer than `seconds` in all. httpx's timeouts bound
-    each step of a request, and a reply read in chunks waits that long for each:
-    so it's sent from a thread of its own, left to end by those timeouts once
-    given up on."""
-    def sent_within(*args, **kwargs) -> httpx.Response:
-        reply: Future = Future()
-
-        def run() -> None:
-            try:
-                reply.set_result(send(*args, **kwargs))
-            except BaseException as exc:  # handed to the caller, whatever it is
-                reply.set_exception(exc)
-
-        threading.Thread(target=run, daemon=True).start()
-        if not wait([reply], timeout=seconds).done:
-            raise httpx.TimeoutException(f"gave up after {seconds:.1f}s")
-        return reply.result()
-    return sent_within
 
 
 def _labels(test: dict) -> list[str]:

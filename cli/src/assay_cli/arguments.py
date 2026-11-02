@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 
 from assay_cli import __version__
-from assay_cli.client import SCOPES
+from assay_cli.client import SCOPES, canonical_id
 from assay_cli.gate import (
     BATCH_FAIL_ON,
     BATCH_FAIL_ON_CHOICES,
@@ -38,7 +38,7 @@ class ArgumentError(Exception):
 def parse(argv: list[str] | None) -> argparse.Namespace:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if getattr(args, "replay", None) and args.scope == "test":
+    if getattr(args, "replay", None) is not None and args.scope == "test":
         parser.error("--replay: a standalone test has no executions to replay")
     return args
 
@@ -67,7 +67,9 @@ def build_parser() -> argparse.ArgumentParser:
                     "every run to finish, and fail when a run's outcome is in --fail-on, or, "
                     "with limits, when more runs fail than they allow.")
     _scope_arguments(run)
-    run.add_argument("--replay", metavar="EXECUTION_ID",
+    # an id, or nothing is replayed: "" (an unset variable) would start a live run,
+    # and a path such as ../.. a run of something else
+    run.add_argument("--replay", type=_execution_id, metavar="EXECUTION_ID",
                      help="Replay this past execution of the set or plan: exactly its entries.")
     run.add_argument("--fail-on", type=_choices(RUN_STATUSES), metavar="STATUSES",
                      help="Comma-separated run outcomes that fail a run "
@@ -86,7 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
                            default=[], metavar="[TEST_SET=]RATE",
                            help="At least RATE (0 to 1) of the runs passing: over the whole "
                                 "execution, or in that test set; repeatable.")
-    tolerance.add_argument("--blocking-check", action="append", default=[], metavar="LABEL",
+    tolerance.add_argument("--blocking-check", type=_label, action="append", default=[],
+                           metavar="LABEL",
                            help="A check label that fails the step whenever it fails, "
                                 "whatever the counts; repeatable, added to the policy's.")
     _wait_arguments(run)
@@ -134,7 +137,8 @@ def _connection_arguments(parser: argparse.ArgumentParser, defaults: bool) -> No
                              f"of the API; repeatable. ${HEADERS_ENV} takes a JSON object.")
     parser.add_argument("--http-timeout", type=_positive_float, default=default(30.0),
                         metavar="SECONDS",
-                        help="Timeout of each step of a request to the API (default 30).")
+                        help="The longest a request to the API may take, in all "
+                             "(default 30).")
 
 
 def _scope_arguments(parser: argparse.ArgumentParser) -> None:
@@ -184,6 +188,21 @@ def _limit(parse: Callable[[object, str], object]) -> Callable[[str], tuple]:
     return limit
 
 
+def _execution_id(value: str) -> str:
+    """An execution's id, in any form, as Assay spells it."""
+    execution_id = canonical_id(value.strip())
+    if execution_id is None:
+        raise argparse.ArgumentTypeError(f"expected an execution's id (got {value!r})")
+    return execution_id
+
+
+def _label(value: str) -> str:
+    """A check's label, without the spaces around it: they'd match no check."""
+    if not value.strip():
+        raise argparse.ArgumentTypeError("expected a check's label")
+    return value.strip()
+
+
 def _positive_int(value: str) -> int:
     number = int(value)
     if number < 1:
@@ -222,15 +241,30 @@ def _parameter(pair: str) -> tuple[str, object]:
 
 
 def api_url(url: str) -> str:
-    """An http:// or https:// address with a host: no other could ever be reached."""
+    """An http:// or https:// address with a host, and no query or fragment, which
+    every request's path would be added after; the spaces around it, as a secret
+    pasted with them would keep, left out."""
+    url = url.strip()
     try:
         parsed = httpx.URL(url)
     except httpx.InvalidURL as exc:
-        raise ArgumentError(f"the API's URL {url!r} isn't valid: {exc}") from None
+        # httpx's reason may quote part of a password: kept out when there may be one
+        why = "" if "@" in url else f": {exc}"
+        raise ArgumentError(f"the API's URL {_shown(url)} isn't valid{why}") from None
     if parsed.scheme not in ("http", "https") or not parsed.host:
         raise ArgumentError(f"the API's URL must start with http:// or https:// and name "
-                            f"a host, e.g. https://assay.internal/api (got {url!r})")
+                            f"a host, e.g. https://assay.internal/api (got {_shown(url)})")
+    if parsed.query or parsed.fragment or url.endswith(("?", "#")):
+        raise ArgumentError(f"the API's URL can't have a query (?) or a fragment (#), as "
+                            f"each request's path follows it (got {_shown(url)}); send a "
+                            "gateway's key as a header with --header")
     return url
+
+
+def _shown(url: str) -> str:
+    """The URL for an error, unless it holds an @: a password may be before it, and
+    may hold any character, so no part of it is shown then."""
+    return "(not shown, as it may hold a password)" if "@" in url else repr(url)
 
 
 def headers(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, str]:

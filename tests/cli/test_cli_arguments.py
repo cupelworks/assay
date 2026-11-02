@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from assay_cli.arguments import ArgumentError, api_url, build_parser, headers
+from assay_cli.arguments import ArgumentError, api_url, build_parser, headers, parse
 from assay_cli.cli import EXIT_ERROR, main
 
 
@@ -147,3 +147,64 @@ def test_the_version_is_written_once():
     project = tomllib.loads((Path(__file__).parents[2] / "cli" / "pyproject.toml").read_text())
     assert "version" not in project["project"] and "version" in project["project"]["dynamic"]
     assert project["tool"]["hatch"]["version"]["path"] == "src/assay_cli/__init__.py"
+
+
+EXECUTION = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+
+
+@pytest.mark.parametrize("given", [
+    EXECUTION, EXECUTION.upper(), f"{{{EXECUTION}}}", f"urn:uuid:{EXECUTION}", f" {EXECUTION} "])
+def test_a_replay_is_an_executions_id_in_any_form(given):
+    assert parse(["run", "test-set", "Smoke", "--replay", given]).replay == EXECUTION
+
+
+@pytest.mark.parametrize("given", ["", "  ", "last", f"../../{EXECUTION}", f"{EXECUTION}/x"])
+def test_a_replay_that_isnt_an_id_is_refused(given, capsys):
+    # "" is a variable left unset: never a live run instead of the replay asked for
+    with pytest.raises(SystemExit):
+        parse(["run", "test-set", "Smoke", "--replay", given])
+    assert "expected an execution's id" in capsys.readouterr().err
+
+
+def test_a_replay_of_a_standalone_test_is_refused_even_empty(capsys):
+    with pytest.raises(SystemExit):
+        parse(["run", "test", "lonely", "--replay", EXECUTION])
+    assert "a standalone test has no executions" in capsys.readouterr().err
+
+
+def test_a_blocking_check_is_given_without_the_spaces_around_it():
+    args = parse(["run", "test-set", "Smoke", "--blocking-check", " Toxicity "])
+    assert args.blocking_check == ["Toxicity"]
+    with pytest.raises(SystemExit):
+        parse(["run", "test-set", "Smoke", "--blocking-check", " "])
+
+
+@pytest.mark.parametrize("url", [
+    "htps://ci:s3cr3t@assay.internal/api",
+    "ci:s3cr3t@assay.internal/api",
+    "https://ci:s3cr3t@assay.internal:port/api",
+    "https://ci:Pa55?s3cr3t@gw/api",  # a password holding ?, / or #
+    "https://tok:abc/s3cr3t@gw/api",
+    "https://user:s3cr#t@host/api",
+    "ftp://ci:s3/cr3t@gw/api",
+    "https://ci:s3cr3t@gw/api?key=1",
+])
+def test_a_url_error_never_shows_any_of_its_password(url):
+    with pytest.raises(ArgumentError) as raised:
+        api_url(url)
+    assert "s3" not in str(raised.value) and "cr" not in str(raised.value)
+    assert "(not shown, as it may hold a password)" in str(raised.value)
+
+
+@pytest.mark.parametrize(("url", "says"), [
+    ("https://gw/api?subscription-key=K", "can't have a query (?) or a fragment (#)"),
+    ("https://gw/api#top", "can't have a query"),
+    ("https://gw/api?", "can't have a query"),
+])
+def test_a_url_with_a_query_or_fragment_is_refused(url, says):
+    with pytest.raises(ArgumentError, match=re.escape(says)):
+        api_url(url)
+
+
+def test_a_url_is_taken_without_the_spaces_around_it():
+    assert api_url("  https://assay.internal/api \n") == "https://assay.internal/api"

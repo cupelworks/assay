@@ -80,7 +80,7 @@ def _policy(data: object, source: str) -> Policy:
     if scopes:
         scope = (_SCOPE_KEYS[scopes[0]], _text(data[scopes[0]], scopes[0]))
     fail_on = STRICT.fail_on
-    if "fail_on" in data:
+    if _given(data, "fail_on", None) is not None:
         try:
             fail_on = spelled(RUN_STATUSES, _list(data["fail_on"], "fail_on", split=True))
         except ValueError as exc:

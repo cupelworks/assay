@@ -131,11 +131,13 @@ assay --url https://assay.internal.example.com health
 |---|---|---|---|
 | The API's URL | `--url URL` | `ASSAY_API_URL` | none: required |
 | Headers sent with every request | `--header 'Name: value'`, repeatable | `ASSAY_API_HEADERS`, a JSON object | none |
-| Timeout of each step of a request | `--http-timeout SECONDS` | | `30` |
+| The longest a request may take, in all | `--http-timeout SECONDS` | | `30` |
 
 - **The URL includes the path the API is served under.** If a proxy serves it under `/api`
   (Assay's `ASSAY_ROOT_PATH`), give `https://host/api`. A trailing slash doesn't matter.
-  It must start with `http://` or `https://`: anything else is refused before any request.
+  It must start with `http://` or `https://` and have no query (`?`) or fragment (`#`):
+  anything else is refused before any request. Send a gateway's key with `--header`. A URL
+  with a password in it (`user:password@`) is never shown in an error.
 - **The flag wins** over the environment variable.
 - **These options go before or after the command:** `assay --url X run …` and
   `assay run … --url X` both work.
@@ -366,7 +368,8 @@ removed from the set since. Use it to compare like with like: "did this change r
 exactly what we tested at the last release?". Entries without a recorded answer ask your
 application again, so their answers can differ from the original run's.
 
-- The execution must belong to the set or plan you name.
+- The execution must belong to the set or plan you name. Give its id, in any form; an
+  empty `--replay ""` (a variable left unset) is an error, never a live run.
 - Find execution ids with `GET /runs/test-sets/{id}/executions` (or `/runs/test-plans/…`),
   in the UI, or in the CLI's output.
 - A standalone test has no executions, so `--replay` with `test` is an error, caught
@@ -546,10 +549,14 @@ Per-check targets and leaving checks out of a batch are possible through the API
   have started.
 - **The last check comes on time.** The CLI never sleeps past `--timeout`, and no request,
   each page of a list included, is sent after the time left (or 5 seconds, for the check at
-  the deadline). A request waits no longer than the time left in all, connecting and
-  reading the reply included, whatever `--http-timeout` is. So the step reports the
+  the deadline). A request takes no longer than the time left in all, connecting and
+  reading the reply included, nor longer than `--http-timeout`. So the step reports the
   timeout, and stops a batch, a few seconds after `--timeout`; stopping a batch takes at
   most 5 seconds, within the time a CI system leaves after a cancel.
+- **The runs are judged only once their list agrees with the execution's counts.** A run
+  listed as still in progress, or a list short of the counts (read a moment behind), is
+  read again for up to a minute: then exit 3 for runs still in progress, exit 2 for a list
+  that still differs. Neither is ever judged as a failure, nor as a pass.
 - **Timing out stops waiting, not the work.** The runs carry on in Assay and their results
   are kept there. Only a batch with `--stop-on-timeout` is stopped.
 - **`--no-wait`** prints the new execution's, run's or batch's id on stdout (with `--json`:
@@ -617,7 +624,7 @@ Prints one JSON object instead of the text, for scripts:
 | `id` | The run's, execution's or batch's id in Assay |
 | `scope` | What ran: `kind`, `id`, `name` |
 | `status` | A run's outcome; an execution's worst outcome; a batch's status |
-| `passed` | Whether the step passed: the same as exit code 0 |
+| `passed` | Whether the gate passed. The exit code is 0 when it did and every report file was written; 2 when one couldn't be |
 | `counts` | Runs by outcome; for a batch, checks by verdict (`pass`, `fail`, `inconclusive`, `none`) |
 | `fail_on` | The rule it was judged by |
 | `reason` | Why it failed whatever `fail_on` says: a batch stopped or undecided, a status the CLI doesn't know; `null` otherwise |
@@ -639,14 +646,15 @@ would leave it no longer XML.
 |---|---|---|
 | `<testsuite>` | The test set (or test); for a plan, each of its test sets | Each entry: `test set / test` |
 | `<testcase>` | Each run, named after its test | Each check, named by its label |
-| `<failure>` | A run whose outcome fails the step (`Amber`, `Red`) | A verdict that fails the step |
-| `<error>` | A run that couldn't run (`NotRan`), or with a status the CLI doesn't know | A batch that ended `Incomplete` or `NotRan`, or with a status the CLI doesn't know: one case named after the statistical test, with the reason |
+| `<failure>` | A run that fails the step: its outcome is one you fail on (`Amber`, `Red`), and no limit tolerated it | A verdict that fails the step |
+| `<error>` | A run that couldn't run (`NotRan`) and no limit tolerated, or with a status the CLI doesn't know | A batch that ended `Incomplete` or `NotRan`, or with a status the CLI doesn't know: one case named after the statistical test, with the reason |
 | `<skipped>` | | A check with no verdict, or a verdict you don't fail on (e.g. `inconclusive` by default) |
-| `<system-out>` | The outcome of a run you tolerated | |
+| `<system-out>` | The outcome of a run you tolerated, by `--fail-on` or by a limit (`… (tolerated by the gate)`): a CI system reading the report doesn't fail the build the step passed | |
 
-When two cases would share a suite and a name, for example the same test in two sets of a
-plan, each name ends with its entry's id in brackets: CI systems merge cases with the same
-names.
+When two cases would share a suite and a name, for example two entries of one set made
+from tests with the same name, each name ends with its entry's id in brackets: CI systems
+merge cases with the same names. The same test in two sets of a plan needs none: each set
+is a suite of its own.
 
 Characters XML can't hold, such as colour codes in an application's error, are left out, so
 CI systems can always read the report.
@@ -671,8 +679,8 @@ created, and a file given both ways gets the summary once.
 |---|---|---|
 | `0` | Passed | Every run, or every verdict, met your rule. Also: `--no-wait` started it; `health` is ready |
 | `1` | Failed the gate | A run you fail on, a limit or blocking check broken, a verdict you fail on, an `Incomplete` batch, a status the CLI doesn't know; `health` not ready |
-| `2` | Error: nothing was judged | No URL; bad arguments or policy file; the API unreachable; a name with no match; the API refused the request (the reason is shown); a report file that can't be written; anything unexpected |
-| `3` | Timed out | Not finished within `--timeout`, usually because no worker is running |
+| `2` | Error: nothing was judged | No URL; bad arguments or policy file; the API unreachable; a name with no match; the API refused the request (the reason is shown); a runs list that doesn't match the execution's counts; a report file that can't be written; anything unexpected |
+| `3` | Timed out | Not finished within `--timeout`, usually because no worker is running; or its runs still listed in progress a minute after it finished |
 | `4` | Couldn't be judged | It failed only because runs Not Ran: the application under test or the judge didn't answer. With the runs that Not Ran left out, it would have passed. Also a `NotRan` batch |
 | `130` | Interrupted | Ctrl-C |
 | `143` | Cancelled | The CI system cancelled the job (SIGTERM) |
@@ -921,9 +929,10 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 | `assay-gate.yml is for the test plan 'X', not …` | The file names the scope it's for (`test_plan:`): give it to that scope only |
 | Exit `4` | The application under test or the judge didn't answer: check them (`POST /settings/target/checks`, `POST /settings/judge/checks`) |
 
-`--http-timeout` raises the limit on each step of a request (connecting, each read) if the
-API is slow to answer, e.g. behind a busy proxy. While waiting, the time left caps a
-request in all too.
+`--http-timeout` raises the limit on a request, in all, if the API is slow to answer, e.g.
+behind a busy proxy. A request given up on is left to end in the background; while three
+reads given up on are still being answered (a reply trickling in, a little at a time),
+no other read is sent until one ends, and the wait says so.
 
 ## What it doesn't do (yet)
 
@@ -955,6 +964,8 @@ assay health
 
 assay run {test,test-set,test-plan} ID_OR_NAME
           [--replay EXECUTION_ID] [--fail-on STATUSES]
+          [--policy FILE] [--max-failures [TEST_SET=]N]... [--min-pass-rate [TEST_SET=]RATE]...
+          [--blocking-check LABEL]...
           [--no-wait] [--timeout SECONDS] [--interval SECONDS]
           [--json] [--junit FILE] [--markdown FILE]
 
@@ -969,7 +980,7 @@ assay batch {test,test-set,test-plan} ID_OR_NAME
 |---|---|---|---|
 | `--url URL` | all | `$ASSAY_API_URL` | Assay's API, including its path |
 | `--header 'NAME: VALUE'` | all | `$ASSAY_API_HEADERS` | A header for every request; repeatable |
-| `--http-timeout SECONDS` | all | `30` | Timeout of each step of a request |
+| `--http-timeout SECONDS` | all | `30` | The longest a request may take, in all |
 | `--version` | | | Print the CLI's version |
 | `-h`, `--help` | all | | Help for the CLI or a command |
 | `--replay EXECUTION_ID` | `run` | | Replay a past execution of the set or plan |

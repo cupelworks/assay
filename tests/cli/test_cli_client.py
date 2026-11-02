@@ -9,7 +9,7 @@ import time
 import httpx
 import pytest
 
-from assay_cli.client import ApiError, AssayClient
+from assay_cli.client import GIVEN_UP_READS, ApiError, AssayClient
 
 
 def _client(reply):
@@ -121,6 +121,41 @@ def test_the_time_left_bounds_a_request_in_all(send, says, retries):
     assert raised.value.retries == retries
 
 
+def test_http_timeout_bounds_a_request_in_all_without_a_time_left():
+    release = threading.Event()
+    client = AssayClient(httpx.Client(base_url="http://assay", timeout=0.2,
+                                      transport=httpx.MockTransport(_held(release))))
+    started = time.monotonic()
+    try:
+        with pytest.raises(ApiError, match="gave up after 0.2s.*it may have been carried out"):
+            client.start_batch({})  # a start has no time left: --http-timeout bounds it
+    finally:
+        release.set()
+    assert time.monotonic() - started < 2
+
+
+def test_reads_given_up_on_and_still_answered_hold_back_other_reads_not_writes():
+    release = threading.Event()
+    client = _client(_held(release))
+    try:
+        for _ in range(GIVEN_UP_READS):
+            with pytest.raises(ApiError, match="gave up after"):
+                client.batch("b", time_left=lambda: 0.05)
+        with pytest.raises(ApiError, match="not sent: 3 requests given up on are still "
+                                           "being answered") as raised:
+            client.batch("b", time_left=lambda: 0.05)
+        assert raised.value.retries == math.inf  # the wait goes on: one may end
+        with pytest.raises(ApiError, match="gave up after"):
+            client.stop_batch("b", lambda: 0.05)  # sent: a stop never waits on reads
+    finally:
+        release.set()
+    deadline = time.monotonic() + 2
+    while client._given_up and any(t.is_alive() for t in client._given_up):
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    assert client.batch("b", time_left=lambda: 1) == {"id": "b"}  # they ended: sent again
+
+
 @pytest.mark.parametrize("error", [
     httpx.UnsupportedProtocol("Request URL is missing an 'http://' or 'https://' protocol."),
     httpx.LocalProtocolError("Illegal header value b' x'"),
@@ -157,6 +192,19 @@ def test_an_id_in_any_form_is_sent_as_assay_spells_it(given):
 
     assert paths == ["/test-sets/3f2504e0-4f89-11d3-9a0c-0305e82c3301"]
     assert found == {"id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301", "name": "Smoke"}
+
+
+@pytest.mark.parametrize("page", [
+    {"runs": [], "total": 3},  # its items under another key
+    {"items": [{"id": "r"}]},  # no total: a long list would end after one page
+    {"items": None, "total": 0},
+    [{"id": "r"}],
+])
+def test_a_reply_that_isnt_a_page_is_an_error_never_the_end_of_the_list(page):
+    with pytest.raises(ApiError, match="the reply isn't a page of a list") as raised:
+        _client(lambda request: httpx.Response(200, json=page)).execution_runs(
+            "test-set", "s", "e")
+    assert raised.value.retries == 0
 
 
 def test_check_labels_are_read_from_a_test_and_from_a_sets_entries():

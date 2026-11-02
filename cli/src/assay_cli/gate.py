@@ -195,8 +195,21 @@ def _failures(count: int) -> str:
     return f"{count} failure{'' if count == 1 else 's'}"
 
 
-def _percent(rate: float) -> str:
-    return f"{rate * 100:.1f}".rstrip("0").rstrip(".") + "%"
+def _percent(rate: float, digits: int = 1) -> str:
+    return f"{rate * 100:.{digits}f}".rstrip("0").rstrip(".") + "%"
+
+
+def _percents(rate: float, limit: float) -> tuple[str, str]:
+    """The limit as given (99.995%, never rounded to 100%), and the rate to as many
+    digits as tell it from the limit: never "95% < min 95%"."""
+    least = _percent(limit, 6)
+    fewest = max(len(least.rstrip("%").partition(".")[2]), 1)
+    shown = _percent(rate, fewest)
+    for digits in range(fewest + 1, 7):
+        if rate == limit or shown != least:
+            break
+        shown = _percent(rate, digits)
+    return shown, least
 
 
 def _blocking(label: str, runs: list[Judged]) -> Rule:
@@ -224,11 +237,12 @@ def _limited(runs: list[Judged], limits: Limits, policy: Policy,
         passed = len(runs) - failed
         rate = passed / len(runs)
         broken = rate < limits.min_pass_rate
+        shown, least = _percents(rate, limits.min_pass_rate)
         rules.append(Rule(
             "min_pass_rate", test_set, limits.min_pass_rate, round(rate, 4), broken,
             f"{where}a pass rate of at least {_percent(limits.min_pass_rate)}",
-            f"{where}{passed} of {len(runs)} passed ({_percent(rate)}) "
-            f"{'<' if broken else '≥'} min {_percent(limits.min_pass_rate)}"))
+            f"{where}{passed} of {len(runs)} passed ({shown}) "
+            f"{'<' if broken else '≥'} min {least}"))
     return rules
 
 
@@ -309,8 +323,28 @@ def _verdict(passed: bool) -> str:
 
 # -- runs and executions --
 
+def tolerated(run: Judged, rules: list[Rule], policy: Policy) -> bool:
+    """A failing run that every rule counting it allowed: its test set's own limits
+    when it has them, the limits over the whole when there are some, else "no
+    failure" outside the limited sets. Reported as passed, so a CI system reading
+    the JUnit report doesn't fail the build the gate passed."""
+    if not policy.tolerant or run.status not in policy.fail_on:
+        return False
+    limited = run.test_set in policy.test_sets
+
+    def counts_it(rule: Rule) -> bool:
+        if rule.rule == "blocking_check":
+            return False  # a blocking check that failed in this run is never tolerated
+        if rule.test_set is not None:
+            return rule.test_set == run.test_set
+        return rule.rule != "none_allowed" or not limited
+
+    return not any(rule.broken for rule in rules if counts_it(rule))
+
+
 def _run_case(name: str, group: str, status: str, not_met: Iterable[str], error: str | None,
-              policy: Policy) -> Case:
+              policy: Policy, allowed: bool = False) -> Case:
+    """`allowed`: the rules counting the run held, so it fails nothing."""
     if status in IN_PROGRESS:
         return Case(name, group, "error", f"{status}: not finished when read")
     if status not in RUN_STATUSES:
@@ -326,6 +360,8 @@ def _run_case(name: str, group: str, status: str, not_met: Iterable[str], error:
         message = status
     if status not in policy.fail_on and not blocking:
         return Case(name, group, "passed", "" if status == "Green" else message)
+    if allowed and not blocking:
+        return Case(name, group, "passed", f"{message} (tolerated by the gate)")
     return Case(name, group, "error" if status == "NotRan" else "failed", message)
 
 
@@ -363,7 +399,8 @@ def execution_outcome(scope: dict, details: dict, runs: list[dict],
     unfinished = sum(run["status"] in IN_PROGRESS for run in runs)
     reason = "; ".join(why for why in (
         _unknown(", ".join(unknown)) if unknown else "",
-        f"{_runs(unfinished)} still in progress when its runs were read" if unfinished else "")
+        f"{_runs(unfinished)} still in progress when its runs were read" if unfinished
+        else runs_disagree(details, runs))
         if why)
 
     def test_set(run: dict) -> str | None:
@@ -372,11 +409,12 @@ def execution_outcome(scope: dict, details: dict, runs: list[dict],
     def not_met(run: dict) -> tuple[str, ...]:
         return tuple((run.get("checks") or {}).get("not_met", []))
 
-    rules, passed, judged = _gated(
-        [Judged(test_set(run), run["status"], not_met(run)) for run in runs], policy, reason)
+    seen = [Judged(test_set(run), run["status"], not_met(run)) for run in runs]
+    rules, passed, judged = _gated(seen, policy, reason)
     cases = _distinct(
         [_run_case(run.get("test_name", run["id"]), test_set(run) or scope["name"],
-                   run["status"], not_met(run), run.get("error"), policy) for run in runs],
+                   run["status"], not_met(run), run.get("error"), policy,
+                   tolerated(one, rules, policy)) for run, one in zip(runs, seen, strict=True)],
         [str((run.get("test_set_entry_id") or {}).get("id") or run["id"]) for run in runs])
     summary = (f"{_verdict(passed)}: {SCOPE_NOUNS[scope['kind']]} {scope['name']!r}, "
                f"{_runs(details.get('run_count', sum(counts.values())))}: "
@@ -384,6 +422,23 @@ def execution_outcome(scope: dict, details: dict, runs: list[dict],
     return Outcome("execution", str(details["id"]), scope, _execution_status(counts), passed,
                    summary, counts, cases, policy.fail_on, reason, rules, policy.tolerant,
                    judged)
+
+
+def runs_disagree(details: dict, runs: list[dict]) -> str:
+    """How the runs listed differ from the execution's own counts of them, or "".
+    Judged on a list that's short (a page lost) or out of step, the gate would
+    pass on runs it never saw."""
+    counted = Counter({s: n for s, n in details["runs"].items() if n})
+    listed = Counter(run["status"] for run in runs)
+    total = details.get("run_count", sum(counted.values()))
+    if listed == counted and len(runs) == total:
+        return ""
+    return (f"its runs as listed ({_tally(listed)}) don't match its counts "
+            f"({_runs(total)}: {_tally(counted)})")
+
+
+def _tally(counts: Counter) -> str:
+    return ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "none"
 
 
 def _execution_status(counts: dict) -> str:
@@ -397,11 +452,14 @@ def _execution_status(counts: dict) -> str:
 def run_outcome(scope: dict, details: dict, policy: Policy = STRICT) -> Outcome:
     status = details["status"]
     results = details.get("results") or {}
-    not_met = tuple(sorted(label for label, r in results.items() if not r.get("passed")))
+    # the API's own rule for an execution's runs: a check that errored isn't met
+    not_met = tuple(sorted(label for label, r in results.items()
+                           if not (r.get("passed") and not r.get("errored"))))
     reason = "" if status in RUN_STATUSES else _unknown(status)
-    rules, passed, judged = _gated([Judged(None, status, not_met)], policy, reason)
+    seen = Judged(None, status, not_met)
+    rules, passed, judged = _gated([seen], policy, reason)
     case = _run_case(scope["name"], scope["name"], status, not_met, details.get("error"),
-                     policy)
+                     policy, tolerated(seen, rules, policy))
     met = len(results) - len(not_met)
     summary = (f"{_verdict(passed)}: test {scope['name']!r}: {status}"
                + (f", {met}/{len(results)} checks met" if results else "")

@@ -28,14 +28,15 @@ def _gate_line(outcome: Outcome) -> str:
 
 
 def text(outcome: Outcome) -> str:
-    lines = [outcome.summary, f"  {outcome.kind} id: {outcome.id}"]
+    lines = [_one_line(outcome.summary), f"  {outcome.kind} id: {outcome.id}"]
     if _gate_line(outcome):
         lines.append(f"  gate: {_gate_line(outcome)}")
     if not outcome.passed and not outcome.judged:
         lines.append(f"  couldn't be judged: {_UNJUDGED}")
     failures = outcome.failures
     for case in failures[:MAX_LISTED]:
-        lines.append(f"  {_MARK[case.outcome]} {_label(outcome, case)}: {case.message}")
+        lines.append(f"  {_MARK[case.outcome]} {_one_line(_label(outcome, case))}: "
+                     f"{_one_line(case.message)}")
     if len(failures) > MAX_LISTED:
         lines.append(f"  … and {len(failures) - MAX_LISTED} more (see the JUnit report)")
     if not outcome.passed and outcome.fail_on and not outcome.reason:
@@ -46,7 +47,7 @@ def text(outcome: Outcome) -> str:
 def markdown(outcome: Outcome) -> str:
     icon = "✅" if outcome.passed else "❌"
     lines = [f"### {icon} Assay: {SCOPE_NOUNS[outcome.scope['kind']]} "
-             f"`{outcome.scope['name']}`", "",
+             f"{_code(outcome.scope['name'])}", "",
              _escape(outcome.summary), "",
              f"{outcome.kind.capitalize()} `{outcome.id}`"]
     if _gate_line(outcome):
@@ -119,5 +120,20 @@ def _xml(value: str) -> str:
     return _NOT_IN_XML.sub("", value)
 
 
+def _one_line(value: str) -> str:
+    """Line breaks, which would end a line of a report early, as spaces."""
+    return value.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+
+
 def _escape(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
+    """On one line, and no `|` read as a Markdown table's column."""
+    return _one_line(value).replace("|", "\\|")
+
+
+def _code(value: str) -> str:
+    """`value` as Markdown code, whatever backticks it holds: fenced by one more
+    than its longest run of them, spaced when it starts or ends with one."""
+    value = _one_line(value)
+    fence = "`" * (max(map(len, re.findall("`+", value)), default=0) + 1)
+    padded = f" {value} " if value.startswith("`") or value.endswith("`") else value
+    return f"{fence}{padded}{fence}"

@@ -846,3 +846,106 @@ def test_an_entry_replayed_that_no_set_holds_is_never_judged_without(db, cli, re
     assert (f"Couldn't read the checks of 3 of the entries execution {execution} ran: no "
             "test set holds them now") in cli.err.getvalue()
     assert db.dispatched == []
+
+
+def test_a_replay_given_in_another_form_replays_that_execution(db, cli):
+    test_set = db.test_set("Smoke", [db.test(name="a")])
+    first = db.client.post(f"/runs/test-sets/{test_set['id']}").json()["id"]
+
+    code = cli("run", "test-set", "Smoke", "--replay", "{" + first.upper() + "}", "--json")
+
+    assert code == EXIT_PASSED, cli.err.getvalue()
+    replay = json.loads(cli.out.getvalue())["id"]
+    details = db.client.get(f"/runs/test-sets/{test_set['id']}/executions/{replay}").json()
+    assert details["replayed_execution_id"] == {"id": first}
+
+
+def test_a_set_replay_checks_its_limits_without_reading_the_runs_it_replays(db, cli):
+    test_set = db.test_set("Smoke", [db.test(name="a")])
+    first = db.client.post(f"/runs/test-sets/{test_set['id']}").json()["id"]
+    client = Counted(db.client, lambda method, path: False, None)
+
+    code = cli("run", "test-set", "Smoke", "--replay", first, "--max-failures", "Smoke=0",
+               client=client)
+
+    assert code == EXIT_PASSED, cli.err.getvalue()
+    assert client.sent[f"/runs/test-sets/{test_set['id']}/executions/{first}/test-runs"] == 0
+
+
+class Lagging(AssayClient):
+    """Lists an execution's runs as still Running, `times` times."""
+
+    def __init__(self, http, times):
+        super().__init__(http)
+        self.times = times
+
+    def execution_runs(self, *args, **kwargs):
+        runs = super().execution_runs(*args, **kwargs)
+        if self.times:
+            self.times -= 1
+            return [{**run, "status": "Running"} for run in runs]
+        return runs
+
+
+def test_runs_listed_still_in_progress_are_read_again(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+
+    code = cli("run", "test-set", "Smoke", client=Lagging(db.client, times=2))
+
+    assert code == EXIT_PASSED, cli.err.getvalue()
+
+
+def test_runs_listed_in_progress_for_a_minute_time_out_never_fail_the_gate(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+
+    code = cli("run", "test-set", "Smoke", client=Lagging(db.client, times=10_000))
+
+    assert code == EXIT_TIMED_OUT
+    assert (f"It finished, but its runs still listed 1 in progress after {READ_SECONDS}s"
+            in cli.err.getvalue())
+
+
+class Short(AssayClient):
+    """Lists an execution's runs one short, `times` times: a page lost."""
+
+    def __init__(self, http, times):
+        super().__init__(http)
+        self.times = times
+
+    def execution_runs(self, *args, **kwargs):
+        runs = super().execution_runs(*args, **kwargs)
+        if self.times:
+            self.times -= 1
+            return runs[1:]
+        return runs
+
+
+def test_runs_listed_short_of_the_counts_are_read_again(db, cli):
+    db.test_set("Smoke", [db.test(name="good"), db.test(name="bad", checks=[MISSES])])
+
+    code = cli("run", "test-set", "Smoke", client=Short(db.client, times=2))
+
+    assert code == EXIT_FAILED  # judged on every run: the bad one included
+    assert "✗ bad: Red: not met: Misses" in cli.out.getvalue()
+
+
+def test_runs_listed_short_of_the_counts_for_a_minute_are_an_error_not_a_pass(db, cli):
+    db.test_set("Smoke", [db.test(name="good"), db.test(name="bad", checks=[MISSES])])
+
+    code = cli("run", "test-set", "Smoke", client=Short(db.client, times=10_000))
+
+    assert code == EXIT_ERROR
+    assert (f"It finished, but after {READ_SECONDS}s its runs as listed (1 Green) don't "
+            "match its counts (2 runs: 1 Green, 1 Red)") in cli.err.getvalue()
+
+
+def test_a_run_a_limit_tolerated_passes_in_the_junit_report_too(db, cli, tmp_path):
+    db.test_set("Smoke", [db.test(name="good"), db.test(name="bad", checks=[MISSES])])
+    junit = tmp_path / "assay.xml"
+
+    code = cli("run", "test-set", "Smoke", "--max-failures", "1", "--junit", str(junit))
+
+    assert code == EXIT_PASSED
+    suites = ET.parse(junit).getroot().findall("testsuite")
+    assert [(s.get("name"), s.get("failures")) for s in suites] == [
+        ("Smoke", "0"), ("Assay gate", "0")]

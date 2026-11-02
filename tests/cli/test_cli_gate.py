@@ -191,6 +191,32 @@ def test_a_run_status_the_cli_doesnt_know_never_passes():
     assert "fails on:" not in report.text(outcome)  # --fail-on didn't decide it
 
 
+@pytest.mark.parametrize(("name", "heading"), [
+    ("Smoke", "`Smoke`"),
+    ("Smoke `v2` | prod", "``Smoke `v2` | prod``"),
+    ("`edge`", "`` `edge` ``"),
+    ("two\r\nlines", "`two lines`"),
+])
+def test_a_scopes_name_never_breaks_the_markdown_heading(name, heading):
+    scope = {**SCOPE, "name": name}
+    details = {"id": "x", "run_count": 1, "runs": {"Green": 1}}
+    runs = [{"id": "r1", "test_name": "a\nb", "status": "Green", "checks": {"not_met": []}}]
+
+    summary = report.markdown(execution_outcome(scope, details, runs))
+
+    assert summary.splitlines()[0] == f"### ✅ Assay: test set {heading}"
+
+
+def test_a_name_with_a_line_break_stays_on_its_line_of_the_text_report():
+    details = {"id": "x", "run_count": 1, "runs": {"Red": 1}}
+    runs = [{"id": "r1", "test_name": "two\nlines", "status": "Red",
+             "checks": {"not_met": ["A\rB"]}}]
+
+    lines = report.text(execution_outcome(SCOPE, details, runs)).splitlines()
+
+    assert "  ✗ two lines: Red: not met: A B" in lines
+
+
 def test_a_standalone_run_with_a_status_the_cli_doesnt_know_never_passes():
     scope = {"kind": "test", "id": "t", "name": "lonely"}
 
@@ -378,10 +404,101 @@ def test_a_plans_runs_are_grouped_and_judged_by_their_test_set():
     assert outcome.passed
     assert report.text(outcome).splitlines()[2] == "  gate: Tone: 1 of 2 passed (50%) ≥ min 50%"
     suites = ET.fromstring(report.junit(outcome)).findall("testsuite")
+    # Tone's Red run was tolerated: a CI system reading the report mustn't fail on it
     assert [(s.get("name"), s.get("tests"), s.get("failures")) for s in suites] == [
-        ("Smoke", "1", "0"), ("Tone", "2", "1"), ("Assay gate", "2", "0")]
+        ("Smoke", "1", "0"), ("Tone", "2", "0"), ("Assay gate", "2", "0")]
+    assert [c.find("system-out").text for c in suites[1].iter("testcase")
+            if c.get("name") == "Login"] == ["Red: not met: Polite (tolerated by the gate)"]
     # the same test in two sets: told apart by its set, no id needed
     assert [c.get("name") for c in suites[0].iter("testcase")] == ["Login"]
+
+
+def _set_outcome(statuses, policy, not_met=None):
+    details = {"id": "x", "run_count": len(statuses), "runs": dict(Counter(statuses))}
+    runs = [{"id": f"r{i}", "test_name": f"t{i}", "status": status,
+             "test_set_name": "Tone" if i % 2 else "Smoke",
+             "checks": {"not_met": (not_met or {}).get(i, ["A"] if status != "Green" else [])}}
+            for i, status in enumerate(statuses)]
+    return execution_outcome(PLAN, details, runs, policy)
+
+
+def _junit_outcomes(outcome):
+    return {case.get("name"): [child.tag for child in case]
+            for case in ET.fromstring(report.junit(outcome)).iter("testcase")
+            if case.get("classname") != report.GATE_SUITE}
+
+
+def test_runs_a_limit_tolerated_are_reported_passed_and_the_others_failed():
+    # t0, t2 in Smoke (no failure allowed); t1, t3 in Tone (one allowed)
+    outcome = _set_outcome(["Red", "Red", "Green", "Green"],
+                           Policy(test_sets={"Smoke": Limits(max_failures=0),
+                                             "Tone": Limits(max_failures=1)}))
+
+    assert not outcome.passed  # Smoke broke its limit
+    assert _junit_outcomes(outcome) == {"t0": ["failure"], "t1": ["system-out"],
+                                        "t2": [], "t3": []}
+    assert [case.name for case in outcome.failures] == ["t0"]
+
+
+def test_a_run_counted_by_a_broken_limit_over_the_whole_is_never_tolerated():
+    outcome = _set_outcome(["Red", "Red", "Green"],
+                           Policy(limits=Limits(max_failures=1),
+                                  test_sets={"Tone": Limits(max_failures=5)}))
+
+    assert not outcome.passed
+    # t1 is within Tone's limit, but the limit over the whole counts it too
+    assert _junit_outcomes(outcome) == {"t0": ["failure"], "t1": ["failure"], "t2": []}
+
+
+def test_a_blocking_check_failing_is_never_tolerated():
+    outcome = _set_outcome(["Green", "Red"], Policy(limits=Limits(max_failures=5),
+                                                    blocking_checks=("Toxicity",)),
+                           not_met={1: ["Toxicity"]})
+
+    assert _junit_outcomes(outcome)["t1"] == ["failure"]
+
+
+def test_a_strict_gate_tolerates_nothing():
+    outcome = _set_outcome(["Green", "Amber"], STRICT)
+
+    assert _junit_outcomes(outcome)["t1"] == ["failure"]
+
+
+def test_a_standalone_run_a_limit_tolerated_is_reported_passed():
+    scope = {"kind": "test", "id": "t", "name": "lonely"}
+    details = {"id": "r", "status": "Red", "results": {"A": {"passed": False}}}
+
+    outcome = run_outcome(scope, details, Policy(limits=Limits(max_failures=1)))
+
+    assert outcome.passed and outcome.failures == []
+    assert _junit_outcomes(outcome) == {"lonely": ["system-out"]}
+
+
+@pytest.mark.parametrize(("passed", "total", "limit", "text"), [
+    (1899, 2000, 0.95, "1899 of 2000 passed (94.95%) < min 95%"),
+    (19, 20, 0.95, "19 of 20 passed (95%) ≥ min 95%"),
+    (2, 3, 0.9, "2 of 3 passed (66.7%) < min 90%"),
+    (9999, 10000, 0.99995, "9999 of 10000 passed (99.99%) < min 99.995%"),
+])
+def test_a_pass_rate_is_shown_with_the_digits_that_tell_it_from_the_limit(
+        passed, total, limit, text):
+    runs = [Judged(None, "Green")] * passed + [Judged(None, "Red")] * (total - passed)
+
+    (rule,) = judge(runs, Policy(limits=Limits(min_pass_rate=limit)))
+
+    assert rule.text == text
+
+
+def test_runs_listed_that_dont_match_the_executions_counts_never_pass():
+    details = {"id": "x", "run_count": 3, "runs": {"Green": 2, "Red": 1}}
+    runs = [{"id": f"r{i}", "test_name": f"t{i}", "status": "Green", "checks": {"not_met": []}}
+            for i in range(2)]  # the Red run's page lost
+
+    outcome = execution_outcome(SCOPE, details, runs)
+
+    assert not outcome.passed
+    assert outcome.reason == ("its runs as listed (2 Green) don't match its counts "
+                              "(3 runs: 2 Green, 1 Red)")
 
 
 def test_a_broken_rule_is_named_in_every_output():
