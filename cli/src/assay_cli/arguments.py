@@ -80,11 +80,13 @@ def build_parser() -> argparse.ArgumentParser:
                      "one run; a blocking check is added to the file's.")
     tolerance.add_argument("--policy", type=Path, metavar="FILE",
                            help="A YAML gate policy, e.g. assay-gate.yml in your repository.")
-    tolerance.add_argument("--max-failures", type=_limit(max_failures_of), action="append",
+    tolerance.add_argument("--max-failures", type=_limit(_whole, max_failures_of),
+                           action="append",
                            default=[], metavar="[TEST_SET=]N",
                            help="At most N failing runs: over the whole execution, or in "
                                 "that test set; repeatable.")
-    tolerance.add_argument("--min-pass-rate", type=_limit(pass_rate_of), action="append",
+    tolerance.add_argument("--min-pass-rate", type=_limit(_number, pass_rate_of),
+                           action="append",
                            default=[], metavar="[TEST_SET=]RATE",
                            help="At least RATE (0 to 1) of the runs passing: over the whole "
                                 "execution, or in that test set; repeatable.")
@@ -175,17 +177,31 @@ def _choices(allowed: tuple[str, ...]) -> Callable[[str], tuple[str, ...]]:
     return parse
 
 
-def _limit(parse: Callable[[object, str], object]) -> Callable[[str], tuple]:
-    """`[TEST_SET=]VALUE`: the test set is everything before the last `=`."""
+def _limit(read: Callable[[str], object],
+           parse: Callable[[object, str], object]) -> Callable[[str], tuple]:
+    """`[TEST_SET=]VALUE`: the test set is everything before the last `=`; VALUE's
+    text `read` as a number, then checked as a policy file's would be."""
     def limit(text: str) -> tuple:
         test_set, sep, value = text.rpartition("=")
         if sep and not test_set.strip():
             raise argparse.ArgumentTypeError(f"expected [TEST_SET=]VALUE (got {text!r})")
         try:
-            return (test_set.strip() or None), parse(value.strip(), "value")
+            return (test_set.strip() or None), parse(read(value.strip()), "value")
         except PolicyError as exc:
             raise argparse.ArgumentTypeError(str(exc).removeprefix("value: ")) from None
     return limit
+
+
+def _whole(text: str) -> int | str:
+    """A whole number's text as one; any other left as it is, to be refused."""
+    return int(text) if text.isdecimal() else text
+
+
+def _number(text: str) -> float | str:
+    try:
+        return float(text)
+    except ValueError:
+        return text
 
 
 def _execution_id(value: str) -> str:

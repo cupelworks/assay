@@ -4,7 +4,6 @@
 loosening the gate is reviewed like any change, then the flags given for one run.
 The file is read strictly: an unknown or repeated key, a name YAML would read as
 something other than text, a limit out of range, each is an error naming it."""
-import contextlib
 import math
 from collections.abc import Hashable, Iterable, Mapping
 from pathlib import Path
@@ -36,6 +35,8 @@ class _Loader(yaml.SafeLoader):
 def _mapping(loader: _Loader, node: yaml.MappingNode, deep: bool = False) -> dict:
     seen = set()
     for key_node, _ in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            continue  # `<<: *defaults`: the anchor's keys, which the file's own may replace
         key = loader.construct_object(key_node, deep=deep)
         if not isinstance(key, Hashable):
             raise PolicyError(f"line {key_node.start_mark.line + 1}: a key must be a name, "
@@ -122,19 +123,15 @@ def _limits(data: Mapping, where: str) -> Limits:
 
 
 def max_failures_of(value: object, what: str) -> int:
-    """A whole number, 0 or more: bool isn't one, though Python counts it as an int."""
-    if isinstance(value, str) and value.strip().isdecimal():
-        value = int(value)
+    """A whole number, 0 or more: bool isn't one, though Python counts it as an int,
+    nor is text, "3" quoted in a file (a flag's text is read as a number first)."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise PolicyError(f"{what}: expected a whole number, 0 or more (got {value!r})")
     return value
 
 
 def pass_rate_of(value: object, what: str) -> float:
-    """A share from 0 to 1, e.g. 0.8 for 80%."""
-    if isinstance(value, str):
-        with contextlib.suppress(ValueError):
-            value = float(value)
+    """A share from 0 to 1, e.g. 0.8 for 80%; a number, not text, as above."""
     if (isinstance(value, bool) or not isinstance(value, int | float)
             or not math.isfinite(value) or not 0 <= value <= 1):
         raise PolicyError(f"{what}: expected a share from 0 to 1, e.g. 0.8 for 80% "
@@ -158,9 +155,10 @@ def _list(value: object, what: str, split: bool = False) -> list:
 
 
 def _text(value: object, what: str) -> str:
+    """A name without the spaces around it, which would match nothing, as a flag's."""
     if not isinstance(value, str) or not value.strip():
         raise PolicyError(f"{what}: expected a name, as text (got {value!r}): quote it")
-    return value
+    return value.strip()
 
 
 def with_flags(policy: Policy, fail_on: tuple[str, ...] | None,

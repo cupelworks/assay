@@ -292,11 +292,17 @@ class Runner:
         """Never tried again, as Assay may have carried it out; an interrupt while
         it's in flight says so too."""
         try:
-            return start()
+            started = start()
         except (KeyboardInterrupt, Cancelled):
             self.say(f"Interrupted while starting the {what}: it may have started, so "
                      "look in Assay before running it again.")
             raise
+        if not (isinstance(started, dict) and started.get("id")):
+            # a reply from something else than Assay's API: it may have started all the same
+            raise ApiError(f"Starting the {what} got a reply without its id — is the URL "
+                           f"Assay's API? It may have started, so look in Assay before "
+                           f"running it again", maybe_done=True)
+        return started
 
     def _stop(self, batch_id: str) -> None:
         """Best effort, and quick: a failed or interrupted stop is reported, and the

@@ -237,6 +237,13 @@ def test_a_standalone_run_with_a_status_the_cli_doesnt_know_never_passes():
     assert not outcome.passed and "(Paused)" in outcome.reason
 
 
+def test_a_trial_says_nothing_was_gated():
+    outcome = batch_outcome(_batch("Done", {}, [_check("A", None)]))
+
+    assert outcome.passed
+    assert outcome.summary.endswith("A trial asks no question: nothing was gated.")
+
+
 def test_a_batch_status_the_cli_doesnt_know_never_passes():
     batch = _batch("Archived", {"pass": 1}, [_check("A", "pass")])
 

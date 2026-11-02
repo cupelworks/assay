@@ -1041,3 +1041,26 @@ def test_a_batch_start_refused_says_nothing_about_stopping(db, cli):
     code = cli("batch", "test-set", "Smoke", "-s", "nope", "--stop-on-timeout")
 
     assert code == EXIT_ERROR and "can't stop it" not in cli.err.getvalue()
+
+
+class Elsewhere(AssayClient):
+    """A start answered by something other than Assay's API: 200, and no id."""
+
+    def start_run(self, *args, **kwargs):
+        return {"ok": True}
+
+    def start_batch(self, *args, **kwargs):
+        return {"ok": True}
+
+
+def test_a_start_answered_without_an_id_says_it_may_have_started(db, cli):
+    db.test_set("Smoke", [db.test(name="a")])
+
+    assert cli("run", "test-set", "Smoke", client=Elsewhere(db.client)) == EXIT_ERROR
+    assert ("Starting the execution got a reply without its id — is the URL Assay's API? It "
+            "may have started") in cli.err.getvalue()
+
+    code = cli("batch", "test-set", "Smoke", "-s", "binomial_gate", "--stop-on-timeout",
+               client=Elsewhere(db.client))
+    assert code == EXIT_ERROR
+    assert "--stop-on-timeout can't stop it" in cli.err.getvalue()

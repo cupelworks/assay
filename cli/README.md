@@ -329,9 +329,12 @@ assay run test-plan "Release checks" --policy assay-gate.yml
 | `test_sets` | Each set's name, then its `max_failures`, `min_pass_rate` or both |
 | `blocking_checks` | A list of check labels, in any letter case |
 
-- **The file is read strictly.** An unknown key, a key given twice, a limit out of range,
-  or a name YAML reads as something else (an unquoted `No`, `On`, or a number) is an
-  error that names it, before anything is sent to Assay. Quote names to be safe.
+- **The file is read strictly.** An unknown key, a key given twice, a limit out of range
+  or quoted (`"3"` is text, not a number), or a name YAML reads as something else (an
+  unquoted `No`, `On`, or a number) is an error that names it, before anything is sent to
+  Assay. Quote names to be safe; the spaces around a name are left out. A block reused
+  with YAML's merge key (`<<: *strict`) is read, its keys replaced by the ones written
+  beside it.
 - **Flags change it for one run.** `--fail-on` and each limit given as a flag replace the
   file's, for the whole or for that set. `--blocking-check` only adds: dropping a
   blocking check is a change to the file, reviewed as one.
@@ -467,7 +470,7 @@ The batch ends with one status:
 | `Inconclusive` | Finished, but not every check could be decided | Only with `--fail-on fail,inconclusive` |
 | `Incomplete` | Stopped before every run ran | **Always** |
 | `NotRan` | Nothing could be decided: every run Not Ran, or every check errored in every run. Fix the cause; a bigger batch wouldn't help | **Always**, with exit 4 |
-| `Done` | A trial finished | No |
+| `Done` | A trial finished: it asks no question, so nothing is gated, and the summary says so | No |
 
 A status this version of the CLI doesn't know fails the step with exit 2 (an error, not a
 failed gate), saying so: the gate never passes on something it can't read, nor blames

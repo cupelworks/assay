@@ -66,7 +66,11 @@ def test_fail_on_may_be_a_list_or_comma_separated_in_any_case(tmp_path):
     ("max_failures: -1\n", "max_failures: expected a whole number, 0 or more (got -1)"),
     ("max_failures: 1.5\n", "expected a whole number"),
     ("max_failures: true\n", "expected a whole number"),
-    ('max_failures: "²"\n', "expected a whole number"),  # a digit int() can't read
+    ('max_failures: "²"\n', "expected a whole number"),
+    ('max_failures: "3"\n', "max_failures: expected a whole number, 0 or more (got '3')"),
+    ('min_pass_rate: "0.8"\n', "min_pass_rate: expected a share from 0 to 1"),
+    ("test_sets:\n  A: &d {max_failures: 1}\n  B: {<<: *d, max_failures: 2, max_failures: 3}\n",
+     "'max_failures' is given twice"),  # a shortcut never hides a key written twice
     ("min_pass_rate: 80\n", "min_pass_rate: expected a share from 0 to 1, e.g. 0.8 for 80%"),
     ("min_pass_rate: -0.1\n", "expected a share from 0 to 1"),
     ("min_pass_rate: .nan\n", "expected a share from 0 to 1"),
@@ -88,6 +92,21 @@ def test_each_mistake_in_a_file_is_named(tmp_path, text, says):
     message = _error(tmp_path, text)
 
     assert says in message and message.startswith(str(tmp_path / "assay-gate.yml"))
+
+
+def test_a_block_reused_with_a_yaml_merge_key_is_read(tmp_path):
+    policy = load(_file(tmp_path, "test_sets:\n"
+                                  "  Smoke: &strict {max_failures: 0, min_pass_rate: 0.9}\n"
+                                  "  Tone: {<<: *strict, max_failures: 2}\n"))
+
+    assert dict(policy.test_sets) == {"Smoke": Limits(max_failures=0, min_pass_rate=0.9),
+                                      "Tone": Limits(max_failures=2, min_pass_rate=0.9)}
+
+
+def test_names_in_a_file_are_read_without_the_spaces_around_them(tmp_path):
+    policy = load(_file(tmp_path, 'test_set: " Smoke "\nblocking_checks: [" Toxicity"]\n'))
+
+    assert policy.scope == ("test-set", "Smoke") and policy.blocking_checks == ("Toxicity",)
 
 
 def test_a_key_left_blank_is_left_out(tmp_path):

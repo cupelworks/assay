@@ -519,6 +519,8 @@ def batch_outcome(batch: dict, fail_on: tuple = BATCH_FAIL_ON) -> Outcome:
     sentence = result.get("summary") or batch.get("summary") or why or status
     summary = (f"{_verdict(passed)}: batch of {SCOPE_NOUNS[scope['kind']]} "
                f"{scope['name']!r} ({batch['statistical_test']}): {status}. {sentence}")
+    if status == "Done":
+        summary += " A trial asks no question: nothing was gated."
     return Outcome("batch", str(batch["id"]), scope, status, passed, summary, verdicts,
                    _distinct(cases, ids), fail_on, why, judged=status != "NotRan",
                    unreadable=unreadable)
