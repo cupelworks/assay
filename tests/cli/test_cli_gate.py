@@ -282,6 +282,19 @@ def test_a_blocking_check_fails_the_gate_even_in_a_run_otherwise_tolerated():
         ("b", "failed", "Amber: not met: Tone, Toxicity (blocking: Toxicity)")]
 
 
+def test_a_run_still_in_progress_when_the_runs_are_read_never_passes():
+    details = {"id": "x", "run_count": 2, "runs": {"Green": 2}}
+    runs = [{"id": "r1", "test_name": "a", "status": "Green", "checks": {"not_met": []}},
+            {"id": "r2", "test_name": "b", "status": "Running", "checks": None}]
+
+    outcome = execution_outcome(SCOPE, details, runs)
+
+    assert not outcome.passed and outcome.reason == "1 run still in progress when its runs " \
+                                                    "were read"
+    assert [(c.name, c.outcome, c.message) for c in outcome.failures] == [
+        ("b", "error", "Running: not finished when read")]
+
+
 def test_a_blocking_check_is_matched_ignoring_letter_case():
     policy = Policy(fail_on=("Red", "NotRan"), blocking_checks=("toxicity",))
     details = {"id": "x", "run_count": 1, "runs": {"Amber": 1}}

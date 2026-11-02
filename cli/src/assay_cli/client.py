@@ -142,14 +142,16 @@ class AssayClient:
         shaped like an id that no item has is looked for as a name: a test created
         without a name is named with a random UUID."""
         noun = SCOPE_NOUNS[scope]
-        if _is_uuid(ref):
+        item_id = canonical_id(ref)
+        if item_id:
             try:
-                item = self._request("GET", f"{_LIST_PATHS[scope]}/{ref}", time_left=time_left)
+                item = self._request("GET", f"{_LIST_PATHS[scope]}/{item_id}",
+                                     time_left=time_left)
             except ApiError as exc:
                 if exc.status_code != 404:
                     raise
             else:
-                return {"id": str(item.get("id", ref)), "name": item.get("name", ref)}
+                return {"id": str(item.get("id", item_id)), "name": item.get("name", ref)}
         found: dict[str, dict] = {}  # by id: a list shifting between pages repeats items
         for item in self._pages(_LIST_PATHS[scope], {"q": ref}, limit=500,
                                 key=_LIST_KEYS.get(scope, "items"), time_left=time_left):
@@ -159,7 +161,7 @@ class AssayClient:
                     raise ApiError(f"At least 2 {noun}s are named {ref!r} "
                                    f"({', '.join(found)}); give the id.")
         if not found:
-            has = "has the id or the name" if _is_uuid(ref) else "is named"
+            has = "has the id or the name" if item_id else "is named"
             raise ApiError(f"No {noun} {has} {ref!r}. Give its exact name or its id.")
         (item_id, item), = found.items()
         return {"id": item_id, "name": item["name"]}
@@ -248,12 +250,13 @@ def _labels(test: dict) -> list[str]:
             for assignment in test.get("test_type_assignments") or []]
 
 
-def _is_uuid(value: str) -> bool:
+def canonical_id(value: str) -> str | None:
+    """`value` as Assay spells an id (lowercase, hyphenated), when it's one in any
+    form (capitals, braces, `urn:uuid:`); else None."""
     try:
-        uuid.UUID(value)
+        return str(uuid.UUID(value))
     except ValueError:
-        return False
-    return True
+        return None
 
 
 def _detail(response: httpx.Response) -> str:

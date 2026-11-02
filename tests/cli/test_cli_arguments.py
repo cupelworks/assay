@@ -63,17 +63,33 @@ def test_a_bad_url_is_refused_before_any_request():
     assert "the API's URL must start with http:// or https://" in err.getvalue()
 
 
-@pytest.mark.parametrize(("header", "env", "says"), [
-    ("X A: 1", None, "--header 'X A: 1': 'X A' isn't a header name"),
-    ("X-A: café", None, "header X-A's value may hold only printable ASCII"),
-    (None, '{"X-A": "a\\nb"}', "$ASSAY_API_HEADERS: header X-A's value"),
-    (None, '{"X:A": "1"}', "$ASSAY_API_HEADERS: 'X:A' isn't a header name"),
+@pytest.mark.parametrize(("given", "env", "says"), [
+    (["X A: 1"], None, "--header: a header's name holds only letters, digits"),
+    (["X-A: 1", "X-B: café"], None, "--header 2: header X-B's value may hold only printable"),
+    ([], '{"X-A": "a\\nb"}', "$ASSAY_API_HEADERS, header 1: header X-A's value"),
+    ([], '{"X-A": "1", "X:B": "1"}', "$ASSAY_API_HEADERS, header 2: a header's name"),
+    ([], '{"X-Debug": true}', "$ASSAY_API_HEADERS, header 1: a value must be text"),
+    ([], '{"X-Tenant": null}', "$ASSAY_API_HEADERS, header 1: a value must be text"),
 ])
-def test_a_header_http_doesnt_allow_is_refused(header, env, says):
-    args = build_parser().parse_args(["health", *(["--header", header] if header else [])])
+def test_a_header_http_doesnt_allow_is_refused(given, env, says):
+    args = build_parser().parse_args(["health", *(x for h in given for x in ("--header", h))])
     with pytest.raises(ArgumentError) as raised:
         headers(args, {"ASSAY_API_HEADERS": env} if env else {})
     assert says in str(raised.value)
+
+
+@pytest.mark.parametrize(("given", "env"), [
+    ("Authorization Bearer s3cr3t", None),  # the colon left out
+    ("X-Api-Key=s3cr3t", None),
+    ("Authorization: Bearer s3cr3t\u00e9", None),
+    (None, '{"Authorization": "Bearer s3cr3t\\u00e9"}'),
+    (None, '{"Authorization": "Bearer s3cr3t'),  # not JSON
+])
+def test_no_header_error_shows_what_may_be_a_secret(given, env):
+    args = build_parser().parse_args(["health", *(["--header", given] if given else [])])
+    with pytest.raises(ArgumentError) as raised:
+        headers(args, {"ASSAY_API_HEADERS": env} if env else {})
+    assert "s3cr3t" not in str(raised.value)
 
 
 def test_a_header_value_keeps_its_inner_spaces_and_may_be_empty():

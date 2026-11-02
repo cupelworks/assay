@@ -75,11 +75,24 @@ def test_fail_on_may_be_a_list_or_comma_separated_in_any_case(tmp_path):
     ("test_set: Smoke\ntest_plan: Release\n", "give one of test_set, test_plan"),
     ("- max_failures: 3\n", "expected keys such as fail_on"),
     ("max_failures: [3\n", "not valid YAML"),
+    ("blocking_checks: false\n", "blocking_checks: expected a list"),
+    ("blocking_checks: 0\n", "blocking_checks: expected a list"),
+    ('blocking_checks: ""\n', "blocking_checks: expected a name, as text"),
+    ("test_sets: []\n", "test_sets: expected each test set's name"),
+    ('test_sets: ""\n', "test_sets: expected each test set's name"),
+    ("? [a, b]\n: 1\n", "line 1: a key must be a name, not a list"),
+    ("test_sets:\n  ? {a: 1}\n  : {max_failures: 0}\n", "line 2: a key must be a name, "
+                                                         "not a mapping"),
 ])
 def test_each_mistake_in_a_file_is_named(tmp_path, text, says):
     message = _error(tmp_path, text)
 
     assert says in message and message.startswith(str(tmp_path / "assay-gate.yml"))
+
+
+def test_a_key_left_blank_is_left_out(tmp_path):
+    policy = load(_file(tmp_path, "test_sets:\nblocking_checks:\nmax_failures: 1\n"))
+    assert not policy.test_sets and not policy.blocking_checks
 
 
 def test_a_file_that_cant_be_read_is_named(tmp_path):
@@ -123,8 +136,11 @@ def test_a_file_naming_its_scope_applies_to_that_scope_alone(tmp_path):
         check_scope(policy, "test-set", {"id": "s1", "name": "Release checks"})
 
 
-def test_a_scope_may_be_named_by_its_id(tmp_path):
-    policy = load(_file(tmp_path, "test_set: 4e86003a-9e28-4c93-a08e-f99c6acbaab6\n"))
+@pytest.mark.parametrize("given", [
+    "4e86003a-9e28-4c93-a08e-f99c6acbaab6", "4E86003A-9E28-4C93-A08E-F99C6ACBAAB6",
+    "{4e86003a-9e28-4c93-a08e-f99c6acbaab6}", "urn:uuid:4e86003a-9e28-4c93-a08e-f99c6acbaab6"])
+def test_a_scope_may_be_named_by_its_id_in_any_form(tmp_path, given):
+    policy = load(_file(tmp_path, f'test_set: "{given}"\n'))
 
     check_scope(policy, "test-set", {"id": "4e86003a-9e28-4c93-a08e-f99c6acbaab6",
                                      "name": "Smoke"})

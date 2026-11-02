@@ -311,6 +311,8 @@ def _verdict(passed: bool) -> str:
 
 def _run_case(name: str, group: str, status: str, not_met: Iterable[str], error: str | None,
               policy: Policy) -> Case:
+    if status in IN_PROGRESS:
+        return Case(name, group, "error", f"{status}: not finished when read")
     if status not in RUN_STATUSES:
         return Case(name, group, "error", _unknown(status))
     blocking = [label for label in not_met if _among(label, policy.blocking_checks)]
@@ -358,7 +360,11 @@ def execution_outcome(scope: dict, details: dict, runs: list[dict],
     counts = {s: details["runs"].get(s, 0) for s in RUN_STATUSES}
     reported = {s for s, n in details["runs"].items() if n} | {run["status"] for run in runs}
     unknown = sorted(reported - {*RUN_STATUSES, *IN_PROGRESS})
-    reason = _unknown(", ".join(unknown)) if unknown else ""
+    unfinished = sum(run["status"] in IN_PROGRESS for run in runs)
+    reason = "; ".join(why for why in (
+        _unknown(", ".join(unknown)) if unknown else "",
+        f"{_runs(unfinished)} still in progress when its runs were read" if unfinished else "")
+        if why)
 
     def test_set(run: dict) -> str | None:
         return run.get("test_set_name") if scope["kind"] == "test-plan" else scope["name"]

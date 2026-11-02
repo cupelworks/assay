@@ -201,24 +201,29 @@ class Runner:
         if not (policy.test_sets or policy.blocking_checks):
             return
         noun = SCOPE_NOUNS[self.args.scope]
-        test_sets, labels = self._fetch(
-            lambda left: self._what_runs(target, bool(policy.blocking_checks), left),
-            f"Couldn't read what the {noun} runs")
+        test_sets, labels = self._what_runs(target, bool(policy.blocking_checks))
         check_test_sets(policy, test_sets, noun)
-        if labels is not None:
+        if policy.blocking_checks:
             check_blocking_checks(policy, labels, noun)
 
-    def _what_runs(self, target: dict, with_labels: bool,
-                   left: TimeLeft) -> tuple[list[str], list[str] | None]:
+    def _what_runs(self, target: dict, with_labels: bool) -> tuple[list[str], list[str]]:
         """The test sets a run of `target` runs, and its checks' labels when
-        `with_labels` (None when an entry's can't be read). A replay runs exactly
-        the entries of the execution it replays, whatever the plan links now."""
+        `with_labels`. A replay runs exactly the entries of the execution it
+        replays, whatever the plan links now. Each read is tried again on its own."""
         args, client = self.args, self.client
+        noun = SCOPE_NOUNS[args.scope]
+
+        def read(request: Callable[[TimeLeft], Any]) -> Any:
+            return self._fetch(request, f"Couldn't read what the {noun} runs")
+
         if args.scope == "test":
-            return [], client.test_labels(target["id"], left) if with_labels else None
+            if not with_labels:
+                return [], []
+            return [], read(lambda left: client.test_labels(target["id"], left))
         entry_ids = None  # a live run runs every entry
         if args.replay:
-            runs = client.execution_runs(args.scope, target["id"], args.replay, left)
+            runs = read(lambda left: client.execution_runs(args.scope, target["id"],
+                                                           args.replay, left))
             entry_ids = {str(run["test_set_entry_id"]["id"]) for run in runs}
         if args.scope == "test-set":
             sets = {target["id"]: target["name"]}
@@ -226,16 +231,20 @@ class Runner:
             sets = {str(run["test_set_id"]["id"]): run["test_set_name"]
                     for run in runs if run.get("test_set_id")}
         else:
-            sets = {s["id"]: s["name"] for s in client.plan_test_sets(target["id"], left)}
+            sets = {s["id"]: s["name"]
+                    for s in read(lambda left: client.plan_test_sets(target["id"], left))}
         if not with_labels:
-            return list(sets.values()), None
+            return list(sets.values()), []
         by_entry: dict[str, list[str]] = {}
         for set_id in sets:
-            by_entry.update(client.entry_labels(set_id, left))
+            by_entry.update(read(lambda left, set_id=set_id: client.entry_labels(set_id, left)))
         if entry_ids is None:
             entry_ids = by_entry.keys()
-        elif not entry_ids <= by_entry.keys():
-            return list(sets.values()), None  # an entry no longer in its set
+        missing = len(set(entry_ids) - by_entry.keys())
+        if missing:
+            # never judged without: a blocking check none of them has would always hold
+            raise ApiError(f"Couldn't read the checks of {missing} of the entries execution "
+                           f"{args.replay} ran: no test set holds them now")
         return list(sets.values()), [label for entry_id in entry_ids
                                      for label in by_entry[entry_id]]
 

@@ -8,6 +8,7 @@ import json
 import os
 import signal
 import sys
+from collections import Counter
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -805,3 +806,43 @@ def test_a_junit_report_sharing_the_summarys_file_is_refused_before_it_starts(
     assert "--junit report.xml: the Markdown summary is appended to that file too" in (
         cli.err.getvalue())
     assert db.dispatched == [] and not (tmp_path / "report.xml").exists()
+
+
+class Counted(Flaky):
+    """Flaky, and counting the requests sent, by path."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sent = Counter()
+
+    def _request(self, method, path, **kwargs):
+        self.sent[path] += 1
+        return super()._request(method, path, **kwargs)
+
+
+def test_a_read_before_it_starts_is_tried_again_alone(db, cli, release):
+    tone = db.client.get("/test-sets", params={"q": "Tone"}).json()["items"][0]
+    client = Counted(db.client, lambda method, path: path == f"/test-sets/{tone['id']}/entries",
+                     GATEWAY_DOWN)
+
+    code = cli("run", "test-plan", "Release", "--blocking-check", "Misses", client=client)
+
+    assert code == EXIT_FAILED, cli.err.getvalue()
+    assert client.sent[f"/test-plans/{release['id']}/entries"] == 1  # not read again
+    assert client.sent[f"/test-sets/{tone['id']}/entries"] == 2
+
+
+def test_an_entry_replayed_that_no_set_holds_is_never_judged_without(db, cli, release):
+    execution = _executed(db, release)
+
+    class Lost(AssayClient):
+        def entry_labels(self, test_set_id, time_left=None):
+            return {}  # as if its set held none of them now
+
+    code = cli("run", "test-plan", "Release", "--replay", execution,
+               "--blocking-check", "Misses", client=Lost(db.client))
+
+    assert code == EXIT_ERROR
+    assert (f"Couldn't read the checks of 3 of the entries execution {execution} ran: no "
+            "test set holds them now") in cli.err.getvalue()
+    assert db.dispatched == []

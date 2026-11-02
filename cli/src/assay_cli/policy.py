@@ -6,13 +6,13 @@ The file is read strictly: an unknown or repeated key, a name YAML would read as
 something other than text, a limit out of range, each is an error naming it."""
 import contextlib
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Hashable, Iterable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
 import yaml
 
-from assay_cli.client import SCOPE_NOUNS
+from assay_cli.client import SCOPE_NOUNS, canonical_id
 from assay_cli.gate import (
     RUN_STATUSES,
     STRICT,
@@ -37,6 +37,9 @@ def _mapping(loader: _Loader, node: yaml.MappingNode, deep: bool = False) -> dic
     seen = set()
     for key_node, _ in node.value:
         key = loader.construct_object(key_node, deep=deep)
+        if not isinstance(key, Hashable):
+            raise PolicyError(f"line {key_node.start_mark.line + 1}: a key must be a name, "
+                              f"not a {'list' if isinstance(key, list) else 'mapping'}")
         if key in seen:
             raise PolicyError(f"line {key_node.start_mark.line + 1}: {key!r} is given twice")
         seen.add(key)
@@ -82,7 +85,7 @@ def _policy(data: object, source: str) -> Policy:
             fail_on = spelled(RUN_STATUSES, _list(data["fail_on"], "fail_on", split=True))
         except ValueError as exc:
             raise PolicyError(f"fail_on: {exc}") from None
-    test_sets = data.get("test_sets") or {}
+    test_sets = _given(data, "test_sets", {})
     if not isinstance(test_sets, Mapping):
         raise PolicyError("test_sets: expected each test set's name, then its limits")
     by_set = {}
@@ -103,7 +106,7 @@ def _policy(data: object, source: str) -> Policy:
             raise PolicyError(f"{where}: expected max_failures, min_pass_rate or both")
     blocking = distinct_labels(
         _text(label, "blocking_checks")
-        for label in _list(data.get("blocking_checks") or [], "blocking_checks"))
+        for label in _list(_given(data, "blocking_checks", []), "blocking_checks"))
     return Policy(fail_on, _limits(data, ""), MappingProxyType(by_set), blocking, scope, source)
 
 
@@ -137,6 +140,13 @@ def pass_rate_of(value: object, what: str) -> float:
         raise PolicyError(f"{what}: expected a share from 0 to 1, e.g. 0.8 for 80% "
                           f"(got {value!r})")
     return float(value)
+
+
+def _given(data: Mapping, key: str, empty: object) -> object:
+    """`data[key]`, or `empty` when it's left out or left blank (`key:` alone):
+    any other value is checked, `false` and `0` included."""
+    value = data.get(key)
+    return empty if value is None else value
 
 
 def _list(value: object, what: str, split: bool = False) -> list:
@@ -179,6 +189,7 @@ def check_scope(policy: Policy, kind: str, target: dict) -> None:
     if policy.scope is None:
         return
     wanted_kind, wanted = policy.scope
-    if wanted_kind != kind or wanted not in (target["name"], target["id"]):
+    named = wanted in (target["name"], target["id"]) or canonical_id(wanted) == target["id"]
+    if wanted_kind != kind or not named:
         raise PolicyError(f"{policy.source} is for the {SCOPE_NOUNS[wanted_kind]} {wanted!r}, "
                           f"not the {SCOPE_NOUNS[kind]} {target['name']!r}")

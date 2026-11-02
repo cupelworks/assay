@@ -150,8 +150,10 @@ assay --url https://assay.internal.example.com health
   Headers from `--header` are added to those in `ASSAY_API_HEADERS`; when both give the
   same name, in any case (`authorization` and `Authorization`), `--header` wins. A name or
   value HTTP doesn't allow (a space in the name, a line break or a non-ASCII character in
-  the value) is refused before any request. Keep tokens in your CI system's secrets, never
-  in the pipeline file.
+  the value) is refused before any request, and so is a value in `ASSAY_API_HEADERS` that
+  isn't text in quotes (`true`, `null`, a number). The error names the header's place,
+  never its value, so a token isn't written to the job's log. Keep tokens in your CI
+  system's secrets, never in the pipeline file.
 
 ## Name what to run
 
@@ -175,7 +177,8 @@ assay run test-set "Smoke"
 - **No match** is an error (exit 2) that says so.
 - **Two tests with the same name** are an error that lists two of their ids: use an id. Test set
   and test plan names are unique in Assay, so they can't clash.
-- **Ids** are shown in the UI and returned by the API, e.g. `GET /test-sets?q=smoke`.
+- **Ids** are shown in the UI and returned by the API, e.g. `GET /test-sets?q=smoke`. Any
+  form of one works: upper case, in braces, or as `urn:uuid:…`.
 - **A name shaped like an id** (a test created without a name is named with a random
   one) is looked up as an id first, then as a name.
 
@@ -459,7 +462,8 @@ The batch ends with one status:
 | `Done` | A trial finished | No |
 
 A status this version of the CLI doesn't know fails the step, saying so: the gate never
-passes on something it can't read. The same goes for a run's status. Update the CLI then.
+passes on something it can't read. The same goes for a run's status (update the CLI
+then), and for a run still `Pending` or `Running` when an execution's runs are read.
 
 ### Choosing what fails the step: `--fail-on`
 

@@ -236,14 +236,15 @@ def api_url(url: str) -> str:
 def headers(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, str]:
     """$ASSAY_API_HEADERS, then each --header: a later one replaces an earlier one
     of the same name, whatever its case, as HTTP names are. A name or a value HTTP
-    doesn't allow is an error here, not on every request."""
+    doesn't allow is an error here, not on every request; no error shows a value,
+    nor a --header that isn't one, as either may hold a secret."""
     chosen: dict[str, str] = {}
 
     def put(name: str, value: str, where: str) -> None:
         name, value = name.strip(), value.strip()
         if not _HEADER_NAME.fullmatch(name):
-            raise ArgumentError(f"{where}: {name!r} isn't a header name (letters, digits "
-                                "and - are)")
+            raise ArgumentError(f"{where}: a header's name holds only letters, digits and "
+                                "punctuation such as -, with no spaces")
         if not all(char == "\t" or " " <= char <= "~" for char in value):
             raise ArgumentError(f"{where}: header {name}'s value may hold only printable "
                                 "ASCII characters")
@@ -255,15 +256,22 @@ def headers(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, str]:
         try:
             loaded = json.loads(env[HEADERS_ENV])
         except ValueError as exc:
-            raise ArgumentError(f"${HEADERS_ENV} isn't a JSON object: {exc}") from exc
+            raise ArgumentError(f"${HEADERS_ENV} isn't a JSON object: {exc.msg}, at "
+                                f"character {exc.pos}") from None
         if not isinstance(loaded, dict):
             raise ArgumentError(f"${HEADERS_ENV} must be a JSON object of header names "
                                 "to values")
-        for name, value in loaded.items():
-            put(str(name), str(value), f"${HEADERS_ENV}")
-    for header in [*args.header, *(getattr(args, "header_after", None) or [])]:
+        for number, (name, value) in enumerate(loaded.items(), 1):
+            where = f"${HEADERS_ENV}, header {number}"
+            if not isinstance(value, str):
+                raise ArgumentError(f"{where}: a value must be text, in quotes")
+            put(name, value, where)
+    given = [*args.header, *(getattr(args, "header_after", None) or [])]
+    for number, header in enumerate(given, 1):
+        where = f"--header {number}" if len(given) > 1 else "--header"
         name, sep, value = header.partition(":")
         if not sep or not name.strip():
-            raise ArgumentError(f"--header {header!r}: expected 'NAME: VALUE'")
-        put(name, value, f"--header {header!r}")
+            raise ArgumentError(f"{where}: expected 'NAME: VALUE', a colon after the name "
+                                "(the header isn't shown, as it may hold a secret)")
+        put(name, value, where)
     return chosen

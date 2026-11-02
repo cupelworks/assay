@@ -142,6 +142,23 @@ def test_a_url_without_a_scheme_is_named_at_once():
     assert raised.value.retries == 0
 
 
+@pytest.mark.parametrize("given", [
+    "3F2504E0-4F89-11D3-9A0C-0305E82C3301", "{3f2504e0-4f89-11d3-9a0c-0305e82c3301}",
+    "urn:uuid:3f2504e0-4f89-11d3-9a0c-0305e82c3301"])
+def test_an_id_in_any_form_is_sent_as_assay_spells_it(given):
+    paths = []
+
+    def reply(request):
+        paths.append(request.url.path)
+        return httpx.Response(200, json={"id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+                                         "name": "Smoke"})
+
+    found = _client(reply).resolve("test-set", given)
+
+    assert paths == ["/test-sets/3f2504e0-4f89-11d3-9a0c-0305e82c3301"]
+    assert found == {"id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301", "name": "Smoke"}
+
+
 def test_check_labels_are_read_from_a_test_and_from_a_sets_entries():
     def reply(request):
         if request.url.path == "/tests/t1":
