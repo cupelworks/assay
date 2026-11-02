@@ -16,6 +16,7 @@ from assay_cli.gate import (
     PolicyError,
     batch_finished,
     batch_outcome,
+    check_blocking_checks,
     check_test_sets,
     execution_outcome,
     judge,
@@ -279,6 +280,28 @@ def test_a_blocking_check_fails_the_gate_even_in_a_run_otherwise_tolerated():
     assert [rule.text for rule in outcome.deciding] == ["blocking check 'Toxicity' failed in 1 run"]
     assert [(c.name, c.outcome, c.message) for c in outcome.failures] == [
         ("b", "failed", "Amber: not met: Tone, Toxicity (blocking: Toxicity)")]
+
+
+def test_a_blocking_check_is_matched_ignoring_letter_case():
+    policy = Policy(fail_on=("Red", "NotRan"), blocking_checks=("toxicity",))
+    details = {"id": "x", "run_count": 1, "runs": {"Amber": 1}}
+    runs = [{"id": "r1", "test_name": "b", "status": "Amber",
+             "checks": {"not_met": ["Toxicity"]}}]
+
+    outcome = execution_outcome(SCOPE, details, runs, policy)
+
+    assert [rule.text for rule in outcome.deciding] == ["blocking check 'toxicity' failed in 1 run"]
+    assert outcome.failures[0].message == "Amber: not met: Toxicity (blocking: Toxicity)"
+
+
+def test_a_blocking_check_the_scope_doesnt_ask_is_refused():
+    policy = Policy(blocking_checks=("toxicity", "Valid JSON", "Tone"))
+
+    with pytest.raises(PolicyError) as raised:
+        check_blocking_checks(policy, ["Toxicity", "tone", "Bias", "Tone"], "test plan")
+    assert str(raised.value) == ("the policy's blocking check 'Valid JSON' is no check this "
+                                 "test plan asks (its checks: 'Bias', 'tone', 'Toxicity')")
+    check_blocking_checks(Policy(blocking_checks=("TOXICITY",)), ["Toxicity"], "test")
 
 
 @pytest.mark.parametrize(("statuses", "judged"), [

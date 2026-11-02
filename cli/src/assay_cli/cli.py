@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from assay_cli import arguments, report
-from assay_cli.client import SCOPE_NOUNS, ApiError, AssayClient
+from assay_cli.client import SCOPE_NOUNS, ApiError, AssayClient, TimeLeft
 from assay_cli.gate import (
     IN_PROGRESS,
     RUN_STATUSES,
@@ -26,6 +26,7 @@ from assay_cli.gate import (
     PolicyError,
     batch_finished,
     batch_outcome,
+    check_blocking_checks,
     check_test_sets,
     execution_outcome,
     run_finished,
@@ -119,9 +120,10 @@ class Runner:
     def run(self) -> int:
         args = self.args
         policy = self._policy()  # read before any request: a mistake in it costs nothing
+        self._check_reports()
         target = self._resolve()
         check_scope(policy, args.scope, target)
-        self._check_test_sets(policy, target)
+        self._check_policy(policy, target)
         scope = {"kind": args.scope, **target}
         kind = "run" if args.scope == "test" else "execution"
         started = self._start(
@@ -151,6 +153,7 @@ class Runner:
 
     def batch(self) -> int:
         args = self.args
+        self._check_reports()
         target = self._resolve()
         body = {f"{args.scope.replace('-', '_')}_id": target["id"],
                 "statistical_test": args.statistical_test,
@@ -192,17 +195,49 @@ class Runner:
         return with_flags(load(args.policy) if args.policy else STRICT, args.fail_on,
                           args.max_failures, args.min_pass_rate, args.blocking_check)
 
-    def _check_test_sets(self, policy: Policy, target: dict) -> None:
-        """Before it starts: a limit on a test set it doesn't run would never apply."""
-        if not policy.test_sets:
+    def _check_policy(self, policy: Policy, target: dict) -> None:
+        """Before it starts: a limit on a test set it doesn't run would never apply,
+        and a blocking check it doesn't ask would always hold."""
+        if not (policy.test_sets or policy.blocking_checks):
             return
-        scope = self.args.scope
-        if scope == "test-plan":
-            names = self._fetch(lambda left: self.client.plan_test_sets(target["id"], left),
-                                "Couldn't read the test plan's test sets")
+        noun = SCOPE_NOUNS[self.args.scope]
+        test_sets, labels = self._fetch(
+            lambda left: self._what_runs(target, bool(policy.blocking_checks), left),
+            f"Couldn't read what the {noun} runs")
+        check_test_sets(policy, test_sets, noun)
+        if labels is not None:
+            check_blocking_checks(policy, labels, noun)
+
+    def _what_runs(self, target: dict, with_labels: bool,
+                   left: TimeLeft) -> tuple[list[str], list[str] | None]:
+        """The test sets a run of `target` runs, and its checks' labels when
+        `with_labels` (None when an entry's can't be read). A replay runs exactly
+        the entries of the execution it replays, whatever the plan links now."""
+        args, client = self.args, self.client
+        if args.scope == "test":
+            return [], client.test_labels(target["id"], left) if with_labels else None
+        entry_ids = None  # a live run runs every entry
+        if args.replay:
+            runs = client.execution_runs(args.scope, target["id"], args.replay, left)
+            entry_ids = {str(run["test_set_entry_id"]["id"]) for run in runs}
+        if args.scope == "test-set":
+            sets = {target["id"]: target["name"]}
+        elif args.replay:
+            sets = {str(run["test_set_id"]["id"]): run["test_set_name"]
+                    for run in runs if run.get("test_set_id")}
         else:
-            names = [target["name"]] if scope == "test-set" else []
-        check_test_sets(policy, names, SCOPE_NOUNS[scope])
+            sets = {s["id"]: s["name"] for s in client.plan_test_sets(target["id"], left)}
+        if not with_labels:
+            return list(sets.values()), None
+        by_entry: dict[str, list[str]] = {}
+        for set_id in sets:
+            by_entry.update(client.entry_labels(set_id, left))
+        if entry_ids is None:
+            entry_ids = by_entry.keys()
+        elif not entry_ids <= by_entry.keys():
+            return list(sets.values()), None  # an entry no longer in its set
+        return list(sets.values()), [label for entry_id in entry_ids
+                                     for label in by_entry[entry_id]]
 
     def _resolve(self) -> dict:
         args = self.args
@@ -241,6 +276,21 @@ class Runner:
             print(started_id, file=self.out)
         return EXIT_PASSED
 
+    def _summaries(self) -> list[Path]:
+        """The files the Markdown summary is appended to, each once."""
+        given = (self.args.markdown, self.env.get("GITHUB_STEP_SUMMARY"))
+        return list(dict.fromkeys(Path(p).resolve() for p in given if p))
+
+    def _check_reports(self) -> None:
+        """Before it starts: a JUnit report written where a Markdown summary is then
+        appended would no longer be XML."""
+        junit = self.args.junit
+        if junit and junit.resolve() in self._summaries():
+            raise arguments.ArgumentError(
+                f"--junit {junit}: the Markdown summary is appended to that file too "
+                "(--markdown, or $GITHUB_STEP_SUMMARY): give the JUnit report a file of "
+                "its own")
+
     def _report(self, outcome: Outcome) -> int:
         # the files first: they're what the CI system keeps; one that can't be
         # written leaves the others and the outcome, and makes the step an error
@@ -249,9 +299,8 @@ class Runner:
             junit = report.junit(outcome)
             unwritten[self.args.junit] = _write(self.args.junit,
                                                 lambda path: path.write_bytes(junit))
-        given = (self.args.markdown, self.env.get("GITHUB_STEP_SUMMARY"))
         summary = report.markdown(outcome)
-        for target in dict.fromkeys(Path(p).resolve() for p in given if p):
+        for target in self._summaries():
             unwritten[target] = _write(target, lambda path: _append(path, summary))
         unwritten = {path: reason for path, reason in unwritten.items() if reason}
         if self.args.json:
@@ -345,7 +394,8 @@ def _run(args: argparse.Namespace, client: AssayClient | None, env: Mapping[str,
             if not url:
                 print(f"assay: give the API's URL with --url or ${arguments.URL_ENV}", file=err)
                 return EXIT_ERROR
-            client = AssayClient.connect(url, arguments.headers(args, env), args.http_timeout)
+            client = AssayClient.connect(arguments.api_url(url), arguments.headers(args, env),
+                                         args.http_timeout)
         runner = Runner(client, args, env, out, err, sleep, clock)
         return getattr(runner, args.command)()
     except (ApiError, arguments.ArgumentError, PolicyError) as exc:

@@ -270,7 +270,7 @@ Every batch run is a full, paid run, so statistics are always a deliberate choic
 The [`assay` command line](cli/README.md) puts Assay in a CI/CD pipeline: it starts a run
 of a test, set or plan (or a statistics batch), waits for it, and fails the step when a
 run isn't Green or a check's verdict is `fail`. It writes JUnit XML for the CI system's
-test results and a GitHub job summary, and needs only `httpx`:
+test results and a GitHub job summary, and needs only `httpx` and PyYAML:
 
 ```bash
 pip install "assay-cli @ git+https://github.com/cupelworks/assay@main#subdirectory=cli"

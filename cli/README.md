@@ -135,6 +135,7 @@ assay --url https://assay.internal.example.com health
 
 - **The URL includes the path the API is served under.** If a proxy serves it under `/api`
   (Assay's `ASSAY_ROOT_PATH`), give `https://host/api`. A trailing slash doesn't matter.
+  It must start with `http://` or `https://`: anything else is refused before any request.
 - **The flag wins** over the environment variable.
 - **These options go before or after the command:** `assay --url X run …` and
   `assay run … --url X` both work.
@@ -147,8 +148,10 @@ assay --url https://assay.internal.example.com health
   ```
 
   Headers from `--header` are added to those in `ASSAY_API_HEADERS`; when both give the
-  same name, in any case (`authorization` and `Authorization`), `--header` wins. Keep
-  tokens in your CI system's secrets, never in the pipeline file.
+  same name, in any case (`authorization` and `Authorization`), `--header` wins. A name or
+  value HTTP doesn't allow (a space in the name, a line break or a non-ASCII character in
+  the value) is refused before any request. Keep tokens in your CI system's secrets, never
+  in the pipeline file.
 
 ## Name what to run
 
@@ -284,8 +287,13 @@ assay run test-plan "Release checks" --max-failures "Smoke=0" --min-pass-rate "T
 
 A test set is named as Assay names it, exactly. A plan's runs each carry the test set of
 their entry, so per-set limits work on a test plan; on a test set, its own name works too;
-a standalone test has no sets. A limit naming a set the scope doesn't run is refused
-before anything starts: it's a typo, or a set renamed since, and would never apply.
+a standalone test has no sets. A check is named by its label, in any letter case.
+
+Before anything starts, the CLI checks the policy against what the run will run: a limit
+naming a set it doesn't run, or a blocking check none of its tests has, is refused (exit 2).
+Either is a typo, or a set or check renamed since: the limit would never apply, and the
+blocking check would always hold. On a [replay](#replaying-a-past-execution---replay),
+that's the sets and checks of the execution replayed, not those the plan links now.
 
 #### A policy file: `--policy`
 
@@ -314,7 +322,7 @@ assay run test-plan "Release checks" --policy assay-gate.yml
 | `max_failures` | A whole number, 0 or more, over the whole execution |
 | `min_pass_rate` | A share from 0 to 1 (`0.8` for 80%), over the whole execution |
 | `test_sets` | Each set's name, then its `max_failures`, `min_pass_rate` or both |
-| `blocking_checks` | A list of check labels, exactly as Assay shows them |
+| `blocking_checks` | A list of check labels, in any letter case |
 
 - **The file is read strictly.** An unknown key, a key given twice, a limit out of range,
   or a name YAML reads as something else (an unquoted `No`, `On`, or a number) is an
@@ -534,11 +542,10 @@ Per-check targets and leaving checks out of a batch are possible through the API
   have started.
 - **The last check comes on time.** The CLI never sleeps past `--timeout`, and no request,
   each page of a list included, is sent after the time left (or 5 seconds, for the check at
-  the deadline). Each step of a request (connecting, sending, each read of the reply) waits
-  no longer than the time left either, whatever `--http-timeout` is. So the step reports
-  the timeout, and stops a batch, a few seconds after `--timeout`. A reply that arrives
-  very slowly, a little at a time, can take longer: each step is capped, not the request
-  as a whole.
+  the deadline). A request waits no longer than the time left in all, connecting and
+  reading the reply included, whatever `--http-timeout` is. So the step reports the
+  timeout, and stops a batch, a few seconds after `--timeout`; stopping a batch takes at
+  most 5 seconds, within the time a CI system leaves after a cancel.
 - **Timing out stops waiting, not the work.** The runs carry on in Assay and their results
   are kept there. Only a batch with `--stop-on-timeout` is stopped.
 - **`--no-wait`** prints the new execution's, run's or batch's id on stdout (with `--json`:
@@ -620,7 +627,9 @@ For example, `assay run test-set Smoke --json | jq -r '.failures[].name'`.
 
 Writes a JUnit XML report, which most CI systems display as test results: GitLab, Azure
 Pipelines, Jenkins, CircleCI, TeamCity, and GitHub through a test-report action. Missing
-folders in the path are created.
+folders in the path are created. It needs a file of its own: one that's also `--markdown`'s
+or `$GITHUB_STEP_SUMMARY` is refused before anything starts, as the summary appended to it
+would leave it no longer XML.
 
 | In the report | A run or execution | A batch |
 |---|---|---|
@@ -901,12 +910,16 @@ jq -r '.failures[] | "\(.name): \(.message)"' outcome.json
 | Batch ends `NotRan` | Nothing could be decided: fix the cause above; more runs won't help |
 | The step passes but you expected it to fail | Check `--fail-on`: e.g. `inconclusive` doesn't fail a batch by default. With limits, the gate line says which rule tolerated the failures |
 | `assay-gate.yml: …` | The policy file has a mistake, named in the message: nothing was sent to Assay. Fix the file |
-| `the policy names test set 'X', which this test plan doesn't run` | A typo, or a set renamed or unlinked since: use the names listed |
+| `the policy names test set 'X', which this test plan doesn't run` | A typo, or a set renamed or unlinked since: use the names listed. On a replay, the sets are those of the execution replayed |
+| `the policy's blocking check 'X' is no check this test plan asks` | A typo, or a check renamed since: use one of the labels listed |
+| `the API's URL must start with http:// or https://` | Give the full address, e.g. `https://assay.internal/api` |
+| `--junit FILE: the Markdown summary is appended to that file too` | Give the JUnit report a file of its own |
 | `assay-gate.yml is for the test plan 'X', not …` | The file names the scope it's for (`test_plan:`): give it to that scope only |
 | Exit `4` | The application under test or the judge didn't answer: check them (`POST /settings/target/checks`, `POST /settings/judge/checks`) |
 
 `--http-timeout` raises the limit on each step of a request (connecting, each read) if the
-API is slow to answer, e.g. behind a busy proxy.
+API is slow to answer, e.g. behind a busy proxy. While waiting, the time left caps a
+request in all too.
 
 ## What it doesn't do (yet)
 

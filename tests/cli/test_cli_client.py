@@ -3,6 +3,8 @@
 """The client against a mock API: how each failure is classed, and how long
 each request may wait."""
 import math
+import threading
+import time
 
 import httpx
 import pytest
@@ -92,6 +94,66 @@ def test_the_time_left_caps_every_step_of_a_request():
 
     assert seen[0] == {"connect": 2, "read": 2, "write": 2, "pool": 2}
     assert seen[1]["read"] == 5  # httpx's own default, untouched without
+
+
+def _held(release):
+    def reply(request):
+        release.wait(5)
+        return httpx.Response(200, json={"id": "b"})
+    return reply
+
+
+@pytest.mark.parametrize(("send", "says", "retries"), [
+    (lambda client, left: client.batch("b", time_left=left), "no reply from Assay", math.inf),
+    (lambda client, left: client.stop_batch("b", left), "it may have been carried out", 0),
+])
+def test_the_time_left_bounds_a_request_in_all(send, says, retries):
+    release = threading.Event()
+    started = time.monotonic()
+    try:
+        with pytest.raises(ApiError) as raised:
+            send(_client(_held(release)), lambda: 0.2)
+    finally:
+        release.set()  # the reply given up on ends its thread
+
+    assert time.monotonic() - started < 2
+    assert "gave up after 0.2s" in str(raised.value) and says in str(raised.value)
+    assert raised.value.retries == retries
+
+
+@pytest.mark.parametrize("error", [
+    httpx.UnsupportedProtocol("Request URL is missing an 'http://' or 'https://' protocol."),
+    httpx.LocalProtocolError("Illegal header value b' x'"),
+])
+def test_a_request_no_server_takes_is_never_tried_again(error):
+    def refused(request):
+        raise error
+
+    with pytest.raises(ApiError) as raised:
+        _client(refused).health()
+    assert str(raised.value) == f"GET /health/worker: {error}"
+    assert raised.value.retries == 0
+
+
+def test_a_url_without_a_scheme_is_named_at_once():
+    client = AssayClient(httpx.Client(base_url="assay.internal/api"))
+    with pytest.raises(ApiError, match="missing an 'http://'") as raised:
+        client.health()
+    assert raised.value.retries == 0
+
+
+def test_check_labels_are_read_from_a_test_and_from_a_sets_entries():
+    def reply(request):
+        if request.url.path == "/tests/t1":
+            return httpx.Response(200, json={"id": "t1", "test_type_assignments": [
+                {"name": "Contains", "label": "Mentions it"}, {"name": "Toxicity"}]})
+        return httpx.Response(200, json={"total": 2, "items": [
+            {"id": "e1", "test_type_assignments": [{"name": "Bias", "label": "Bias"}]},
+            {"id": "e2", "test_type_assignments": []}]})
+
+    client = _client(reply)
+    assert client.test_labels("t1") == ["Mentions it", "Toxicity"]
+    assert client.entry_labels("s1") == {"e1": ["Bias"], "e2": []}
 
 
 def test_each_page_asks_the_time_left_afresh():

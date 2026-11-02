@@ -735,3 +735,73 @@ def test_an_execution_that_failed_only_by_not_running_exits_4(db, cli):
 
     assert cli("run", "test-set", "Live") == EXIT_UNJUDGED
     assert "couldn't be judged: it failed only on runs that Not Ran" in cli.out.getvalue()
+
+
+def test_a_blocking_check_the_plan_doesnt_ask_is_refused_before_it_starts(db, cli, release):
+    assert cli("run", "test-plan", "Release", "--blocking-check", "Missess") == EXIT_ERROR
+    assert ("blocking check 'Missess' is no check this test plan asks "
+            "(its checks: 'Contains', 'Misses')") in cli.err.getvalue()
+    assert db.dispatched == []
+
+
+def test_a_blocking_check_is_found_whatever_its_letter_case(db, cli, release):
+    code = cli("run", "test-plan", "Release", "--max-failures", "5",
+               "--blocking-check", "misses")
+
+    assert code == EXIT_FAILED
+    assert "gate: blocking check 'misses' failed in 1 run" in cli.out.getvalue()
+
+
+def test_a_standalone_tests_blocking_check_is_one_of_its_own(db, cli):
+    db.test(name="lonely", checks=[MISSES])
+
+    assert cli("run", "test", "lonely", "--blocking-check", "Toxicity") == EXIT_ERROR
+    assert "is no check this test asks (its checks: 'Misses')" in cli.err.getvalue()
+    assert cli("run", "test", "lonely", "--blocking-check", "Misses") == EXIT_FAILED
+
+
+def _executed(db, plan):
+    """A finished execution of `plan`, as a worker would have run it."""
+    execution = db.client.post(f"/runs/test-plans/{plan['id']}").json()
+    pending, db.dispatched[:] = list(db.dispatched), []
+    db.execute(pending)
+    return execution["id"]
+
+
+def test_a_replay_is_checked_against_the_sets_it_replays_not_the_plans_now(db, cli, release):
+    execution = _executed(db, release)
+    tone = db.client.get("/test-sets", params={"q": "Tone"}).json()["items"][0]
+    unlinked = db.client.request("DELETE", f"/test-plans/{release['id']}/entries",
+                                 json=[{"id": tone["id"]}])
+    assert unlinked.status_code == 200, unlinked.text
+    linked = db.client.post(f"/test-plans/{release['id']}/entries",
+                            json=[{"id": db.test_set("Later", [db.test(name="new")])["id"]}])
+    assert linked.status_code in (200, 201), linked.text
+
+    # Tone is replayed, though no longer linked: its limit and checks apply
+    code = cli("run", "test-plan", "Release", "--replay", execution,
+               "--max-failures", "Tone=1", "--blocking-check", "Contains")
+    assert code == EXIT_PASSED, cli.out.getvalue() + cli.err.getvalue()
+    assert "Tone: 1 failure ≤ max 1" in cli.out.getvalue()
+
+    # Later is linked now, but no replayed run is in it: its limit would never apply
+    assert cli("run", "test-plan", "Release", "--replay", execution,
+               "--max-failures", "Later=0") == EXIT_ERROR
+    assert ("names test set 'Later', which this test plan doesn't run "
+            "(it runs: 'Smoke', 'Tone')") in cli.err.getvalue()
+
+
+@pytest.mark.parametrize("summary", ["--markdown", "GITHUB_STEP_SUMMARY"])
+def test_a_junit_report_sharing_the_summarys_file_is_refused_before_it_starts(
+        db, cli, tmp_path, monkeypatch, summary):
+    db.test_set("Smoke", [db.test(name="a")])
+    monkeypatch.chdir(tmp_path)
+    given = ["--markdown", str(tmp_path / "report.xml")] if summary == "--markdown" else []
+    env = {summary: str(tmp_path / "report.xml")} if summary != "--markdown" else {}
+
+    code = cli("run", "test-set", "Smoke", "--junit", "report.xml", *given, env=env)
+
+    assert code == EXIT_ERROR
+    assert "--junit report.xml: the Markdown summary is appended to that file too" in (
+        cli.err.getvalue())
+    assert db.dispatched == [] and not (tmp_path / "report.xml").exists()

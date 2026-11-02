@@ -79,7 +79,8 @@ class Policy:
     test_sets: Mapping[str, Limits] = field(default_factory=lambda: MappingProxyType({}))
     """Over each named test set's runs, by the set's name."""
     blocking_checks: tuple[str, ...] = ()
-    """Check labels that fail the gate whenever one fails, whatever the counts."""
+    """Check labels that fail the gate whenever one fails, whatever the counts:
+    matched ignoring letter case, as a test's labels are unique."""
     scope: tuple[str, str] | None = None
     """The scope a file is for, as (kind, name or id), when it names one."""
     source: str | None = None
@@ -139,6 +140,32 @@ def check_test_sets(policy: Policy, runs: Iterable[str], noun: str) -> None:
                           f"(it runs: {', '.join(map(repr, runs)) or 'none'})")
 
 
+def check_blocking_checks(policy: Policy, labels: Iterable[str], noun: str) -> None:
+    """Every blocking check must be a check the scope asks: one that isn't would
+    hold whatever happens, a typo or a check since renamed."""
+    asked = distinct_labels(sorted(labels, key=str.casefold))
+    known = {label.casefold() for label in asked}
+    missing = [label for label in policy.blocking_checks if label.casefold() not in known]
+    if missing:
+        raise PolicyError(f"the policy's blocking check{'s' if len(missing) > 1 else ''} "
+                          f"{', '.join(map(repr, missing))} {'are' if len(missing) > 1 else 'is'}"
+                          f" no check this {noun} asks (its checks: "
+                          f"{', '.join(map(repr, asked)) or 'none'})")
+
+
+def distinct_labels(labels: Iterable[str]) -> tuple[str, ...]:
+    """Each label once, ignoring letter case: as first spelled."""
+    first: dict[str, str] = {}
+    for label in labels:
+        first.setdefault(label.casefold(), label)
+    return tuple(first.values())
+
+
+def _among(label: str, labels: Iterable[str]) -> bool:
+    """`label` is one of `labels`, ignoring letter case."""
+    return label.casefold() in {other.casefold() for other in labels}
+
+
 def judge(runs: list[Judged], policy: Policy) -> list[Rule]:
     """Every rule of `policy` on `runs`; the gate passes when none is broken. A run
     fails when its status is in the policy's `fail_on`."""
@@ -173,7 +200,7 @@ def _percent(rate: float) -> str:
 
 
 def _blocking(label: str, runs: list[Judged]) -> Rule:
-    failed = sum(label in run.not_met for run in runs)
+    failed = sum(_among(label, run.not_met) for run in runs)
     text = (f"blocking check {label!r} failed in {_runs(failed)}" if failed
             else f"blocking check {label!r} held")
     return Rule("blocking_check", None, label, failed, failed > 0,
@@ -286,7 +313,7 @@ def _run_case(name: str, group: str, status: str, not_met: Iterable[str], error:
               policy: Policy) -> Case:
     if status not in RUN_STATUSES:
         return Case(name, group, "error", _unknown(status))
-    blocking = [label for label in not_met if label in policy.blocking_checks]
+    blocking = [label for label in not_met if _among(label, policy.blocking_checks)]
     if status == "NotRan":
         message = f"Not Ran: {error or 'no reason recorded'}"
     elif status in ("Amber", "Red"):

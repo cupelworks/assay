@@ -3,12 +3,13 @@
 """The command line's options, and every rule about them checked before any
 request is sent."""
 import io
+import re
 import tomllib
 from pathlib import Path
 
 import pytest
 
-from assay_cli.arguments import ArgumentError, build_parser, headers
+from assay_cli.arguments import ArgumentError, api_url, build_parser, headers
 from assay_cli.cli import EXIT_ERROR, main
 
 
@@ -36,6 +37,49 @@ def test_without_a_url_it_says_how_to_give_one():
     err = io.StringIO()
     assert main(["health"], env={}, out=io.StringIO(), err=err) == EXIT_ERROR
     assert "--url or $ASSAY_API_URL" in err.getvalue()
+
+
+@pytest.mark.parametrize("url", ["https://assay.internal/api", "http://localhost:8000"])
+def test_an_http_or_https_url_is_the_apis(url):
+    assert api_url(url) == url
+
+
+@pytest.mark.parametrize(("url", "says"), [
+    ("assay.internal/api", "must start with http:// or https://"),
+    ("ftp://assay.internal", "must start with http:// or https://"),
+    ("https://", "must start with http:// or https:// and name a host"),
+    ("http://[::1", "isn't valid"),
+])
+def test_a_url_that_could_never_be_reached_is_refused(url, says):
+    with pytest.raises(ArgumentError, match=re.escape(says)):
+        api_url(url)
+
+
+def test_a_bad_url_is_refused_before_any_request():
+    err = io.StringIO()
+    code = main(["health"], env={"ASSAY_API_URL": "assay.internal/api"}, out=io.StringIO(),
+                err=err)
+    assert code == EXIT_ERROR
+    assert "the API's URL must start with http:// or https://" in err.getvalue()
+
+
+@pytest.mark.parametrize(("header", "env", "says"), [
+    ("X A: 1", None, "--header 'X A: 1': 'X A' isn't a header name"),
+    ("X-A: café", None, "header X-A's value may hold only printable ASCII"),
+    (None, '{"X-A": "a\\nb"}', "$ASSAY_API_HEADERS: header X-A's value"),
+    (None, '{"X:A": "1"}', "$ASSAY_API_HEADERS: 'X:A' isn't a header name"),
+])
+def test_a_header_http_doesnt_allow_is_refused(header, env, says):
+    args = build_parser().parse_args(["health", *(["--header", header] if header else [])])
+    with pytest.raises(ArgumentError) as raised:
+        headers(args, {"ASSAY_API_HEADERS": env} if env else {})
+    assert says in str(raised.value)
+
+
+def test_a_header_value_keeps_its_inner_spaces_and_may_be_empty():
+    args = build_parser().parse_args(["health", "--header", "Authorization:  Bearer a b ",
+                                      "--header", "X-Empty:"])
+    assert headers(args, {}) == {"Authorization": "Bearer a b", "X-Empty": ""}
 
 
 @pytest.mark.parametrize("option", ["--interval", "--timeout", "--http-timeout"])

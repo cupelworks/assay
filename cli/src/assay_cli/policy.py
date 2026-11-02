@@ -13,7 +13,15 @@ from types import MappingProxyType
 import yaml
 
 from assay_cli.client import SCOPE_NOUNS
-from assay_cli.gate import RUN_STATUSES, STRICT, Limits, Policy, PolicyError, spelled
+from assay_cli.gate import (
+    RUN_STATUSES,
+    STRICT,
+    Limits,
+    Policy,
+    PolicyError,
+    distinct_labels,
+    spelled,
+)
 
 _SCOPE_KEYS = {"test": "test", "test_set": "test-set", "test_plan": "test-plan"}
 """The key naming the scope a file is for, and that scope as the command line says it."""
@@ -93,9 +101,9 @@ def _policy(data: object, source: str) -> Policy:
         by_set[name] = _limits(limits, where)
         if not by_set[name].given:
             raise PolicyError(f"{where}: expected max_failures, min_pass_rate or both")
-    blocking = tuple(dict.fromkeys(
+    blocking = distinct_labels(
         _text(label, "blocking_checks")
-        for label in _list(data.get("blocking_checks") or [], "blocking_checks")))
+        for label in _list(data.get("blocking_checks") or [], "blocking_checks"))
     return Policy(fail_on, _limits(data, ""), MappingProxyType(by_set), blocking, scope, source)
 
 
@@ -112,7 +120,7 @@ def _limits(data: Mapping, where: str) -> Limits:
 
 def max_failures_of(value: object, what: str) -> int:
     """A whole number, 0 or more: bool isn't one, though Python counts it as an int."""
-    if isinstance(value, str) and value.strip().isdigit():
+    if isinstance(value, str) and value.strip().isdecimal():
         value = int(value)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise PolicyError(f"{what}: expected a whole number, 0 or more (got {value!r})")
@@ -161,7 +169,7 @@ def with_flags(policy: Policy, fail_on: tuple[str, ...] | None,
         else:
             by_set[test_set] = by_set.get(test_set, Limits()).updated(limits)
     return Policy(fail_on or policy.fail_on, whole, MappingProxyType(by_set),
-                  tuple(dict.fromkeys((*policy.blocking_checks, *blocking_checks))),
+                  distinct_labels((*policy.blocking_checks, *blocking_checks)),
                   policy.scope, policy.source)
 
 

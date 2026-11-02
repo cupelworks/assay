@@ -3,8 +3,10 @@
 """A thin, synchronous client for the parts of Assay's API a pipeline needs:
 start a run or a statistics batch, read how it stands, list its runs."""
 import math
+import threading
 import uuid
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future, wait
 from typing import Any
 
 import httpx
@@ -19,6 +21,9 @@ SCOPE_NOUNS = {"test": "test", "test-set": "test set", "test-plan": "test plan"}
 """Each scope as a sentence spells it."""
 _NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 """Failures before the request left: Assay never saw it."""
+_NEVER_PASSES = (httpx.UnsupportedProtocol, httpx.LocalProtocolError)
+"""Failures of the request itself, before it left: a URL or a header no server
+takes, so asking again gets the same."""
 
 
 UNTIL_DEADLINE = math.inf
@@ -69,20 +74,25 @@ class AssayClient:
 
     def _request(self, method: str, path: str, time_left: TimeLeft | None = None,
                  **kwargs) -> Any:
-        """`time_left`: each step of the request (connecting, each read) waits no
-        longer than it says, however long --http-timeout is."""
+        """`time_left`: how long the request may take in all, however long
+        --http-timeout is; past it, the request is given up on, unanswered."""
+        send = self.http.request
         if time_left is not None:
             left = time_left()
             if left <= 0:
                 raise ApiError(f"{method} {path}: out of time, not sent", retries=UNTIL_DEADLINE)
+            # each step capped too, so a request given up on ends soon after
             kwargs["timeout"] = httpx.Timeout(**{
                 step: left if limit is None else min(limit, left)
                 for step, limit in self.http.timeout.as_dict().items()})
+            send = _within(left, self.http.request)
         try:
-            response = self.http.request(method, path, **kwargs)
+            response = send(method, path, **kwargs)
         except _NOT_SENT as exc:
             raise ApiError(f"{method} {path}: couldn't reach Assay ({exc})",
                            retries=UNTIL_DEADLINE) from exc
+        except _NEVER_PASSES as exc:
+            raise ApiError(f"{method} {path}: {exc}") from exc
         except httpx.HTTPError as exc:
             if method == "GET":
                 raise ApiError(f"{method} {path}: no reply from Assay ({exc})",
@@ -154,10 +164,22 @@ class AssayClient:
         (item_id, item), = found.items()
         return {"id": item_id, "name": item["name"]}
 
-    def plan_test_sets(self, plan_id: str, time_left: TimeLeft | None = None) -> list[str]:
-        """The names of the test sets a plan links now."""
-        return [entry["test_set"]["name"] for entry in self._pages(
-            f"/test-plans/{plan_id}/entries", limit=500, time_left=time_left)]
+    def plan_test_sets(self, plan_id: str, time_left: TimeLeft | None = None) -> list[dict]:
+        """The test sets a plan links now: `{id, name}`."""
+        return [{"id": str(entry["test_set"]["id"]), "name": entry["test_set"]["name"]}
+                for entry in self._pages(f"/test-plans/{plan_id}/entries", limit=500,
+                                         time_left=time_left)]
+
+    def test_labels(self, test_id: str, time_left: TimeLeft | None = None) -> list[str]:
+        """The labels of a test's checks."""
+        test = self._request("GET", f"/tests/{test_id}", time_left=time_left)
+        return _labels(test)
+
+    def entry_labels(self, test_set_id: str,
+                     time_left: TimeLeft | None = None) -> dict[str, list[str]]:
+        """The labels of the checks of each entry of a test set, by the entry's id."""
+        return {str(entry["id"]): _labels(entry) for entry in self._pages(
+            f"/test-sets/{test_set_id}/entries", limit=500, time_left=time_left)}
 
     # -- runs --
 
@@ -198,6 +220,32 @@ class AssayClient:
 
     def stop_batch(self, batch_id: str, time_left: TimeLeft | None = None) -> dict:
         return self._request("POST", f"/statistics/batches/{batch_id}/stop", time_left=time_left)
+
+
+def _within(seconds: float, send: Callable[..., httpx.Response]) -> Callable[..., httpx.Response]:
+    """`send`, waited for no longer than `seconds` in all. httpx's timeouts bound
+    each step of a request, and a reply read in chunks waits that long for each:
+    so it's sent from a thread of its own, left to end by those timeouts once
+    given up on."""
+    def sent_within(*args, **kwargs) -> httpx.Response:
+        reply: Future = Future()
+
+        def run() -> None:
+            try:
+                reply.set_result(send(*args, **kwargs))
+            except BaseException as exc:  # handed to the caller, whatever it is
+                reply.set_exception(exc)
+
+        threading.Thread(target=run, daemon=True).start()
+        if not wait([reply], timeout=seconds).done:
+            raise httpx.TimeoutException(f"gave up after {seconds:.1f}s")
+        return reply.result()
+    return sent_within
+
+
+def _labels(test: dict) -> list[str]:
+    return [assignment.get("label") or assignment["name"]
+            for assignment in test.get("test_type_assignments") or []]
 
 
 def _is_uuid(value: str) -> bool:

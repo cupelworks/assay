@@ -66,6 +66,7 @@ def test_fail_on_may_be_a_list_or_comma_separated_in_any_case(tmp_path):
     ("max_failures: -1\n", "max_failures: expected a whole number, 0 or more (got -1)"),
     ("max_failures: 1.5\n", "expected a whole number"),
     ("max_failures: true\n", "expected a whole number"),
+    ('max_failures: "²"\n', "expected a whole number"),  # a digit int() can't read
     ("min_pass_rate: 80\n", "min_pass_rate: expected a share from 0 to 1, e.g. 0.8 for 80%"),
     ("min_pass_rate: -0.1\n", "expected a share from 0 to 1"),
     ("min_pass_rate: .nan\n", "expected a share from 0 to 1"),
@@ -98,9 +99,10 @@ def test_flags_replace_the_files_limits_and_fail_on_one_by_one(tmp_path):
 
 
 def test_a_flag_adds_a_blocking_check_but_never_drops_one(tmp_path):
-    policy = with_flags(load(_file(tmp_path, FULL)), None, [], [], ["Toxicity", "Bias"])
+    policy = with_flags(load(_file(tmp_path, FULL)), None, [], [],
+                        ["toxicity", "Bias", "BIAS"])
 
-    assert policy.blocking_checks == ("Toxicity", "Valid JSON", "Bias")
+    assert policy.blocking_checks == ("Toxicity", "Valid JSON", "Bias")  # each once, any case
     assert policy.fail_on == ("Red", "NotRan")  # the file's, with no --fail-on
 
 

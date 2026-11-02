@@ -5,8 +5,11 @@ is sent to Assay. A mistake exits 2 with argparse's usage line."""
 import argparse
 import json
 import math
+import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
+
+import httpx
 
 from assay_cli import __version__
 from assay_cli.client import SCOPES
@@ -24,6 +27,8 @@ URL_ENV = "ASSAY_API_URL"
 HEADERS_ENV = "ASSAY_API_HEADERS"
 INTERVAL = 5
 """Seconds between two checks on progress, and before trying a failed read again."""
+_HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+"""A header's name, as HTTP defines it: a token."""
 
 
 class ArgumentError(Exception):
@@ -216,12 +221,32 @@ def _parameter(pair: str) -> tuple[str, object]:
     return key.strip(), parsed
 
 
+def api_url(url: str) -> str:
+    """An http:// or https:// address with a host: no other could ever be reached."""
+    try:
+        parsed = httpx.URL(url)
+    except httpx.InvalidURL as exc:
+        raise ArgumentError(f"the API's URL {url!r} isn't valid: {exc}") from None
+    if parsed.scheme not in ("http", "https") or not parsed.host:
+        raise ArgumentError(f"the API's URL must start with http:// or https:// and name "
+                            f"a host, e.g. https://assay.internal/api (got {url!r})")
+    return url
+
+
 def headers(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, str]:
     """$ASSAY_API_HEADERS, then each --header: a later one replaces an earlier one
-    of the same name, whatever its case, as HTTP names are."""
+    of the same name, whatever its case, as HTTP names are. A name or a value HTTP
+    doesn't allow is an error here, not on every request."""
     chosen: dict[str, str] = {}
 
-    def put(name: str, value: str) -> None:
+    def put(name: str, value: str, where: str) -> None:
+        name, value = name.strip(), value.strip()
+        if not _HEADER_NAME.fullmatch(name):
+            raise ArgumentError(f"{where}: {name!r} isn't a header name (letters, digits "
+                                "and - are)")
+        if not all(char == "\t" or " " <= char <= "~" for char in value):
+            raise ArgumentError(f"{where}: header {name}'s value may hold only printable "
+                                "ASCII characters")
         for given in [given for given in chosen if given.lower() == name.lower()]:
             del chosen[given]
         chosen[name] = value
@@ -235,10 +260,10 @@ def headers(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, str]:
             raise ArgumentError(f"${HEADERS_ENV} must be a JSON object of header names "
                                 "to values")
         for name, value in loaded.items():
-            put(str(name), str(value))
+            put(str(name), str(value), f"${HEADERS_ENV}")
     for header in [*args.header, *(getattr(args, "header_after", None) or [])]:
         name, sep, value = header.partition(":")
         if not sep or not name.strip():
             raise ArgumentError(f"--header {header!r}: expected 'NAME: VALUE'")
-        put(name.strip(), value.strip())
+        put(name, value, f"--header {header!r}")
     return chosen
